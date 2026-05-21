@@ -28,7 +28,11 @@ Change only what's needed to make the failing test pass. Do not refactor, rename
 - Run the full test suite — must all pass
 - No regressions allowed
 
-### 5. Commit and PR
+### 5. Update CHANGELOG
+
+Append a one-line entry to the `## [Unreleased]` section of `CHANGELOG.md` (create the section if absent). Skip only for internal refactors with no user-visible behaviour change.
+
+### 6. Commit and PR
 
 ```bash
 git add <changed files>

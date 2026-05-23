@@ -38,6 +38,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 - Money values: `Decimal` never `Double`
 - Simulator: always `iPhone 17` (iOS 26.4+)
 - File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
+- Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
 
 ## Done when
 The user reviews and approves the plan. Then hand off to `/feature`. After the PR is open, `/review` runs first; once it passes, `/test` and `code-review:code-review` run in parallel.

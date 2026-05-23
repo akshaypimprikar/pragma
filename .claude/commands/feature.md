@@ -17,7 +17,7 @@ Before starting any task:
 - After implementation passes tests, run the `simplify` skill on changed files before committing
 - Append a one-line entry to the `## [Unreleased]` section of `CHANGELOG.md` (create the section if absent)
 - One commit per task (after simplify pass and CHANGELOG update)
-- Run `xcodebuild test` after every task — do not proceed if tests fail
+- Run the full test suite (including UI tests) after every task — do not proceed if tests fail. Use the "Full test suite" command in CLAUDE.md; never add `-skip-testing` or `-only-testing` flags.
 - Never edit `project.pbxproj` — files auto-compile via `PBXFileSystemSynchronizedRootGroup`
 
 ## Architecture rules (from CLAUDE.md)

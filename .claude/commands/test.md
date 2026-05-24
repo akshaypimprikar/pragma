@@ -25,8 +25,8 @@ Read `CLAUDE.md` first for build commands, simulator name, and test framework de
 - **Target:** ≥80% coverage on all new code
 
 ### Test file locations
-- Unit/integration: `FinanceTrackerTests/<Layer>/`
-- UI: `FinanceTrackerUITests/`
+- Unit/integration: `<AppName>Tests/<Layer>/`
+- UI: `<AppName>UITests/`
 
 ### In-memory ModelContainer pattern for repository tests
 ```swift

@@ -12,6 +12,8 @@ Test files pushed to the feature branch.
 
 Read `CLAUDE.md` first for build commands, simulator name, and test framework details.
 
+Also read `.claude/context/invariants.md` if it exists — skip silently if absent. Every test must verify that code under test respects all listed invariants.
+
 ### Test framework
 - **Unit tests and integration tests:** Apple `Testing` framework — `import Testing`, `@Suite`, `@Test`, `#expect()`, `#require()`
 - **UI tests:** `XCTest`

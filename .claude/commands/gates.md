@@ -9,6 +9,8 @@ Invoked at the end of every `/feature` session before `gh pr create` (e.g. `/gat
 
 All commands run from the git root (see `CLAUDE.md` for the exact path and project name).
 
+Read `.claude/context/invariants.md` if it exists — skip silently if absent. Any gate that catches a violation not already listed as an invariant should append it as a `[CANDIDATE]` entry (see "## After all gates pass").
+
 Run every gate in order. If any gate fails, stop, report what must be fixed, and do NOT open the PR.
 
 ### Gate 1 — Build
@@ -79,6 +81,15 @@ Gates:
 Fix any failures before continuing.
 
 ## After all gates pass — open the PR
+
+### Write candidate invariants (conditional)
+If any gate caught a violation pattern that is NOT already listed in `.claude/context/invariants.md`, append a candidate comment at the bottom of that file:
+
+```
+<!-- [CANDIDATE] YYYY-MM-DD: <describe the violation pattern — e.g. "ViewModel imported SwiftDataRepository directly in feature/X"> -->
+```
+
+Do not promote it to a numbered invariant — that is a human decision made during the next `/pipeline-review`.
 
 ```bash
 gh pr create \

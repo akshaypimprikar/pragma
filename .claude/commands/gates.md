@@ -11,7 +11,14 @@ All commands run from the git root (see `CLAUDE.md` for the exact path and proje
 
 Run every gate in order. If any gate fails, stop, report what must be fixed, and do NOT open the PR.
 
-### Gate 1 — Build
+### Gate 0 — Swift change check (runs first; determines if Gates 1–2 apply)
+```bash
+git diff develop...HEAD --name-only -- '*.swift'
+```
+If this returns **no output**, skip Gates 1 and 2 — no Swift code changed, so build and test suite are not applicable. Continue from Gate 3.
+If any Swift files are listed, run Gates 1 and 2 as normal.
+
+### Gate 1 — Build (conditional: Swift files changed)
 ```bash
 xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
   -configuration Debug -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
@@ -19,7 +26,7 @@ xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
 ```
 Pass: `BUILD SUCCEEDED`. Fail: stop immediately — a test run on a broken build is meaningless.
 
-### Gate 2 — Full test suite
+### Gate 2 — Full test suite (conditional: Swift files changed)
 ```bash
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
@@ -74,6 +81,18 @@ Gates:
 [✗] CHANGELOG — Unreleased section empty (auto-populating from git log...)
 [–] Coverage — skipped (no new files)
 [–] Security — skipped (no sensitive files)
+```
+
+When Gates 1 and 2 are skipped:
+```
+Gates:
+[–] Build — skipped (no Swift changes)
+[–] Tests — skipped (no Swift changes)
+[✓] No TODO/FIXME/HACK
+[✓] Branch naming
+[✓] CHANGELOG
+[–] Coverage — skipped (no Swift files)
+[–] Security — skipped (no Swift files)
 ```
 
 Fix any failures before continuing.

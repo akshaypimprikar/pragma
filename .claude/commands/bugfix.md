@@ -22,15 +22,27 @@ Before changing any production code, write a test that:
 - Reproduces the exact bug described
 - Fails with a clear error message that matches the symptom
 
-Run it to confirm it fails. Do not proceed until it fails for the right reason.
+Run it to confirm it fails:
+```bash
+xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -only-testing:<AppName>Tests/<SuiteName>/<testName> \
+  2>&1 | grep -E "Test.*passed|Test.*failed|BUILD"
+```
+
+Do not proceed until it fails for the right reason.
 
 ### 3. Implement the minimal fix
 Change only what's needed to make the failing test pass. Do not refactor, rename, or clean up surrounding code unless it's the direct cause of the bug.
 
 ### 4. Confirm the fix
 - Run the new test — must pass
-- Run the full test suite — must all pass
-- No regressions allowed
+- Run the full test suite — must all pass, no regressions:
+```bash
+xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  2>&1 | grep -E "TEST SUCCEEDED|TEST FAILED"
+```
 
 ### 5. Update CHANGELOG
 

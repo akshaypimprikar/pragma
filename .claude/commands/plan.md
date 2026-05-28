@@ -13,10 +13,10 @@ A plan document saved to `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`.
 Before writing, read:
 - The spec document (passed as argument)
 - `CLAUDE.md` — build commands, architecture rules, simulator name
+- All files the spec says will be touched
 - `.claude/context/invariants.md` — inviolable rules (skip if absent)
 - `.claude/context/decisions.md` — past spec choices; build on the chosen approach, do not re-derive (skip if absent)
 - `.claude/context/feature-log.md` — release history; know what already exists (skip if absent)
-- All files the spec says will be touched
 
 The plan must be executable by a subagent with no prior context. Every task needs:
 - Exact file paths
@@ -42,6 +42,11 @@ The plan must be executable by a subagent with no prior context. Every task need
 - Simulator: always `iPhone 17` (iOS 26.4+)
 - File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
+
+## File locations
+- App source: `<AppName>/` (models, services, repositories, viewmodels, views)
+- Unit/integration tests: `<AppName>Tests/`
+- UI tests: `<AppName>UITests/`
 
 ## Done when
 The user reviews and approves the plan. Then hand off to `/feature`. After the PR is open, `/review` runs first; once it passes, `/test` and `code-review:code-review` run in parallel.

@@ -105,7 +105,7 @@ Fix any failures before continuing.
 If any gate caught a violation pattern that is NOT already listed in `.claude/context/invariants.md`, append a candidate comment at the bottom of that file:
 
 ```
-<!-- [CANDIDATE] YYYY-MM-DD: <describe the violation pattern — e.g. "ViewModel imported SwiftDataRepository directly in feature/X"> -->
+<!-- [CANDIDATE] YYYY-MM-DD: <describe the violation pattern> -->
 ```
 
 Do not promote it to a numbered invariant — that is a human decision made during the next `/pipeline-review`.

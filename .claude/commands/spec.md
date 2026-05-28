@@ -78,13 +78,14 @@ If the feature idea implies multiple independent subsystems, say so and suggest 
 
 ## Architecture Rules (from CLAUDE.md — enforce in every spec)
 - Views contain no business logic
-- Domain Services have zero SwiftData imports
+- Domain Services have **zero** SwiftData imports — 100% unit testable without a simulator
 - All money values use `Decimal`, never `Double`
 - ViewModels depend on repository protocols, never concrete implementations
 - New models go in `<AppName>/Models/`, services in `<AppName>/Services/`
+- New repository protocols go in `<AppName>/Repositories/Protocols/`, implementations in `<AppName>/Repositories/SwiftData/`
 
 ## Branching
-Work on branch `spec/<feature-name>`. Save spec to `docs/superpowers/specs/YYYY-MM-DD-<feature-name>.md` and commit.
+Branch `spec/<feature-name>` off `develop`. Save spec to `docs/superpowers/specs/YYYY-MM-DD-<feature-name>.md` and commit. Open PR to `develop`.
 
 ## Done when
 The user reviews the spec and says it's approved.

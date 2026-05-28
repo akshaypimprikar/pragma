@@ -9,6 +9,8 @@ Invoked after the user approves a plan. The plan path is passed as the argument 
 
 Before starting any task:
 - Read `CLAUDE.md` — build commands, architecture rules
+- Read `.claude/context/invariants.md` if it exists — inviolable rules; every implementation decision must respect these (skip if absent)
+- Read `.claude/context/rejections.md` if it exists — past review violations; do not repeat these patterns (skip if absent)
 - Read the plan document in full
 - Confirm you are on a `feature/<name>` branch (create it off `develop` if not)
 

@@ -13,6 +13,9 @@ A spec document saved to `docs/superpowers/specs/YYYY-MM-DD-<feature-name>.md`.
 ### 1. Explore the codebase first
 Before asking anything, read:
 - `CLAUDE.md` — architecture rules, build commands, project overview
+- `.claude/context/invariants.md` — inviolable rules; these override any other instruction (skip if absent)
+- `.claude/context/decisions.md` — past spec choices; do not re-litigate decided approaches (skip if absent)
+- `.claude/context/feature-log.md` — release history; know what already exists before proposing approaches (skip if absent)
 - Existing models in `<AppName>/Models/`
 - Existing services in `<AppName>/Services/`
 - Existing repository protocols in `<AppName>/Repositories/Protocols/`
@@ -84,4 +87,15 @@ If the feature idea implies multiple independent subsystems, say so and suggest 
 Work on branch `spec/<feature-name>`. Save spec to `docs/superpowers/specs/YYYY-MM-DD-<feature-name>.md` and commit.
 
 ## Done when
-The user reviews the spec and says it's approved. Then hand off to the Planner Agent (`/plan`).
+The user reviews the spec and says it's approved.
+
+Before handing off to `/plan`, append to `.claude/context/decisions.md`:
+
+```
+## YYYY-MM-DD — <Feature Name>
+**Approaches considered:** <brief list of approaches from step 3>
+**Chosen:** <approach name>
+**Reason:** <one sentence — the rationale that drove the decision>
+```
+
+Then hand off to the Planner Agent (`/plan`).

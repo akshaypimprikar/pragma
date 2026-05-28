@@ -13,6 +13,10 @@ Invoked with a bug report: description + reproduction steps (e.g. `/bugfix "CSV 
 
 Read `CLAUDE.md` before touching any file.
 
+Also read if they exist — skip silently if absent:
+- `.claude/context/invariants.md` — inviolable rules; ensure the fix does not violate any
+- `.claude/context/rejections.md` — past review violations; ensure the fix does not repeat known bad patterns
+
 ### 2. Write the failing test first
 Before changing any production code, write a test that:
 - Reproduces the exact bug described

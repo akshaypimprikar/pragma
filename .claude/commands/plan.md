@@ -13,6 +13,9 @@ A plan document saved to `docs/superpowers/plans/YYYY-MM-DD-<feature-name>.md`.
 Before writing, read:
 - The spec document (passed as argument)
 - `CLAUDE.md` — build commands, architecture rules, simulator name
+- `.claude/context/invariants.md` — inviolable rules (skip if absent)
+- `.claude/context/decisions.md` — past spec choices; build on the chosen approach, do not re-derive (skip if absent)
+- `.claude/context/feature-log.md` — release history; know what already exists (skip if absent)
 - All files the spec says will be touched
 
 The plan must be executable by a subagent with no prior context. Every task needs:

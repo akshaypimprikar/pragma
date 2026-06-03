@@ -85,7 +85,9 @@ git push origin --delete release/<version>
 
 ### 7. Create GitHub release
 ```bash
-gh release create v<version> --title "v<version>" --notes-file <(git log <last-tag>..v<version> --oneline)
+gh release create v<version> \
+  --title "v<version>" \
+  --notes "$(git log <last-tag>..v<version> --oneline)"
 ```
 
 ### 8. Trigger pipeline review

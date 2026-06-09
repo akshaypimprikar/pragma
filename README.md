@@ -134,11 +134,20 @@ The agent never proceeds to the next task if tests are red.
 
 **To adapt for your project:**
 
-Run `./scripts/setup.sh MyApp /path/to/your-project` — it handles the copy and substitution automatically. After that:
+The fastest path is the setup script:
 
-1. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
-2. Populate `.claude/context/invariants.md` with your non-negotiable rules
-3. Update the Architecture Rules checklist in `/review` to match your stack
+```bash
+./scripts/setup.sh MyApp /path/to/your-project
+```
+
+Or manually:
+
+1. Copy `.claude/commands/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
+2. Replace `<AppName>` with your module name in each command file
+3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
+4. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
+5. Populate `.claude/context/invariants.md` with your non-negotiable rules
+6. Update the Architecture Rules checklist in `/review` to match your stack
 
 ---
 

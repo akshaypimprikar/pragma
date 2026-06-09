@@ -21,7 +21,6 @@ on:
       - 'YOUR_PROJECTTests/**'
       - 'YOUR_PROJECTUITests/**'
       - 'scripts/**'
-      - '.github/workflows/**'
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}

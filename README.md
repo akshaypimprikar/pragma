@@ -138,4 +138,4 @@ spec/*      — off develop, for spec + plan docs
 
 ## Author
 
-Built by [Akshay Pimprikar](https://www.linkedin.com/in/akshaypimprikar) — iOS engineer building agentic development workflows.
+Built by [Akshay Pimprikar](https://www.linkedin.com/in/akshaypimprikar) — iOS lead engineer building agentic AI pipelines.

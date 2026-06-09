@@ -120,7 +120,7 @@ spec/*      — off develop, for spec + plan docs
 - **MVVM + Repository** architecture
 - **SwiftData** for persistence
 - **Swift Testing** framework — `import Testing`, `@Suite`, `@Test`, `#expect()` for unit/integration tests; XCUITest for UI tests
-- **iOS 26.4+** — default simulator target is `iPhone 17`
+- **iOS target** — update simulator name and OS version in `CLAUDE.md` to match your project
 - **`PBXFileSystemSynchronizedRootGroup`** (Xcode 16+) — files auto-compile when placed in the correct directory; never edit `project.pbxproj`
 - A `CLAUDE.md` at the repo root with project-specific build commands and architecture rules
 
@@ -133,3 +133,9 @@ spec/*      — off develop, for spec + plan docs
 3. Update `CLAUDE.md` with your project's build commands, simulator name, and architecture rules
 4. Populate `.claude/context/invariants.md` with your project's non-negotiable rules
 5. The agents read both `CLAUDE.md` and `.claude/context/` before every task — that's where project-specific context lives
+
+---
+
+## Author
+
+Built by [Akshay Pimprikar](https://www.linkedin.com/in/akshaypimprikar) — iOS engineer building agentic development workflows.

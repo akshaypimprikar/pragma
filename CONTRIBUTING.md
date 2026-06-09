@@ -40,4 +40,4 @@ The agents read `CLAUDE.md` and `.claude/context/` before every task. That's whe
 
 ## Questions
 
-Open a GitHub Discussion or reach out on LinkedIn.
+Open a GitHub Discussion or reach out on [LinkedIn](https://www.linkedin.com/in/akshaypimprikar).

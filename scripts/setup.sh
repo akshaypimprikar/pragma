@@ -36,7 +36,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 
 echo ""
-echo -e "${BOLD}ios-agent-workflow setup${RESET}"
+echo -e "${BOLD}Pragma setup${RESET}"
 echo -e "  App:     ${CYAN}${APP_NAME}${RESET}"
 echo -e "  Scheme:  ${CYAN}${SCHEME}${RESET}"
 echo -e "  Target:  ${CYAN}${PROJECT_DIR}${RESET}"

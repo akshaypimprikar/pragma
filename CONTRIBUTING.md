@@ -2,7 +2,7 @@
 
 ## How this project works
 
-ios-agent-workflow is a scaffold — not a library. You copy the command files, CI workflows, and support scripts into your own iOS project and adapt them to your architecture. Everything in this repo is kept in sync with [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker), a production iOS app where every change is battle-tested before it lands here.
+Pragma is a scaffold — not a library. You copy the command files, CI workflows, and support scripts into your own iOS project and adapt them to your architecture. Everything in this repo is kept in sync with [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker), a production iOS app where every change is battle-tested before it lands here.
 
 That means the bar for contributions is: **would this hold up on a real production codebase?** Not just in theory.
 

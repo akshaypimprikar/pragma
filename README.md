@@ -18,19 +18,22 @@ Proven on [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-t
 ## Quick Start
 
 ```bash
-cp -r .claude/commands/ /path/to/your-ios-app/.claude/commands/
-cp -r .claude/context/  /path/to/your-ios-app/.claude/context/
+git clone https://github.com/akshaypimprikar/ios-agent-workflow
+cd ios-agent-workflow
+./scripts/setup.sh MyApp /path/to/your-ios-project
 ```
 
-1. Replace `<AppName>` with your module name in each command file
-2. Add your build commands, simulator target, and architecture rules to `CLAUDE.md`
-3. Seed `.claude/context/invariants.md` with your non-negotiable rules
+The script copies all commands, context files, CI workflows, and support scripts into your project, substitutes your app name throughout, and generates a starter `CLAUDE.md`. No manual find-and-replace.
 
 Then kick off your first feature:
 
 ```
 /spec "describe your feature idea"
 ```
+
+**After setup:**
+1. Fill in `CLAUDE.md` — add your architecture rules and any project-specific constraints
+2. Seed `.claude/context/invariants.md` with your non-negotiable rules before running `/feature`
 
 Each command is plain markdown — no dependencies, no build step.
 
@@ -129,13 +132,22 @@ The agent never proceeds to the next task if tests are red.
 - **Swift Testing** — `import Testing`, `@Suite`, `@Test`, `#expect()` for unit/integration tests; XCUITest for UI tests
 - **`PBXFileSystemSynchronizedRootGroup`** (Xcode 16+) — files auto-compile when placed in the correct directory; never edit `project.pbxproj`
 
-**To adapt for your project:**
+**To adapt for your project — via script (recommended):**
 
-1. Copy `.claude/commands/` and `.claude/context/` into your project
+```bash
+./scripts/setup.sh MyApp /path/to/your-project
+```
+
+Copies everything and substitutes all placeholders. Then fill in `CLAUDE.md` and seed `invariants.md`.
+
+**Or manually:**
+
+1. Copy `.claude/commands/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
 2. Replace `<AppName>` with your module name in each command file
-3. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
-4. Populate `.claude/context/invariants.md` with your non-negotiable rules
-5. Update the Architecture Rules checklist in `/review` to match your stack
+3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
+4. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
+5. Populate `.claude/context/invariants.md` with your non-negotiable rules
+6. Update the Architecture Rules checklist in `/review` to match your stack
 
 ---
 

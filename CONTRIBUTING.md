@@ -2,7 +2,7 @@
 
 ## How this project works
 
-ios-agent-workflow is a template — not a library. You copy the command files into your own iOS project and adapt them to your architecture. The commands in this repo are kept in sync with [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker), a production iOS app where every change is battle-tested before it lands here.
+ios-agent-workflow is a scaffold — not a library. You copy the command files, CI workflows, and support scripts into your own iOS project and adapt them to your architecture. Everything in this repo is kept in sync with [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker), a production iOS app where every change is battle-tested before it lands here.
 
 That means the bar for contributions is: **would this hold up on a real production codebase?** Not just in theory.
 
@@ -20,12 +20,22 @@ That means the bar for contributions is: **would this hold up on a real producti
 
 ## Adapting for your project
 
-1. Copy `.claude/commands/` and `.claude/context/` into your iOS project
-2. Replace `<AppName>` with your module name in each command file
-3. Update `CLAUDE.md` with your project's build commands, simulator target, and architecture rules
-4. Populate `.claude/context/invariants.md` with your non-negotiable rules before running `/feature`
+Run the setup script from the cloned repo:
+
+```bash
+./scripts/setup.sh MyApp /path/to/your-ios-project [MyScheme]
+```
+
+This copies commands, context files, CI workflows, and scripts into your project and substitutes all placeholders. Then:
+
+1. Fill in `CLAUDE.md` with your architecture rules and build commands
+2. Populate `.claude/context/invariants.md` with your non-negotiable rules before running `/feature`
 
 The agents read `CLAUDE.md` and `.claude/context/` before every task. That's where project-specific context lives — not inside the command files themselves.
+
+## Contributing to the CI scaffold
+
+The three workflows (`pr-checks.yml`, `ui-tests.yml`, `release.yml`) and the two scripts (`select_simulator.py`, `check_coverage.py`) follow the same rules as commands: changes must be tested on a real iOS project first. The scripts are intentionally project-agnostic — PRs that introduce project-specific assumptions into them won't be merged.
 
 ---
 

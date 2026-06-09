@@ -20,7 +20,7 @@ That means the bar for contributions is: **would this hold up on a real producti
 
 ## Adapting for your project
 
-1. Copy `.claude/commands/`, `.claude/context/`, `.github/workflows/`, and `scripts/` into your iOS project
+1. Copy `.claude/commands/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your iOS project (place the workflows at `.github/workflows/` in your repo)
 2. Replace `<AppName>` with your module name in each command file
 3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` with your Xcode project and scheme names in all three workflow files
 4. Update `CLAUDE.md` with your project's build commands, simulator target, and architecture rules

@@ -39,7 +39,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 - Domain Services: no SwiftData imports
 - Repository Protocols: Foundation-only imports
 - Money values: `Decimal` never `Double`
-- Simulator: always `iPhone 17` (iOS 26.4+)
+- Simulator: see CLAUDE.md — use your project's target device and OS version
 - File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
 

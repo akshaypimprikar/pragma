@@ -1,68 +1,97 @@
-# iOS Agent Workflow
+# ios-agent-workflow
 
-Claude Code slash commands for agent-driven iOS development. Drop these into any iOS project to get a full pipeline: spec → plan → feature → gates → review → test → bugfix → release.
+> A Claude Code command pipeline that takes an iOS feature from idea to merged PR with two decisions from you — approve the spec, approve the plan. Eight agents handle the rest.
 
-Every feature follows the same disciplined path — you approve the spec and the plan, everything else runs autonomously until you hit merge.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-compatible-5A67D8?logo=anthropic&logoColor=white)](https://claude.ai/code)
+[![Platform](https://img.shields.io/badge/platform-iOS-black?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
+[![Swift](https://img.shields.io/badge/Swift-5.9%2B-FA7343?logo=swift&logoColor=white)](https://swift.org)
 
-**See it in action:** [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker) — a real iOS app built entirely with this workflow, including specs, plans, and PRs going back to day one.
+Proven on [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
 ---
 
-## Install
+**[Quick Start](#quick-start) · [Pipeline](#pipeline) · [Commands](#commands) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+
+---
+
+## Quick Start
 
 ```bash
 cp -r .claude/commands/ /path/to/your-ios-app/.claude/commands/
 cp -r .claude/context/  /path/to/your-ios-app/.claude/context/
 ```
 
-Then update the app target name, simulator, and build commands in each file to match your project. Each command is plain markdown — no code to run.
+1. Replace `<AppName>` with your module name in each command file
+2. Add your build commands, simulator target, and architecture rules to `CLAUDE.md`
+3. Seed `.claude/context/invariants.md` with your non-negotiable rules
 
----
+Then kick off your first feature:
 
-## Commands
+```
+/spec "describe your feature idea"
+```
 
-| Command | Agent | What it does |
-|---|---|---|
-| `/spec "feature idea"` | Spec Agent | Proposes 2–3 approaches, you choose, spec doc saved |
-| `/plan docs/specs/my-spec.md` | Planner Agent | Turns an approved spec into a task-by-task implementation plan |
-| `/feature docs/plans/my-plan.md` | Feature Agent | Executes an approved plan — TDD, one commit per task |
-| `/gates` | Gates Agent | Verifies a branch meets all pre-PR criteria: build, tests, architecture |
-| `/review` | Review Agent | Reviews a PR for architecture compliance |
-| `/test` | Test Agent | Writes tests for a feature branch — run parallel with `/review` |
-| `/bugfix "description"` | Bug Fix Agent | Fixes a bug with a regression test — test-first |
-| `/release 1.0.0` | Release Agent | Version bump, changelog, PR to main, tag |
-| `/design` | Design Agent | Establishes visual design tokens — run before `/spec` on UI features |
-| `/pipeline-review` | Pipeline Review Agent | Audits the pipeline for drift, gaps, and inefficiencies |
-| `/status` | Status Agent | Reconstructs where work stands — use to resume any session |
-| `/trim-context` | Trim Context Agent | Trims accumulated context after completing a plan |
-| `/sync-workflow` | Sync Workflow Agent | Syncs this template repo with your project's latest conventions |
+Each command is plain markdown — no dependencies, no build step.
 
 ---
 
 ## Pipeline
 
-```
-Idea
-  └─ /spec      → proposes 2–3 approaches, you choose, spec doc saved
-  └─ /plan      → task-by-task plan with exact code + xcodebuild commands
-  └─ /feature   → TDD per task: write failing test → implement → pass → commit
-  └─ /gates     → build pass, full test suite, architecture check
-  └─ /review ──┐
-  └─ /test    ──┘ (run in parallel on the PR)
-  └─ merge to develop
-  └─ (repeat for more features)
-  └─ /release   → develop → PR to main → tag
+```mermaid
+flowchart TD
+    A([💡 Idea]):::dim --> B
+    B["/spec\n✓ you approve"]:::human --> C
+    C["/plan\n✓ you approve"]:::human --> D
+    D[/feature]:::auto --> E
+    E[/gates]:::auto --> F
+    F([PR opened]):::dim --> G & H
+    G[/review]:::auto --> I
+    H[/test]:::auto --> I
+    I([merge to develop]):::dim -.->|next feature| B
+    I --> J[/release]:::auto --> K([main · tagged]):::dim
 
-Bug report → /bugfix → /gates → PR → /review → merge
+    BUG([Bug report]):::dim --> BF[/bugfix]:::auto --> BG[/gates]:::auto --> BP([PR]):::dim --> BR[/review]:::auto --> BM([merge]):::dim
+
+    classDef human fill:#3d2800,stroke:#fbbf24,color:#fbbf24
+    classDef auto  fill:#0a1f14,stroke:#34d399,color:#34d399
+    classDef dim   fill:#161b22,stroke:#30363d,color:#8b949e
 ```
 
-You approve twice: after `/spec` and after `/plan`. Everything else is autonomous.
+You approve twice — after `/spec` and after `/plan`. Everything else runs autonomously until merge.
+
+---
+
+## Commands
+
+### Core pipeline
+
+| Command | What it does |
+|---|---|
+| `/spec "feature idea"` | Proposes 2–3 approaches, you choose, spec doc saved |
+| `/plan docs/specs/my-spec.md` | Turns an approved spec into a task-by-task implementation plan |
+| `/feature docs/plans/my-plan.md` | Executes an approved plan — TDD, one commit per task |
+| `/gates` | Verifies build, full test suite, and architecture compliance before PR |
+| `/review` | Reviews a PR for architecture compliance |
+| `/test` | Writes tests for a feature branch — run in parallel with `/review` |
+| `/bugfix "description"` | Regression test first, then fix — test-first always |
+| `/release 1.0.0` | Version bump, changelog, PR to main, git tag |
+
+### Utility
+
+| Command | What it does |
+|---|---|
+| `/design` | Establishes visual design tokens — run before `/spec` on UI features |
+| `/pipeline-review` | Audits the pipeline for drift, gaps, and inefficiencies |
+| `/status` | Reconstructs where work stands — use to resume any session |
+| `/trim-context` | Trims accumulated context after completing a plan |
+| `/sync-workflow` | Syncs this template repo with your project's latest conventions |
 
 ---
 
 ## Memory Layer
 
-The pipeline accumulates knowledge across sessions in `.claude/context/`:
+The pipeline accumulates institutional knowledge across sessions in `.claude/context/`:
 
 ```
 .claude/context/
@@ -72,9 +101,9 @@ The pipeline accumulates knowledge across sessions in `.claude/context/`:
 └── rejections.md    — approaches ruled out, with reasons
 ```
 
-Every agent reads these files before acting. Over time the pipeline develops institutional memory that survives session boundaries — the same context a senior engineer would carry.
+Every agent reads these files before acting. Over time the pipeline carries the same context a senior engineer would — constraints, past decisions, and dead ends — surviving every session boundary.
 
-Populate `invariants.md` with your project's non-negotiables before running `/feature` for the first time.
+Populate `invariants.md` before running `/feature` for the first time.
 
 ---
 
@@ -91,45 +120,38 @@ The agent never proceeds to the next task if tests are red.
 
 ---
 
+## Customising for your project
+
+**Architecture assumptions (defaults — override in `CLAUDE.md`):**
+
+- **MVVM + Repository** — views contain no business logic, ViewModels depend on protocols never concrete implementations
+- **SwiftData** for persistence — Domain Services have zero SwiftData imports
+- **Swift Testing** — `import Testing`, `@Suite`, `@Test`, `#expect()` for unit/integration tests; XCUITest for UI tests
+- **`PBXFileSystemSynchronizedRootGroup`** (Xcode 16+) — files auto-compile when placed in the correct directory; never edit `project.pbxproj`
+
+**To adapt for your project:**
+
+1. Copy `.claude/commands/` and `.claude/context/` into your project
+2. Replace `<AppName>` with your module name in each command file
+3. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
+4. Populate `.claude/context/invariants.md` with your non-negotiable rules
+5. Update the Architecture Rules checklist in `/review` to match your stack
+
+---
+
 ## Branch Strategy (Gitflow)
 
 ```
-main        — production, tagged on release only, never receives direct feature PRs
+main        — production, tagged on release only
 develop     — integration branch, all features merge here
 feature/*   — off develop
-fix/*       — off develop  (hotfix/* off main)
+fix/*        — off develop  (hotfix/* off main)
 release/*   — off develop, PR to main, back-merged to develop
 spec/*      — off develop, for spec + plan docs
 ```
 
 ---
 
-## Architecture Rules (enforced by `/review` on every PR)
+## Author
 
-- Views contain no business logic
-- Domain Services have zero SwiftData imports — 100% unit testable without a simulator
-- Repository Protocols import Foundation only
-- ViewModels depend on protocols, never concrete implementations
-- All money values use `Decimal`, never `Double`
-- No force-unwraps (`!`) in production code
-
----
-
-## Assumptions
-
-- **MVVM + Repository** architecture
-- **SwiftData** for persistence
-- **Swift Testing** framework — `import Testing`, `@Suite`, `@Test`, `#expect()` for unit/integration tests; XCUITest for UI tests
-- **iOS 26.4+** — default simulator target is `iPhone 17`
-- **`PBXFileSystemSynchronizedRootGroup`** (Xcode 16+) — files auto-compile when placed in the correct directory; never edit `project.pbxproj`
-- A `CLAUDE.md` at the repo root with project-specific build commands and architecture rules
-
----
-
-## Customising for your project
-
-1. Copy `.claude/commands/` and `.claude/context/` into your project
-2. In each command file, replace `<AppName>` with your module name
-3. Update `CLAUDE.md` with your project's build commands, simulator name, and architecture rules
-4. Populate `.claude/context/invariants.md` with your project's non-negotiable rules
-5. The agents read both `CLAUDE.md` and `.claude/context/` before every task — that's where project-specific context lives
+Built by [Akshay Pimprikar](https://www.linkedin.com/in/akshaypimprikar) — iOS lead engineer building agentic AI pipelines.

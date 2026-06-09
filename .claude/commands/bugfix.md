@@ -61,7 +61,7 @@ git commit -m "fix: <short description of what was wrong>"
 ## Architecture rules
 All fixes must respect the layer boundaries in `CLAUDE.md`:
 - Domain Service fixes stay in `Services/`
-- Repository fixes stay in `Repositories/SwiftData/`
+- Repository fixes stay in `Repositories/` (implementation subfolder per your architecture)
 - No business logic moved into Views to work around a bug
 
 ## Done when

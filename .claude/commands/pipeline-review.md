@@ -20,7 +20,7 @@ Current valid skills:
 Flag any skill name used in a command file that does not appear on this list. Severity: **Critical**.
 
 ### 2. Template drift
-If this project was derived from a workflow template (e.g. ios-agent-workflow), compare `.claude/commands/` against the template. Flag:
+If this project was derived from a workflow template (e.g. pragma), compare `.claude/commands/` against the template. Flag:
 - App-specific content in the template that should use placeholders — **High**
 - Command files that exist in this project but have no template equivalent — **Medium**
 - Logic improvements in this project's commands not yet back-ported to the template — **Low**

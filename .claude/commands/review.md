@@ -78,5 +78,12 @@ If the verdict is CHANGES REQUESTED, append one entry per violation to `.claude/
 
 Skip this step if the verdict is APPROVED with no issues.
 
+## Tip — automate the review-fix loop
+While a PR sits in CHANGES REQUESTED (or waiting on CI), the user can avoid manually re-checking by running, as a separate top-level command:
+```
+/loop 5m "Check PR <N> for new review comments or failing CI. If found, fix them, push, and rebase on develop if behind. Stop once the PR is approved and CI is green."
+```
+This is the generic `/loop` skill with a literal prompt — there is no dedicated `/babysit` command. `/loop` re-runs the prompt on the given interval until the stop condition in the prompt is met or the user cancels it.
+
 ## Done when
 All issues resolved (if any) and PR approved. Merge to target branch (`develop` for features/fixes/specs, `main` for hotfixes/releases).

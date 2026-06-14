@@ -75,6 +75,20 @@ Adjust the grep pattern to match files that handle external input, data persiste
 If any matches, run the `security-review` skill before opening the PR.
 Skip this gate if no sensitive files were modified.
 
+### Gate 8 — Abstraction bloat / duplication (heuristic, advisory)
+```bash
+# New protocols introduced on this branch
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | xargs grep -ln "^protocol \|^public protocol " 2>/dev/null
+
+# Duplicated added lines (non-blank, appearing 2+ times across the diff) — copy-paste signal
+git diff develop...HEAD -- '*.swift' | grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^\s*$' | sort | uniq -d
+```
+For each new protocol found, check its conformance count: `grep -rn ": <ProtocolName>" --include=*.swift .` A protocol with exactly one conforming type, outside the established `<RepositoryProtocol>`-style pattern (where a single implementation plus a test mock is expected), is a candidate for inlining.
+
+For duplicated lines, flag any run of 3+ consecutive duplicated added lines as a candidate for extraction into a shared helper.
+
+This gate is advisory: list candidates in the gate summary but do not block the PR on them. Final judgment on whether to extract or inline is a human or `/review` call.
+
 ## Gate summary
 
 Report every gate before opening the PR:
@@ -87,6 +101,7 @@ Gates:
 [✗] CHANGELOG — Unreleased section empty (auto-populating from git log...)
 [–] Coverage — skipped (no new files)
 [–] Security — skipped (no sensitive files)
+[i] Abstraction bloat — no candidates found
 ```
 
 When Gates 1 and 2 are skipped:
@@ -99,6 +114,7 @@ Gates:
 [✓] CHANGELOG
 [–] Coverage — skipped (no Swift files)
 [–] Security — skipped (no Swift files)
+[i] Abstraction bloat — 1 candidate found (see report)
 ```
 
 Fix any failures before continuing.

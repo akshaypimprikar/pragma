@@ -64,7 +64,7 @@ Also read the following files if they exist — skip silently if absent:
 For each check: ✅ PASS or ❌ FAIL (with file path + line number).
 
 Final verdict:
-- **APPROVED** — all checks pass, ready to merge to `develop` (or `main` for hotfixes/releases)
+- **APPROVED** — all checks pass, eligible to merge once `/test` and `code-review:code-review` also pass
 - **CHANGES REQUESTED** — list issues that must be fixed before merge
 
 If the verdict is CHANGES REQUESTED, append one entry per violation to `.claude/context/rejections.md` before closing the review:
@@ -78,6 +78,8 @@ If the verdict is CHANGES REQUESTED, append one entry per violation to `.claude/
 
 Skip this step if the verdict is APPROVED with no issues.
 
+Report the verdict and stop. Do **not** merge the PR — merging happens only after `/test` and `code-review:code-review` both pass, and only with the user's explicit go-ahead (see CLAUDE.md's "Merge rule" if the project has one).
+
 ## Tip — automate the review-fix loop
 While a PR sits in CHANGES REQUESTED (or waiting on CI), the user can avoid manually re-checking by running, as a separate top-level command:
 ```
@@ -86,4 +88,4 @@ While a PR sits in CHANGES REQUESTED (or waiting on CI), the user can avoid manu
 This is the generic `/loop` skill with a literal prompt — there is no dedicated `/babysit` command. `/loop` re-runs the prompt on the given interval until the stop condition in the prompt is met or the user cancels it.
 
 ## Done when
-All issues resolved (if any) and PR approved. Merge to target branch (`develop` for features/fixes/specs, `main` for hotfixes/releases).
+All issues resolved (if any) and a verdict reported. Merging the PR is a separate, explicit step the user takes — this command never merges.

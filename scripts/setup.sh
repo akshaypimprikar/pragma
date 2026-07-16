@@ -143,6 +143,10 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 - Domain Services: zero SwiftData imports — 100% unit-testable without a simulator
 - Tests use \`import Testing\` with \`@Suite\` / \`@Test\` / \`#expect()\`
 -->
+
+## Merge rule
+
+No command merges a PR automatically. A PR is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) Agents report their verdict and stop.
 CLAUDEMD
     success "CLAUDE.md generated"
 fi

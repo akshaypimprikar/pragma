@@ -146,7 +146,7 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 ## Merge rule
 
-A PR is eligible to merge once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean. Approval must come from the user's actual GitHub PR review — check \`gh pr view <N> --json reviewDecision -q .reviewDecision\`; a chat "yes" is not sufficient and no command asks for one. Once GitHub shows \`APPROVED\` and all three checks are clean, merge automatically (\`gh pr merge <N> --merge\`) and run the standard post-merge cleanup (pull the base branch, delete the local branch, prune remote refs) without being asked.
+No command merges a PR automatically. A PR is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) Agents report their verdict and stop.
 CLAUDEMD
     success "CLAUDE.md generated"
 fi

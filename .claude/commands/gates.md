@@ -89,6 +89,17 @@ For duplicated lines, flag any run of 3+ consecutive duplicated added lines as a
 
 This gate is advisory: list candidates in the gate summary but do not block the PR on them. Final judgment on whether to extract or inline is a human or `/review` call.
 
+### Gate 9 — Layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
+```bash
+# Example: a layer that must not import a forbidden module (e.g. Domain Services must not import a persistence framework)
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -ln '^import <forbidden import>' 2>/dev/null
+
+# Example: a type-safety rule (e.g. money values must be Decimal, never Double)
+git diff develop...HEAD --name-only -- '*.swift' | xargs grep -nE '<pattern for the forbidden usage, per CLAUDE.md>' 2>/dev/null
+```
+Pass: both commands return no output.
+Fail: list every offending file and line. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least one concrete rule instantiated here. Leave both greps as literal placeholders only if CLAUDE.md defines no enforced layer/type rules yet.
+
 ## Gate summary
 
 Report every gate before opening the PR:
@@ -102,6 +113,7 @@ Gates:
 [–] Coverage — skipped (no new files)
 [–] Security — skipped (no sensitive files)
 [i] Abstraction bloat — no candidates found
+[✓] Layer-rule compliance
 ```
 
 When Gates 1 and 2 are skipped:
@@ -115,6 +127,7 @@ Gates:
 [–] Coverage — skipped (no Swift files)
 [–] Security — skipped (no Swift files)
 [i] Abstraction bloat — 1 candidate found (see report)
+[✓] Layer-rule compliance
 ```
 
 Fix any failures before continuing.
@@ -122,7 +135,7 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/goal "all 7 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean"
+/goal "all 8 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, layer-rule compliance clean"
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
@@ -163,4 +176,4 @@ EOF
 Exceptions: `release/*` and `hotfix/*` branches use `--base main`.
 
 ## Done when
-All 7 gates pass, PR is open, and the PR URL is returned to the user.
+All 8 gates pass, PR is open, and the PR URL is returned to the user.

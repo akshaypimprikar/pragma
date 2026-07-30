@@ -119,6 +119,19 @@ git diff develop...HEAD --name-only -- '<your test target>/*.swift' | xargs grep
 # Generic: UI test selectors must match a real accessibilityIdentifier in production views
 grep -hro 'app\.\(buttons\|textFields\|staticTexts\)\["[^"]*"\]' <AppName>UITests/*.swift 2>/dev/null | sort -u
 # — then cross-check each literal against: grep -r 'accessibilityIdentifier' <AppName>/Views/
+
+# Example (if using a persistence framework with a model macro, e.g. SwiftData's @Model):
+# new model types must be `final class` with an id property of your chosen identity type
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to your Models layer>' | xargs grep -L 'final class' 2>/dev/null
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to your Models layer>' | xargs grep -L '<pattern matching your id property, e.g. var id: UUID>' 2>/dev/null
+
+# Example: relationships must specify an explicit delete rule
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your Models layer>' | xargs grep -n '<your relationship annotation, e.g. @Relationship>' 2>/dev/null | grep -v '<your delete-rule keyword, e.g. deleteRule>'
+
+# Example: new Domain Services must have no stored mutable state — no `var` stored properties.
+# Excludes computed properties (bodies opening with `{` or protocol `{ get }` requirements),
+# which the naive pattern alone can't distinguish from genuinely stored `var`s.
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -nE '^\s*(private\s+)?var\s+\w+\s*[:=]' 2>/dev/null | grep -v '{\s*$' | grep -v '{ get'
 ```
 Pass: every command returns no output (the UI-selector listing is cross-checked by hand/agent against your Views layer).
 Fail: list every offending file and line, grouped by which rule it violates. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least the layer-separation and type-safety examples instantiated here. Leave placeholder examples as-is only if CLAUDE.md defines no enforced rule of that shape yet; the two fully-generic checks (force-unwrap, UI-selector-matching) apply to any Swift/XCTest project regardless.

@@ -89,16 +89,52 @@ For duplicated lines, flag any run of 3+ consecutive duplicated added lines as a
 
 This gate is advisory: list candidates in the gate summary but do not block the PR on them. Final judgment on whether to extract or inline is a human or `/review` call.
 
-### Gate 9 — Layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
+### Gate 9 — Architecture & layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
+This is the single authoritative check for layer-separation, type-safety, and
+pattern rules — `/review` should trust this gate rather than re-running these
+checks post-PR (a full local build+test+coverage cycle is expensive; running it
+once here instead of again in `/review` is the whole point of this gate).
 ```bash
 # Example: a layer that must not import a forbidden module (e.g. Domain Services must not import a persistence framework)
 git diff develop...HEAD --name-only -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -ln '^import <forbidden import>' 2>/dev/null
 
+# Example: repository/protocol layer purity — protocols should import only the minimum (e.g. Foundation), never the persistence framework or UI framework directly
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your repository-protocol layer>' | xargs grep -n '^import <forbidden import>' 2>/dev/null
+
+# Example: ViewModels must depend on protocols, never concrete persistence-layer implementations
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your ViewModel layer>' | xargs grep -n '<pattern matching a concrete implementation type, e.g. SwiftData\w*Repository>' 2>/dev/null
+
+# Example: Views must have no direct persistence-layer access
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your View layer>' | xargs grep -ln '^import <persistence framework>' 2>/dev/null
+
 # Example: a type-safety rule (e.g. money values must be Decimal, never Double)
 git diff develop...HEAD --name-only -- '*.swift' | xargs grep -nE '<pattern for the forbidden usage, per CLAUDE.md>' 2>/dev/null
+
+# Generic (not project-specific): no force-unwrap-via-try!/as! in changed production code (Tests excluded)
+git diff develop...HEAD --name-only -- '*.swift' | grep -v 'Tests/' | xargs grep -nE '\btry!|as!' 2>/dev/null
+
+# Generic: unit/integration tests must use the test framework CLAUDE.md specifies, not an alternative
+git diff develop...HEAD --name-only -- '<your test target>/*.swift' | xargs grep -l '<pattern matching the forbidden alternative framework, e.g. XCTestCase for a Testing-framework project>' 2>/dev/null
+
+# Generic: UI test selectors must match a real accessibilityIdentifier in production views
+grep -hro 'app\.\(buttons\|textFields\|staticTexts\)\["[^"]*"\]' <AppName>UITests/*.swift 2>/dev/null | sort -u
+# — then cross-check each literal against: grep -r 'accessibilityIdentifier' <AppName>/Views/
+
+# Example (if using a persistence framework with a model macro, e.g. SwiftData's @Model):
+# new model types must be `final class` with an id property of your chosen identity type
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to your Models layer>' | xargs grep -L 'final class' 2>/dev/null
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to your Models layer>' | xargs grep -L '<pattern matching your id property, e.g. var id: UUID>' 2>/dev/null
+
+# Example: relationships must specify an explicit delete rule
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your Models layer>' | xargs grep -n '<your relationship annotation, e.g. @Relationship>' 2>/dev/null | grep -v '<your delete-rule keyword, e.g. deleteRule>'
+
+# Example: new Domain Services must have no stored mutable state — no `var` stored properties.
+# Excludes computed properties (bodies opening with `{` or protocol `{ get }` requirements),
+# which the naive pattern alone can't distinguish from genuinely stored `var`s.
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -nE '^\s*(private\s+)?var\s+\w+\s*[:=]' 2>/dev/null | grep -v '{\s*$' | grep -v '{ get'
 ```
-Pass: both commands return no output.
-Fail: list every offending file and line. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least one concrete rule instantiated here. Leave both greps as literal placeholders only if CLAUDE.md defines no enforced layer/type rules yet.
+Pass: every command returns no output (the UI-selector listing is cross-checked by hand/agent against your Views layer).
+Fail: list every offending file and line, grouped by which rule it violates. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least the layer-separation and type-safety examples instantiated here. Leave placeholder examples as-is only if CLAUDE.md defines no enforced rule of that shape yet; the two fully-generic checks (force-unwrap, UI-selector-matching) apply to any Swift/XCTest project regardless.
 
 ## Gate summary
 
@@ -113,7 +149,7 @@ Gates:
 [–] Coverage — skipped (no new files)
 [–] Security — skipped (no sensitive files)
 [i] Abstraction bloat — no candidates found
-[✓] Layer-rule compliance
+[✓] Architecture & layer-rule compliance
 ```
 
 When Gates 1 and 2 are skipped:
@@ -127,7 +163,7 @@ Gates:
 [–] Coverage — skipped (no Swift files)
 [–] Security — skipped (no Swift files)
 [i] Abstraction bloat — 1 candidate found (see report)
-[✓] Layer-rule compliance
+[✓] Architecture & layer-rule compliance
 ```
 
 Fix any failures before continuing.
@@ -135,7 +171,7 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/goal "all 8 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, layer-rule compliance clean"
+/goal "all 8 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, architecture & layer-rule compliance clean"
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
@@ -155,6 +191,9 @@ If any gate caught a violation pattern that is NOT already listed in `.claude/co
 
 Do not promote it to a numbered invariant — that is a human decision made during the next `/pipeline-review`.
 
+Include the actual Gate summary output (from above) in the PR body under its own
+section — `/review` reads this instead of re-running the same checks itself.
+
 ```bash
 gh pr create \
   --title "<type>(<scope>): <description>" \
@@ -162,6 +201,9 @@ gh pr create \
   --body "$(cat <<'EOF'
 ## Summary
 - <bullet per task from the plan>
+
+## Gates
+<paste the actual Gate summary block from this run — commit SHA it was run against, plus each gate's ✓/✗/– status>
 
 ## Test plan
 - [ ] Full test suite passes (TEST SUCCEEDED)

@@ -122,6 +122,14 @@ Fowler calls the behavioral-correctness sensor "the elephant in the room — sti
 | `/trim-context` | Trims accumulated context after completing a plan |
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
 
+### Standalone skills
+
+Unlike the commands above, these work in any project without adopting the rest of the pipeline.
+
+| Skill | What it does |
+|---|---|
+| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — every gate is a real command with a pass/fail outcome, none of it asks an LLM to judge the diff |
+
 ---
 
 ## CI Layer

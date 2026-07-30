@@ -50,7 +50,7 @@ Pass: no output. Fail: list every offending file and line.
 ```bash
 git branch --show-current
 ```
-Pass: branch matches one of `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*`.
+Pass: branch matches one of `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*`, `chore/*`.
 Fail: `main`, `develop`, or any non-conforming name — stop and ask the user to rename.
 
 ### Gate 5 — CHANGELOG.md has Unreleased entries
@@ -102,7 +102,10 @@ git diff develop...HEAD --name-only -- '*.swift' | grep '<path to the constraine
 git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your repository-protocol layer>' | xargs grep -n '^import <forbidden import>' 2>/dev/null
 
 # Example: ViewModels must depend on protocols, never concrete persistence-layer implementations
-git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your ViewModel layer>' | xargs grep -n '<pattern matching a concrete implementation type, e.g. SwiftData\w*Repository>' 2>/dev/null
+# (exclude Tests/ — your test suite legitimately constructs concrete implementations against an
+# in-memory store; a naive path match on the ViewModel-layer glob will also catch a mirrored
+# <TestTarget>/<ViewModel layer>/ directory, which is not a production-code violation)
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your ViewModel layer>' | grep -v 'Tests/' | xargs grep -n '<pattern matching a concrete implementation type, e.g. SwiftData\w*Repository>' 2>/dev/null
 
 # Example: Views must have no direct persistence-layer access
 git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your View layer>' | xargs grep -ln '^import <persistence framework>' 2>/dev/null

@@ -108,6 +108,7 @@ Fowler calls the behavioral-correctness sensor "the elephant in the room — sti
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
 | `/review` | Reviews a PR for architecture compliance |
 | `/test` | Writes tests for a feature branch — run in parallel with `/review` |
+| `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |
 

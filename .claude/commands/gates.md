@@ -227,3 +227,10 @@ All 8 gates pass, PR is open, and the PR URL is returned to the user.
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review` then
 `/test` — the two stages that don't need a human trigger. `code-review:code-review`
 still has to be run manually; `/pr-followup` reminds you of that at the end.
+
+## Standalone version
+The gate logic above also exists as an installable skill independent of this
+pipeline: [`skills/deterministic-pr-gates/SKILL.md`](../../skills/deterministic-pr-gates/SKILL.md).
+If you're adopting this command as part of the full pipeline, this file remains
+the source of truth for your project; the skill is for using the gate pattern
+without the rest of the pipeline.

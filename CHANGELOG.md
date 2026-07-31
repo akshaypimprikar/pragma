@@ -23,6 +23,7 @@ First versioned release. Pragma has been developed and battle-tested against [Fi
 ### Changed
 - Renamed the project from `ios-agent-workflow` to **Pragma**
 - Removed auto-merge from `/review` — merging now always requires explicit human action, since GitHub blocks PR authors from approving their own PRs
+- `scripts/setup.sh`'s generated CLAUDE.md Merge rule now exempts `release/*`/`hotfix/*` PRs from `/review` and `code-review:code-review` — every commit in those PRs already passed both when it merged into `develop`, so `/release`'s pre-flight test run is the only gate needed there
 
 ### Fixed
 - `pr-checks.yml` path filter that excluded files it should have covered

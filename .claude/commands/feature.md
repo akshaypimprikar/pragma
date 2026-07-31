@@ -45,4 +45,13 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green. Run `/gates` to verify pre-PR criteria, then open a PR to `develop`. Then `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` run in parallel.
+All tasks complete, full test suite green, and all 7 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` run in parallel.
+
+To drive the entire feature-to-gates cycle autonomously:
+```
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 7 gates pass.
+```
+Or target only gate-fixing after tasks are done:
+```
+/goal "all 7 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated"
+```

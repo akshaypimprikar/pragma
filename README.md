@@ -9,7 +9,7 @@
 
 The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
 
-Proven on [FinanceTracker](https://github.com/akshaypimprikar/personal-finance-tracker) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
+Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
 ---
 
@@ -80,6 +80,20 @@ flowchart TD
 
 You approve twice — after `/spec` and after `/plan`. Every other step is either an agent or automated CI.
 
+### Harness Design
+
+Martin Fowler's ["Harness Engineering for Coding Agent Users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (April 2026) frames `Agent = Model + Harness`, splitting the harness into **feedforward guides** (steer the agent before it acts) and **feedback sensors** (verify what it did after, across maintainability, architecture fitness, and behavioral correctness). This pipeline maps directly onto that taxonomy:
+
+| Fowler category | Pragma stage |
+|---|---|
+| Feedforward guides | `/spec`, `/plan` — establish approach and constraints before code is written |
+| Feedback sensors — maintainability | `/gates` — TODO/FIXME, branch naming, CHANGELOG, coverage, abstraction bloat |
+| Feedback sensors — architecture fitness | `/review` — layer separation, type safety, established patterns |
+| Feedback sensors — behavioral correctness | `/test` — full suite, ≥80% coverage on new code |
+| Recovery loop | `/bugfix` — regression test first, then fix |
+
+Fowler calls the behavioral-correctness sensor "the elephant in the room — still unsolved" for most agent harnesses. `/test` plus `/gates`' coverage gate are this pipeline's concrete attempt at that sensor.
+
 ---
 
 ## Commands
@@ -94,6 +108,7 @@ You approve twice — after `/spec` and after `/plan`. Every other step is eithe
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
 | `/review` | Reviews a PR for architecture compliance |
 | `/test` | Writes tests for a feature branch — run in parallel with `/review` |
+| `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |
 
@@ -106,6 +121,14 @@ You approve twice — after `/spec` and after `/plan`. Every other step is eithe
 | `/status` | Reconstructs where work stands — use to resume any session |
 | `/trim-context` | Trims accumulated context after completing a plan |
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
+
+### Standalone skills
+
+Unlike the commands above, these work in any project without adopting the rest of the pipeline.
+
+| Skill | What it does |
+|---|---|
+| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — every gate is a real command with a pass/fail outcome, none of it asks an LLM to judge the diff |
 
 ---
 

@@ -146,7 +146,7 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 ## Merge rule
 
-No command merges a PR automatically. A PR is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) Agents report their verdict and stop.
+No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\`/\`hotfix/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. Agents report their verdict and stop.
 CLAUDEMD
     success "CLAUDE.md generated"
 fi

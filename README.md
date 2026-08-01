@@ -45,7 +45,7 @@ Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 13 Claude Code slash commands covering the full SDLC |
+| **Agent commands** | `.claude/commands/` | 15 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
 | **Support scripts** | `scripts/` | Simulator selection and coverage enforcement for CI |
 

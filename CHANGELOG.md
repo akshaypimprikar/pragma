@@ -5,6 +5,8 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Installable as a real Claude Code plugin** — `.claude-plugin/plugin.json` + `marketplace.json`, so `/plugin marketplace add akshaypimprikar/pragma` + `/plugin install pragma@pragma` works with no clone or shell script. Verified locally: `claude plugin validate` passes, and `claude plugin details pragma@pragma` confirms all 16 commands (including the new `/pragma:init`) plus the existing `deterministic-pr-gates` skill — 17 components total — load correctly.
+- **`/pragma:init` command** — the plugin-native equivalent of `scripts/setup.sh`, but interviews the user for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in manually — and, unlike the first draft of this command, never overwrites either file if it already exists, matching `setup.sh`'s own guard. Closes the "3 manual edits before your first `/spec`" friction gap that plain `setup.sh` left.
 - README: real FinanceTracker screenshots (Dashboard, Accounts) instead of no visuals at all, and a "Why not just Cursor/Windsurf/Copilot's spec mode?" section addressing the obvious comparison directly — CI-enforced gates, cross-session memory, and a real app with 70+ merged PRs are the three things a built-in spec mode doesn't give you
 
 ## [1.0.0] — 2026-07-31

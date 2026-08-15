@@ -26,23 +26,33 @@ Not a mockup — this is what 70+ merged PRs of `/spec → /plan → /feature �
 
 ## Quick Start
 
+**Recommended — install as a Claude Code plugin, no clone or shell script:**
+
+Inside Claude Code, in your iOS project's repo root:
+
+```
+/plugin marketplace add akshaypimprikar/pragma
+/plugin install pragma@pragma
+/pragma:init MyApp
+```
+
+`/pragma:init` does what `scripts/setup.sh` does — copies commands, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
+
+**Alternative — clone and run the setup script directly:**
+
 ```bash
 git clone https://github.com/akshaypimprikar/pragma
 cd pragma
 ./scripts/setup.sh MyApp /path/to/your-ios-project
 ```
 
-The script copies all commands, context files, CI workflows, and support scripts into your project, substitutes your app name throughout, and generates a starter `CLAUDE.md`. No manual find-and-replace.
+This copies the same files and substitutes your app name, but leaves `CLAUDE.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
 
-Then kick off your first feature:
+Then, either way, kick off your first feature:
 
 ```
 /spec "describe your feature idea"
 ```
-
-**After setup:**
-1. Fill in `CLAUDE.md` — add your architecture rules and any project-specific constraints
-2. Seed `.claude/context/invariants.md` with your non-negotiable rules before running `/feature`
 
 ---
 

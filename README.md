@@ -11,13 +11,34 @@ The complete iOS development scaffold for the agentic era — agent commands, CI
 
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
+<p>
+  <img src="docs/screenshots/financetracker-dashboard.png" width="220" alt="FinanceTracker Dashboard — net worth, spending this month, budget progress" />
+  <img src="docs/screenshots/financetracker-accounts.png" width="220" alt="FinanceTracker Accounts — assets and liabilities, net worth calculation" />
+</p>
+
+Not a mockup — this is what 70+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
+
 ---
 
-**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
 ## Quick Start
+
+**Recommended — install as a Claude Code plugin, no clone or shell script:**
+
+Inside Claude Code, in your iOS project's repo root:
+
+```
+/plugin marketplace add akshaypimprikar/pragma
+/plugin install pragma@pragma
+/pragma:init MyApp
+```
+
+`/pragma:init` does what `scripts/setup.sh` does — copies commands, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
+
+**Alternative — clone and run the setup script directly:**
 
 ```bash
 git clone https://github.com/akshaypimprikar/pragma
@@ -25,17 +46,13 @@ cd pragma
 ./scripts/setup.sh MyApp /path/to/your-ios-project
 ```
 
-The script copies all commands, context files, CI workflows, and support scripts into your project, substitutes your app name throughout, and generates a starter `CLAUDE.md`. No manual find-and-replace.
+This copies the same files and substitutes your app name, but leaves `CLAUDE.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
 
-Then kick off your first feature:
+Then, either way, kick off your first feature:
 
 ```
 /spec "describe your feature idea"
 ```
-
-**After setup:**
-1. Fill in `CLAUDE.md` — add your architecture rules and any project-specific constraints
-2. Seed `.claude/context/invariants.md` with your non-negotiable rules before running `/feature`
 
 ---
 
@@ -45,7 +62,7 @@ Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 13 Claude Code slash commands covering the full SDLC |
+| **Agent commands** | `.claude/commands/` | 15 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
 | **Support scripts** | `scripts/` | Simulator selection and coverage enforcement for CI |
 
@@ -96,6 +113,20 @@ Fowler calls the behavioral-correctness sensor "the elephant in the room — sti
 
 ---
 
+## Why not just Cursor / Windsurf / Copilot's built-in spec mode?
+
+Every major AI coding tool has shipped some flavor of spec-driven development — Cursor's Plan Mode, Windsurf's Cascade, GitHub Copilot workspace, GitHub Spec Kit, BMAD-METHOD, and others. Fair question: why a separate scaffold instead of using what's already built into the IDE?
+
+Three things pragma does that a spec mode alone doesn't:
+
+1. **CI-enforced, not just agent-enforced.** `/gates` runs locally before a PR opens; the same checks re-run independently in GitHub Actions (`pr-checks.yml`, `ui-tests.yml`) as enforcement that can't be skipped by rerunning the agent with a different prompt. Spec modes generate a plan; they don't wire in an enforcement layer the agent itself can't talk its way around.
+2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge.
+3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
+
+None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the enforcement and the memory to survive independently of any one session, IDE, or agent run.
+
+---
+
 ## Commands
 
 ### Core pipeline
@@ -106,8 +137,8 @@ Fowler calls the behavioral-correctness sensor "the elephant in the room — sti
 | `/plan docs/specs/my-spec.md` | Turns an approved spec into a task-by-task implementation plan |
 | `/feature docs/plans/my-plan.md` | Executes an approved plan — TDD, one commit per task |
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
-| `/review` | Reviews a PR for architecture compliance |
-| `/test` | Writes tests for a feature branch — run in parallel with `/review` |
+| `/review` | Reviews a PR for architecture compliance, posts its verdict as a real GitHub review |
+| `/test` | Writes tests for a feature branch — runs after `/review` reports APPROVED |
 | `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |

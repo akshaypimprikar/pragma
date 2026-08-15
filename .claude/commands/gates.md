@@ -174,13 +174,13 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/goal "all 8 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, architecture & layer-rule compliance clean"
+/loop Fix failing gates and re-check. Stop when all 9 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, architecture & layer-rule compliance clean.
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
 To drive the full feature-to-PR cycle autonomously (no interval = Claude self-paces):
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 7 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 9 gates pass.
 ```
 
 ## After all gates pass — open the PR
@@ -221,7 +221,7 @@ EOF
 Exceptions: `release/*` and `hotfix/*` branches use `--base main`.
 
 ## Done when
-All 8 gates pass, PR is open, and the PR URL is returned to the user.
+All 9 gates pass, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into review + test
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review` then

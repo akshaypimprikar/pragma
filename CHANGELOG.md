@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-15
+
+### Added
+- **Installable as a real Claude Code plugin** — `.claude-plugin/plugin.json` + `marketplace.json`, so `/plugin marketplace add akshaypimprikar/pragma` + `/plugin install pragma@pragma` works with no clone or shell script. Verified locally: `claude plugin validate` passes, and `claude plugin details pragma@pragma` confirms all 16 commands (including the new `/pragma:init`) plus the existing `deterministic-pr-gates` skill — 17 components total — load correctly.
+- **`/pragma:init` command** — the plugin-native equivalent of `scripts/setup.sh`, but interviews the user for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in manually — and, unlike the first draft of this command, never overwrites either file if it already exists, matching `setup.sh`'s own guard. Closes the "3 manual edits before your first `/spec`" friction gap that plain `setup.sh` left.
+- README: real FinanceTracker screenshots (Dashboard, Accounts) instead of no visuals at all, and a "Why not just Cursor/Windsurf/Copilot's spec mode?" section addressing the obvious comparison directly — CI-enforced gates, cross-session memory, and a real app with 70+ merged PRs are the three things a built-in spec mode doesn't give you
+
+### Fixed
+- **`/review`, `/feature`, `/test` had drifted behind FinanceTracker's local, improved copies** — `/review` now logs pre-review fixes to `rejections.md` (not just its own CHANGES REQUESTED verdicts) and posts its verdict as a real GitHub review via `gh pr review --comment`; `/feature` requires both a repeat-call/duplicate test and a missing-required-field test for mutations on shared/persisted entities; `/test`'s Trigger description no longer contradicts `/pr-followup` about running in parallel with `/review`. Caught by a code-review pass on an external plugin-directory listing that described capabilities the shipped template didn't actually have.
+- Pre-existing "7 gates" → "9 gates" drift in `feature.md` (`gates.md` itself already documents 9 gates; the prose just never caught up)
+
 ## [1.0.0] — 2026-07-31
 
 First versioned release. Pragma has been developed and battle-tested against [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) since May 2026; this release captures that history as a baseline.

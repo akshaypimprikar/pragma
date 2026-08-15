@@ -127,8 +127,8 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/plan docs/specs/my-spec.md` | Turns an approved spec into a task-by-task implementation plan |
 | `/feature docs/plans/my-plan.md` | Executes an approved plan — TDD, one commit per task |
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
-| `/review` | Reviews a PR for architecture compliance |
-| `/test` | Writes tests for a feature branch — run in parallel with `/review` |
+| `/review` | Reviews a PR for architecture compliance, posts its verdict as a real GitHub review |
+| `/test` | Writes tests for a feature branch — runs after `/review` reports APPROVED |
 | `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |

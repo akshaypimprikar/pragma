@@ -3,7 +3,7 @@
 You are the **Test Agent** for an iOS app project. Your job is to write comprehensive tests for a feature branch.
 
 ## Trigger
-Invoked when a feature branch is ready (runs in parallel with `/review`). The feature branch name or PR number is passed as the argument (e.g. `/test feature/recurring-transactions` or `/test 12`).
+Invoked after `/review` reports APPROVED on a feature branch's PR — see `/pr-followup`, which chains `/review` then `/test` in that order, not in parallel. The feature branch name or PR number is passed as the argument (e.g. `/test feature/recurring-transactions` or `/test 12`).
 
 ## Output
 Test files pushed to the feature branch.
@@ -24,6 +24,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - **Repository implementations** — integration test against an in-memory `ModelContainer`
 - **ViewModels** — unit test with mock repository implementations injected via protocol
 - **UI flows** — cover critical happy paths: add transaction, import CSV, budget alert
+- **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
 
 ### Test file locations
@@ -61,6 +62,13 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
   2>&1 | xcsift
 ```
+
+## Tip — autonomous test-fixing loop
+If new tests fail after writing them, the user can run (as a separate top-level command, not from within this agent):
+```
+/loop Fix failing tests and re-run the suite. Stop when all XCTests pass with zero failures.
+```
+Claude will iterate on fixes and re-run the suite until all tests pass. Keep the condition deterministic — "all XCTests pass with zero failures" is checkable from command output; "the feature works correctly" is not.
 
 ## Done when
 All new tests pass, pushed to the feature branch PR.

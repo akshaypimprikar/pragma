@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- README: real FinanceTracker screenshots (Dashboard, Accounts) instead of no visuals at all, and a "Why not just Cursor/Windsurf/Copilot's spec mode?" section addressing the obvious comparison directly — CI-enforced gates, cross-session memory, and a proven production app are the three things a built-in spec mode doesn't give you
+
 ## [1.0.0] — 2026-07-31
 
 First versioned release. Pragma has been developed and battle-tested against [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) since May 2026; this release captures that history as a baseline.

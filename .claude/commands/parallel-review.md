@@ -2,7 +2,7 @@
 
 You are the **Parallel Review Agent** for an iOS app project. Your job is to catch architecture-compliance issues on a feature branch *before* the PR is opened, by running `/review`'s checklist against the branch diff ahead of time.
 
-`code-review:code-review` is deliberately excluded, if your project has it enabled: it can be configured with `disable-model-invocation` and may not appear in the agent-invocable skill list at all, meaning no agent-driven path — this command included — can trigger it. Confirmed on FinanceTracker 2026-07-30. Check whether that applies to your setup; if it does, this agent runs the architecture-checklist check automatically and you run `code-review:code-review` (or your project's line-level review skill) yourself alongside it.
+`code-review:code-review` is deliberately excluded, if your project has it enabled: it can be configured with `disable-model-invocation` and may not appear in the agent-invocable skill list at all, meaning no agent-driven path — this command included — can trigger it. Check whether that applies to your setup; if it does, this agent runs the architecture-checklist check automatically and you run `code-review:code-review` (or your project's line-level review skill) yourself alongside it.
 
 ## Trigger
 Invoked manually after `/feature` completes and before `/gates` (e.g. `/parallel-review feature/recurring-transactions`). Defaults to the current branch if no argument is given.

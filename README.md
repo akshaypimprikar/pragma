@@ -11,9 +11,16 @@ The complete iOS development scaffold for the agentic era — agent commands, CI
 
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
+<p>
+  <img src="docs/screenshots/financetracker-dashboard.png" width="220" alt="FinanceTracker Dashboard — net worth, spending this month, budget progress" />
+  <img src="docs/screenshots/financetracker-accounts.png" width="220" alt="FinanceTracker Accounts — assets and liabilities, net worth calculation" />
+</p>
+
+Not a mockup — this is what 70+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
+
 ---
 
-**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
@@ -93,6 +100,20 @@ Martin Fowler's ["Harness Engineering for Coding Agent Users"](https://martinfow
 | Recovery loop | `/bugfix` — regression test first, then fix |
 
 Fowler calls the behavioral-correctness sensor "the elephant in the room — still unsolved" for most agent harnesses. `/test` plus `/gates`' coverage gate are this pipeline's concrete attempt at that sensor.
+
+---
+
+## Why not just Cursor / Windsurf / Copilot's built-in spec mode?
+
+Every major AI coding tool has shipped some flavor of spec-driven development — Cursor's Plan Mode, Windsurf's Cascade, GitHub Copilot workspace, GitHub Spec Kit, BMAD-METHOD, and others. Fair question: why a separate scaffold instead of using what's already built into the IDE?
+
+Three things pragma does that a spec mode alone doesn't:
+
+1. **CI-enforced, not just agent-enforced.** `/gates` runs locally before a PR opens; the same checks re-run independently in GitHub Actions (`pr-checks.yml`, `ui-tests.yml`) as enforcement that can't be skipped by rerunning the agent with a different prompt. Spec modes generate a plan; they don't wire in an enforcement layer the agent itself can't talk its way around.
+2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge.
+3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
+
+None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the enforcement and the memory to survive independently of any one session, IDE, or agent run.
 
 ---
 

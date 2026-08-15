@@ -16,6 +16,7 @@ Before starting any task:
 
 ## Per-task rules
 - Follow TDD: write failing test first, confirm failure, implement, confirm pass
+- If the task adds or modifies a mutation on a shared/persisted entity (create, update, or delete on an `@Model` type), the failing test written first must cover **both** a repeat-call/duplicate case (e.g. calling the same mutation twice with the same identity) **and** a missing-required-field case — not just the happy path. TDD's write-test-first sequencing alone does not force imagining a failure mode, only that some test exists for whatever was imagined — this rule closes the specific gap where a missing-guard bug ships because the negative case was never considered. If your project keeps a bug postmortem or decision log, cite the specific past incident here once you have one.
 - After implementation passes tests, run the `simplify` skill on changed files before committing
 - Append a one-line entry to the `## [Unreleased]` section of `CHANGELOG.md` (create the section if absent)
 - One commit per task (after simplify pass and CHANGELOG update)
@@ -45,13 +46,13 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green, and all 7 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` run in parallel.
+All tasks complete, full test suite green, and all 9 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` runs (`code-review:code-review` is manual — it can't be agent-invoked).
 
 To drive the entire feature-to-gates cycle autonomously:
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 7 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 9 gates pass.
 ```
 Or target only gate-fixing after tasks are done:
 ```
-/goal "all 7 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated"
+/loop Fix failing gates. Stop when all 9 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated.
 ```

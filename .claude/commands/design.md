@@ -54,22 +54,26 @@ extension Theme {
 }
 ```
 
-## Bootstrap process
+## Process
 
-### 1. Audit all views
+Two modes, selected by the trigger used — see "Trigger" above.
+
+### Bootstrap process
+
+#### 1. Audit all views
 Read every file in `<AppName>/Views/`. Extract:
 - All hardcoded colors and opacities — note semantic meaning from context
 - All spacing values: padding, corner radii, gaps
 - All typography uses: font sizes, weights, styles
 - Recurring component patterns: card, row, sheet, empty state, progress bar
 
-### 2. Propose token structure
+#### 2. Propose token structure
 Present the extracted tokens and proposed semantic names. **Wait for approval before creating any files.** Flag ambiguous cases — e.g. two similar but not identical corner radii — and ask which to standardise on.
 
-### 3. Create Theme/ files
+#### 3. Create Theme/ files
 Create `<AppName>/Theme/Colors.swift`, `Typography.swift`, `Spacing.swift` with approved tokens.
 
-### 4. Create docs/design-system.md
+#### 4. Create docs/design-system.md
 Document the token set with:
 - Color semantics table (token name → meaning → current value)
 - Spacing scale
@@ -77,21 +81,21 @@ Document the token set with:
 - Component patterns (card, row, sheet, empty state) with structure description
 - A **Data Visualisation** section — initially empty, populated when charts ship
 
-### 5. Do NOT refactor existing views
+#### 5. Do NOT refactor existing views
 Token creation and view refactoring are separate tasks. Bootstrap only defines the tokens. A dedicated refactor task updates existing views to use them.
 
-## Extend process
+### Extend process
 
-### 1. Read existing tokens and design-system.md
+#### 1. Read existing tokens and design-system.md
 Understand what already exists before proposing anything new.
 
-### 2. Read relevant views
+#### 2. Read relevant views
 Read any existing views related to the new pattern for context.
 
-### 3. Propose new tokens
+#### 3. Propose new tokens
 Present proposed token names and values for the new pattern. **Wait for approval before creating files.**
 
-### 4. Extend Theme/ and design-system.md
+#### 4. Extend Theme/ and design-system.md
 Add approved tokens to the appropriate `Theme/*.swift` file. Create a new file if the pattern warrants a new category (e.g. `Charts.swift`). Update `docs/design-system.md`.
 
 ## Rules

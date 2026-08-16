@@ -15,11 +15,13 @@ Before starting any task:
 - Confirm you are on a `feature/<name>` branch (create it off `develop` if not)
 
 ## Per-task rules
-- Follow TDD: write failing test first, confirm failure, implement, confirm pass
+- Before starting the RED step of each task, apply TDD discipline: watch the test fail before implementing, never write production code before a failing test exists for it. If the Superpowers plugin's `test-driven-development` skill is installed (`.claude/settings.json` → `enabledPlugins`), invoke `Skill(test-driven-development)` instead of paraphrasing this from memory — it carries an explicit anti-rationalization checklist that a one-line instruction doesn't.
 - If the task adds or modifies a mutation on a shared/persisted entity (create, update, or delete on an `@Model` type), the failing test written first must cover **both** a repeat-call/duplicate case (e.g. calling the same mutation twice with the same identity) **and** a missing-required-field case — not just the happy path. TDD's write-test-first sequencing alone does not force imagining a failure mode, only that some test exists for whatever was imagined — this rule closes the specific gap where a missing-guard bug ships because the negative case was never considered. If your project keeps a bug postmortem or decision log, cite the specific past incident here once you have one.
 - After implementation passes tests, run the `simplify` skill on changed files before committing
 - Append a one-line entry to the `## [Unreleased]` section of `CHANGELOG.md` (create the section if absent)
-- One commit per task (after simplify pass and CHANGELOG update)
+- **Two commits per task, in this order — not one:**
+  1. **RED commit** — the new/modified test file(s) only, no production code. Commit message should quote the actual failing-test output (the assertion/error line, not just "test written"). Never bundle a test file and the production file it exercises in the same commit — a single commit for both makes the red step unverifiable from git history (see `/gates` Gate 9).
+  2. **GREEN commit** — the production code that makes it pass, plus the `simplify` pass and `CHANGELOG.md` entry. Commit message should quote the passing-test output line.
 - Run the full test suite (including UI tests) after every task — do not proceed if tests fail. Use the "Full test suite" command in CLAUDE.md; never add `-skip-testing` or `-only-testing` flags.
 - Never edit `project.pbxproj` — files auto-compile via `PBXFileSystemSynchronizedRootGroup`
 
@@ -46,13 +48,13 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green, and all 9 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` runs (`code-review:code-review` is manual — it can't be agent-invoked).
+All tasks complete, full test suite green, and all 10 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` runs (`code-review:code-review` is manual — it can't be agent-invoked).
 
 To drive the entire feature-to-gates cycle autonomously:
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 9 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 10 gates pass.
 ```
 Or target only gate-fixing after tasks are done:
 ```
-/loop Fix failing gates. Stop when all 9 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated.
+/loop Fix failing gates. Stop when all 10 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated, RED commit precedes GREEN commit for every new file in a scoped layer.
 ```

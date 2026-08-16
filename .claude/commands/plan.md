@@ -22,7 +22,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 - Exact file paths
 - Complete code (no placeholders, no "implement X")
 - Exact xcodebuild commands with expected output
-- TDD structure: write failing test → confirm failure → implement → confirm pass → commit
+- TDD structure: write failing test → confirm failure → commit (RED) → implement → confirm pass → commit (GREEN) — never bundle the test and implementation into one commit; see `/feature`'s per-task rules and `/gates` Gate 9
 
 ## Plan Header (required)
 

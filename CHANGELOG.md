@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`/gates` Gate 9 — RED-before-GREEN commit order** — synced from FinanceTracker: verifies via git history that a test file was committed strictly before the implementation it exercises, never bundled in the same commit. Generic `scripts/check_tdd_commit_order.py` (path-segment matching, no hardcoded app-name prefixes); warns loudly and exits 2 rather than silently passing if `SCOPED_LAYER_DIRS` still holds the template's default layer names and matches nothing in the adopting project. `/feature` and `/plan` updated for the two-commit (RED, GREEN) task structure this gate depends on; `/feature` now points at the Superpowers `test-driven-development` skill when installed. `init.md`/`setup.sh` scaffold the new script into new projects. Old Gate 9 (Architecture & layer-rule compliance) renumbered to Gate 10; `review.md`'s cross-reference updated to match.
+
 ## [1.1.0] — 2026-08-15
 
 ### Added

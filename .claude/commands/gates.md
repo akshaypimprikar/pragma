@@ -89,7 +89,36 @@ For duplicated lines, flag any run of 3+ consecutive duplicated added lines as a
 
 This gate is advisory: list candidates in the gate summary but do not block the PR on them. Final judgment on whether to extract or inline is a human or `/review` call.
 
-### Gate 9 — Architecture & layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
+### Gate 9 — RED-before-GREEN commit order (conditional: new files in a layer that expects a matching test)
+```bash
+python3 scripts/check_tdd_commit_order.py
+```
+For every new file in a layer with a 1:1 "<Type>.swift → <Type>Tests.swift" convention
+(ViewModels, Services, Repositories — adjust `SCOPED_LAYER_DIRS` in the script to your
+project's layer names) that has a matching test file, the script checks that the test file
+was added in a strictly earlier commit than the implementation — never the same commit,
+never a later one.
+
+This exists because "write a failing test first" is unverifiable from `/feature`'s
+instruction alone — nothing distinguishes an agent that watched the test fail from one that
+wrote both together and never ran it red. Git history is the only outside evidence, and only
+a RED-then-GREEN commit split preserves it. If you install the Superpowers plugin's
+`test-driven-development` skill, `/feature` invokes it for the discipline itself; this gate
+is the independent, git-history-based check that the discipline actually happened.
+
+Pass: script exits 0 (no violations, or nothing in scope to check).
+Fail: script lists each violation (file, commit, reason) — fix by re-doing the task as two
+commits (test-only, confirm it fails, then implementation) per `/feature`'s per-task rules.
+Unconfigured (exit 2): the script warns that `SCOPED_LAYER_DIRS` still holds the template's
+default layer names and matches nothing anywhere in this repo — edit it to your project's
+actual layer folders before trusting this gate. Do not treat exit 2 as a pass; it means the
+gate hasn't actually checked anything yet, on any branch, ever.
+Rewriting already-pushed history is not required; this gate only evaluates the branch as it
+stands when `/gates` runs.
+Skip this gate if the branch adds no new files in the scoped layer directories (exit 0 with
+nothing checked — different from exit 2, which means the directories themselves are wrong).
+
+### Gate 10 — Architecture & layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
 This is the single authoritative check for layer-separation, type-safety, and
 pattern rules — `/review` should trust this gate rather than re-running these
 checks post-PR (a full local build+test+coverage cycle is expensive; running it
@@ -152,6 +181,7 @@ Gates:
 [–] Coverage — skipped (no new files)
 [–] Security — skipped (no sensitive files)
 [i] Abstraction bloat — no candidates found
+[✓] RED-before-GREEN commit order
 [✓] Architecture & layer-rule compliance
 ```
 
@@ -166,6 +196,7 @@ Gates:
 [–] Coverage — skipped (no Swift files)
 [–] Security — skipped (no Swift files)
 [i] Abstraction bloat — 1 candidate found (see report)
+[–] RED-before-GREEN commit order — skipped (no new files in scoped layers)
 [✓] Architecture & layer-rule compliance
 ```
 
@@ -174,13 +205,13 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/loop Fix failing gates and re-check. Stop when all 9 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, architecture & layer-rule compliance clean.
+/loop Fix failing gates and re-check. Stop when all 10 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean.
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
 To drive the full feature-to-PR cycle autonomously (no interval = Claude self-paces):
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 9 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 10 gates pass.
 ```
 
 ## After all gates pass — open the PR
@@ -221,7 +252,7 @@ EOF
 Exceptions: `release/*` and `hotfix/*` branches use `--base main`.
 
 ## Done when
-All 9 gates pass, PR is open, and the PR URL is returned to the user.
+All 10 gates pass, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into review + test
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review` then

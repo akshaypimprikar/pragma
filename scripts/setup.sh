@@ -78,8 +78,9 @@ success "Context files ready"
 # ── 3. Scripts ────────────────────────────────────────────────────────────────
 info "Copying support scripts…"
 mkdir -p "$PROJECT_DIR/scripts"
-cp "$REPO_ROOT/scripts/select_simulator.py" "$PROJECT_DIR/scripts/"
-cp "$REPO_ROOT/scripts/check_coverage.py"   "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 success "Scripts ready"
 
 # ── 4. CI workflows ───────────────────────────────────────────────────────────

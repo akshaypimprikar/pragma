@@ -102,9 +102,11 @@ never a later one.
 This exists because "write a failing test first" is unverifiable from `/feature`'s
 instruction alone — nothing distinguishes an agent that watched the test fail from one that
 wrote both together and never ran it red. Git history is the only outside evidence, and only
-a RED-then-GREEN commit split preserves it. If you install the Superpowers plugin's
-`test-driven-development` skill, `/feature` invokes it for the discipline itself; this gate
-is the independent, git-history-based check that the discipline actually happened.
+a RED-then-GREEN commit split preserves it. `/feature`'s per-task rules carry the discipline
+itself (self-contained — don't gate it on an external skill invocation, since a plugin's
+`enabledPlugins: true` flag doesn't guarantee its skills are actually invocable in a given
+environment); this gate is the independent, git-history-based check that the discipline
+actually happened, regardless of how it was instructed.
 
 Pass: script exits 0 (no violations, or nothing in scope to check).
 Fail: script lists each violation (file, commit, reason) — fix by re-doing the task as two

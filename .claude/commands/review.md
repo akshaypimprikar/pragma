@@ -17,7 +17,7 @@ Also read the following files if they exist — skip silently if absent:
 
 `/gates` runs before every PR is opened and is the single authoritative check for
 layer separation, type safety, patterns, build success, full test suite, coverage,
-and UI-selector matching (its Gate 9 covers what this section used to duplicate).
+and UI-selector matching (its Gate 10 covers what this section used to duplicate).
 Do **not** re-run `xcodebuild`, the `ios-coverage` skill, or the layer/type-safety
 grep commands yourself here — that's wasted, redundant work against a diff that
 hasn't changed since gates last ran.

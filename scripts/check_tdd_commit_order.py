@@ -46,6 +46,15 @@ def all_test_files():
     return [line for line in out.splitlines() if TEST_ROOT in line and line.endswith(".swift")]
 
 
+def repo_has_any_scoped_file():
+    # Repo-wide, not just this branch's diff: distinguishes "this branch
+    # legitimately touches no scoped layer today" from "SCOPED_LAYER_DIRS
+    # still holds someone else's project's layer names and will never match
+    # anything here" — the latter must not look like a clean pass.
+    out = run("git", "ls-tree", "-r", "--name-only", "HEAD")
+    return any(any(seg in line for seg in SCOPED_LAYER_DIRS) for line in out.splitlines())
+
+
 commits = commit_list()
 if not commits:
     print(f"No commits ahead of {BASE_REF} — nothing to check.")
@@ -97,6 +106,14 @@ if violations:
     sys.exit(1)
 
 if checked == 0:
+    if not repo_has_any_scoped_file():
+        print(
+            f"WARNING: no file anywhere in this repo matches SCOPED_LAYER_DIRS {SCOPED_LAYER_DIRS} — "
+            "this script still has the template's default layer names. Edit SCOPED_LAYER_DIRS at the "
+            "top of this file to match your project's actual layer folders before trusting this gate; "
+            "until then, every run will silently no-op instead of checking anything."
+        )
+        sys.exit(2)
     print("No new files in scope with matching tests on this branch — skipping.")
 else:
     print(f"RED-before-GREEN commit order OK — {checked} file(s) checked.")

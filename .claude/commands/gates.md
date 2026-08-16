@@ -109,9 +109,14 @@ is the independent, git-history-based check that the discipline actually happene
 Pass: script exits 0 (no violations, or nothing in scope to check).
 Fail: script lists each violation (file, commit, reason) — fix by re-doing the task as two
 commits (test-only, confirm it fails, then implementation) per `/feature`'s per-task rules.
+Unconfigured (exit 2): the script warns that `SCOPED_LAYER_DIRS` still holds the template's
+default layer names and matches nothing anywhere in this repo — edit it to your project's
+actual layer folders before trusting this gate. Do not treat exit 2 as a pass; it means the
+gate hasn't actually checked anything yet, on any branch, ever.
 Rewriting already-pushed history is not required; this gate only evaluates the branch as it
 stands when `/gates` runs.
-Skip this gate if the branch adds no new files in the scoped layer directories.
+Skip this gate if the branch adds no new files in the scoped layer directories (exit 0 with
+nothing checked — different from exit 2, which means the directories themselves are wrong).
 
 ### Gate 10 — Architecture & layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
 This is the single authoritative check for layer-separation, type-safety, and

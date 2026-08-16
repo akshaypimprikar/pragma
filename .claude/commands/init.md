@@ -24,7 +24,7 @@ find "$PROJECT_DIR/.claude/commands" -name "*.md" -exec sed -i '' "s|<AppName>|$
 ```
 (Use GNU `sed -i` without the trailing `''` on Linux — detect with `sed --version 2>/dev/null | grep -q GNU`.)
 
-Remove `init.md` itself from the copied set — it's the plugin's install command, not part of the target project's own pipeline.
+Remove `init.md` and `pragma-review.md` from the copied set — both are pragma-repo-only meta-commands (the plugin's install command, and pragma's own PR review agent), not part of the target project's own pipeline.
 
 ### 3. Copy context, scripts, and CI workflows
 

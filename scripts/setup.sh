@@ -56,6 +56,9 @@ info "Copying command files…"
 mkdir -p "$PROJECT_DIR/.claude/commands"
 cp -r "$REPO_ROOT/.claude/commands/." "$PROJECT_DIR/.claude/commands/"
 
+# Pragma-only meta-commands — operate on this repo itself, not a consumer project
+rm -f "$PROJECT_DIR/.claude/commands/init.md" "$PROJECT_DIR/.claude/commands/pragma-review.md"
+
 info "Substituting <AppName> in commands…"
 find "$PROJECT_DIR/.claude/commands" -name "*.md" | while read -r f; do
     sedi "s|<AppName>|${APP_NAME}|g" "$f"

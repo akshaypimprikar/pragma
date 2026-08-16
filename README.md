@@ -16,7 +16,7 @@ Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios
   <img src="docs/screenshots/financetracker-accounts.png" width="220" alt="FinanceTracker Accounts — assets and liabilities, net worth calculation" />
 </p>
 
-Not a mockup — this is what 70+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
+Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
 
 ---
 
@@ -148,6 +148,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | Command | What it does |
 |---|---|
 | `/design` | Establishes visual design tokens — run before `/spec` on UI features |
+| `/parallel-review` | Runs `/review`'s architecture checklist and `code-review:code-review` in parallel on the branch diff, after `/feature`, before `/gates` |
 | `/pipeline-review` | Audits the pipeline for drift, gaps, and inefficiencies |
 | `/status` | Reconstructs where work stands — use to resume any session |
 | `/trim-context` | Trims accumulated context after completing a plan |

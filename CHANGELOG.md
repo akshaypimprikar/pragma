@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **`scripts/setup.sh`'s generated starter `CLAUDE.md` left the destination string's `OS=` pin out** — FinanceTracker hit an ambiguous-`iPhone 17`-destination bug once a second iOS runtime was installed and fixed it by pinning `OS=26.4.1` explicitly (commit `2c09d19`), but the fix wasn't back-ported to the template. Ported as a generic `<pin to your installed runtime, e.g. 26.4.1>` placeholder rather than hardcoding FinanceTracker's own version, plus the SpringBoard-corruption troubleshooting tip. Found by FinanceTracker's 2026-08-17 pipeline review.
+
 ## [1.2.0] — 2026-08-17
 
 ### Added

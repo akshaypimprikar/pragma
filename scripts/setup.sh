@@ -7,7 +7,9 @@
 #
 # What it does:
 #   - Copies .claude/commands/, .claude/context/, scripts/, and
-#     scaffold/.github/workflows/ into your project
+#     scaffold/.github/workflows/ into your project, excluding pragma-only
+#     meta-commands (init.md, pragma-review.md) that only make sense inside
+#     the pragma repo itself
 #   - Replaces <AppName> in all command files with APP_NAME
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
 #   - Generates a starter CLAUDE.md if one doesn't exist
@@ -34,6 +36,8 @@ SCHEME="${3:-$APP_NAME}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+
+[[ "$PROJECT_DIR" == "$REPO_ROOT" ]] && die "PROJECT_DIR resolves to pragma's own repo root ($REPO_ROOT) — this would delete pragma's own init.md/pragma-review.md. Pass an explicit path to your iOS project as the second argument."
 
 echo ""
 echo -e "${BOLD}Pragma setup${RESET}"

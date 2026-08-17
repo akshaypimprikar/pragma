@@ -15,7 +15,18 @@ only path that had a self-review step until now.
 ## Trigger
 Invoked when a PR is opened against pragma: `/pragma-review 12` or `/pragma-review sync/2026-08-16`.
 
+This command hardcodes `--repo akshaypimprikar/pragma` throughout — it only reviews PRs in the pragma template repo itself, never a consumer project. Because pragma's plugin manifest registers the whole `.claude/commands/` directory (no per-file exclusion exists), this file is still installed as `/pragma:pragma-review` for anyone who installs the pragma plugin. The guard below turns that into a clear refusal instead of a silent wrong-repo operation.
+
 ## Process
+
+### 0. Guard — refuse outside the pragma repo
+```bash
+git remote get-url origin 2>/dev/null | grep -qi 'akshaypimprikar/pragma' || {
+  echo "This command only reviews PRs in the pragma template repo (akshaypimprikar/pragma) — refusing to run outside a checkout of that repo." >&2
+  exit 1
+}
+```
+Stop here if this fails. Do not fall through to the checks below.
 
 Read the PR diff:
 ```bash

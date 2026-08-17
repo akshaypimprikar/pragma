@@ -125,16 +125,16 @@ All commands run from the repo root (contains \`${APP_NAME}.xcodeproj\`).
 
 \`\`\`bash
 # Build
-xcodebuild build -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17'
+xcodebuild build -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Full test suite
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17'
+xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Single suite / single test
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:${APP_NAME}Tests/<SuiteName>
+xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>' -only-testing:${APP_NAME}Tests/<SuiteName>
 \`\`\`
 
-> **Simulator:** \`iPhone 17\` — iOS 26.4 ships with iPhone 17 only, not iPhone 16.
+> **Simulator:** pin \`OS=\` explicitly to your installed runtime version (check with \`xcrun simctl list runtimes\`; \`xcodebuild\` requires an exact match) — a bare \`name=iPhone 17\` destination becomes ambiguous the moment a second iOS runtime is installed, since each gets its own "iPhone 17" device. If a UI test fails with \`RequestDenied ... SBMainWorkspace\`, the simulator's SpringBoard state is corrupt — \`xcrun simctl erase <device-id>\` and reboot it; killing \`Simulator.app\`/\`CoreSimulatorService\` alone won't fix it.
 > **File inclusion:** \`PBXFileSystemSynchronizedRootGroup\` (Xcode 16) — drop a \`.swift\` file in the right folder and it compiles automatically. Never edit \`project.pbxproj\`.
 
 ## Architecture

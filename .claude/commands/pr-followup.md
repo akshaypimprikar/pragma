@@ -6,10 +6,9 @@ pipeline stages that can run without a human trigger.
 `code-review:code-review` is deliberately excluded, if your project has it
 enabled: it can be configured with `disable-model-invocation` and may not
 appear in the agent-invocable skill list at all, meaning no agent-driven path
-— this command included — can trigger it. Confirmed on FinanceTracker
-2026-07-30. Check whether that applies to your setup; if it does, this
-command runs the two automatable stages and reminds you to run the rest
-yourself.
+— this command included — can trigger it. Check whether that applies to your
+setup; if it does, this command runs the two automatable stages and reminds
+you to run the rest yourself.
 
 ## Trigger
 Invoked right after `gh pr create` succeeds, or manually against an existing

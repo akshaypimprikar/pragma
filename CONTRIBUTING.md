@@ -45,6 +45,7 @@ The three workflows (`pr-checks.yml`, `ui-tests.yml`, `release.yml`) and the two
 - One command change per PR — keep diffs reviewable
 - Include in the PR description: what broke or was missing, what project you tested on, and what the agent did differently after the change
 - PRs that haven't been tested on a real project won't be merged
+- Run `/pragma-review <PR>` before merging — it posts a GitHub review checking for template-literal leaks, missing `<placeholder>` tokens, and gate-numbering drift, the pragma-specific equivalent of FinanceTracker's `/review`
 
 ---
 

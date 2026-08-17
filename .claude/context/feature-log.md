@@ -8,6 +8,11 @@
 **Key architectural decisions:** <brief note or "none">
 -->
 
+## v1.2.0 — 2026-08-17
+**Features added:** `/pragma-review` command — auditable self-review for pragma's own PRs (template-literal leakage, `<placeholder>` convention, gate-numbering consistency, doc/content accuracy), posts verdict via `gh pr review --comment`; guarded to refuse running outside a checkout of the pragma repo itself. `/gates` Gate 9 — RED-before-GREEN commit order, synced from FinanceTracker, generic `scripts/check_tdd_commit_order.py` with a loud exit-2 warning (not a silent pass) when `SCOPED_LAYER_DIRS` doesn't match the adopting project.
+**Key files changed:** `.claude/commands/pragma-review.md` (new), `.claude/commands/gates.md`, `.claude/commands/review.md`, `.claude/commands/feature.md`, `.claude/commands/plan.md`, `scripts/check_tdd_commit_order.py` (new), `scripts/setup.sh`, `.claude-plugin/plugin.json`
+**Key architectural decisions:** none
+
 ## v1.1.0 — 2026-08-15
 **Features added:** Installable as a real Claude Code plugin (`.claude-plugin/plugin.json` + `marketplace.json`, `/pragma:init` interactive setup command replacing manual CLAUDE.md/invariants.md fill-in); README screenshots + "Why not a spec mode?" positioning section.
 **Key files changed:** `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.claude/commands/init.md` (new), `.claude/commands/review.md`, `.claude/commands/feature.md`, `.claude/commands/test.md`, `README.md`, `CHANGELOG.md`.

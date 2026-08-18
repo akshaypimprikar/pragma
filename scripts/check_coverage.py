@@ -36,19 +36,22 @@ for target in report.get("targets", []):
             "coverage": file["lineCoverage"],
         })
 
-if not source_files:
-    print("No source files found in coverage report.")
-    sys.exit(0)
-
 # xccov's JSON schema dropped/renamed the field this script reads — a tooling
 # problem, not a coverage problem. Defaulting silently to 0.0 here would have
-# reported every file as untested.
+# reported every file as untested. Checked before the `not source_files` exit
+# below: schema drift is uniform across a report, so it typically empties
+# `source_files` entirely rather than leaving some files behind — that exit
+# must not run first, or it would silently report success instead.
 if schema_drift_files:
     print(f"ERROR: {len(schema_drift_files)} file(s) have no 'lineCoverage' key in the xccov report:")
     for name in schema_drift_files:
         print(f"  {name}")
     print("\nThis usually means xccov's JSON schema changed. Update this script's field name before trusting its output.")
     sys.exit(2)
+
+if not source_files:
+    print("No source files found in coverage report.")
+    sys.exit(0)
 
 # Every source file reporting exactly 0% is the fingerprint of coverage not
 # being collected at all (e.g. `xcodebuild test` run without

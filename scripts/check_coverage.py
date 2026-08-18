@@ -15,6 +15,7 @@ with open(sys.argv[1]) as f:
     report = json.load(f)
 
 source_files = []
+schema_drift_files = []
 for target in report.get("targets", []):
     if "Tests" in target.get("name", ""):
         continue
@@ -27,14 +28,36 @@ for target in report.get("targets", []):
         if (name.endswith("View.swift") or name.endswith("Sheet.swift") or
                 name.endswith("Row.swift") or name.startswith("Color+")):
             continue
+        if "lineCoverage" not in file:
+            schema_drift_files.append(name)
+            continue
         source_files.append({
             "name": name,
-            "coverage": file.get("lineCoverage", 0.0),
+            "coverage": file["lineCoverage"],
         })
 
 if not source_files:
     print("No source files found in coverage report.")
     sys.exit(0)
+
+# xccov's JSON schema dropped/renamed the field this script reads — a tooling
+# problem, not a coverage problem. Defaulting silently to 0.0 here would have
+# reported every file as untested.
+if schema_drift_files:
+    print(f"ERROR: {len(schema_drift_files)} file(s) have no 'lineCoverage' key in the xccov report:")
+    for name in schema_drift_files:
+        print(f"  {name}")
+    print("\nThis usually means xccov's JSON schema changed. Update this script's field name before trusting its output.")
+    sys.exit(2)
+
+# Every source file reporting exactly 0% is the fingerprint of coverage not
+# being collected at all (e.g. `xcodebuild test` run without
+# `-enableCodeCoverage YES`), not of an entire codebase being untested.
+if len(source_files) > 1 and all(f["coverage"] == 0.0 for f in source_files):
+    print(f"ERROR: all {len(source_files)} source file(s) report exactly 0% coverage.")
+    print("This is almost always a misconfigured test run, not genuinely untested code.")
+    print("Check that `xcodebuild test` was invoked with `-enableCodeCoverage YES`.")
+    sys.exit(2)
 
 failing = [f for f in source_files if f["coverage"] < FAIL_THRESHOLD]
 warning = [f for f in source_files if FAIL_THRESHOLD <= f["coverage"] < WARN_THRESHOLD]

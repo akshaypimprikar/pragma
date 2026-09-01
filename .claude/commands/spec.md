@@ -97,7 +97,7 @@ Before handing off to `/plan`, append to `.claude/context/decisions.md`:
 
 ```
 ## YYYY-MM-DD — <Feature Name>
-**Approaches considered:** <brief list of approaches from step 3>
+**Approaches considered:** <brief list of approaches from step 4>
 **Chosen:** <approach name>
 **Reason:** <one sentence — the rationale that drove the decision>
 ```

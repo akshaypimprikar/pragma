@@ -16,6 +16,7 @@ Read `CLAUDE.md` before touching any file.
 Also read if they exist — skip silently if absent:
 - `.claude/context/invariants.md` — inviolable rules; ensure the fix does not violate any
 - `.claude/context/rejections.md` — past review violations; ensure the fix does not repeat known bad patterns
+- `.claude/context/incidents.md` — past bugs and their root causes; check whether this symptom matches one already diagnosed before investigating from scratch
 
 ### 2. Write the failing test first
 Before changing any production code, write a test that:
@@ -48,7 +49,21 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 
 Append a one-line entry to the `## [Unreleased]` section of `CHANGELOG.md` (create the section if absent). Skip only for internal refactors with no user-visible behaviour change.
 
-### 6. Commit and PR
+### 6. Log the incident
+
+Append an entry to `.claude/context/incidents.md` (create the file with a one-line header if it doesn't exist):
+
+```
+## YYYY-MM-DD — <bug name>
+**Symptom:** <what was observed — error message, wrong behavior, exact repro condition>
+**Root cause:** <one line — the actual mechanism, not just "logic error">
+**Fix:** <file:line or brief description of the change>
+**Search terms:** <keywords a future symptom description might match — error strings, type names, subsystem>
+```
+
+The point is a searchable root-cause record, not a duplicate of the CHANGELOG entry (which is user-facing) or the git commit message (which is buried in history until someone thinks to `git log` for it). Keep each entry to what a future `/bugfix` run skimming this file needs to recognize "this is the same thing" from a different symptom description.
+
+### 7. Commit and PR
 
 ```bash
 git add <changed files>

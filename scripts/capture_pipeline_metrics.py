@@ -35,7 +35,15 @@ def commit_log(base, branch):
 
 
 def parse_iso(s):
-    return datetime.fromisoformat(s)
+    dt = datetime.fromisoformat(s)
+    # A naive timestamp (no offset) can't be subtracted from git's always-aware
+    # %aI timestamps — assume it means local system time, per datetime's own
+    # documented behavior for .astimezone() on a naive value.
+    return dt.astimezone() if dt.tzinfo is None else dt
+
+
+def current_branch():
+    return run("git", "rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
 def main():
@@ -58,18 +66,23 @@ def main():
     wall_clock = ended - started
 
     gate_check_output = ""
-    try:
-        gate_check_output = run("python3", "scripts/check_tdd_commit_order.py", args.base).strip()
-        gate_check_status = "pass"
-    except subprocess.CalledProcessError as e:
-        gate_check_output = ((e.stdout or "") + (e.stderr or "")).strip()
-        # exit 1 = a real RED-before-GREEN violation was found; exit 2 = the script
-        # is still unconfigured (template layer names) and checked nothing at all —
-        # these are not the same outcome and must not be reported as the same status.
-        gate_check_status = "unconfigured (nothing checked)" if e.returncode == 2 else "fail"
-    except FileNotFoundError:
-        gate_check_output = "scripts/check_tdd_commit_order.py not found or not configured for this project"
-        gate_check_status = "n/a"
+    on_branch = current_branch()
+    if on_branch != args.branch:
+        gate_check_status = f"skipped — HEAD is `{on_branch}`, not `{args.branch}`"
+        gate_check_output = "check_tdd_commit_order.py always diffs against HEAD, not an arbitrary ref — check out the benchmark branch before running this script, or the result would silently reflect the wrong branch"
+    else:
+        try:
+            gate_check_output = run("python3", "scripts/check_tdd_commit_order.py", args.base).strip()
+            gate_check_status = "pass"
+        except subprocess.CalledProcessError as e:
+            gate_check_output = ((e.stdout or "") + (e.stderr or "")).strip()
+            # exit 1 = a real RED-before-GREEN violation was found; exit 2 = the script
+            # is still unconfigured (template layer names) and checked nothing at all —
+            # these are not the same outcome and must not be reported as the same status.
+            gate_check_status = "unconfigured (nothing checked)" if e.returncode == 2 else "fail"
+        except FileNotFoundError:
+            gate_check_output = "scripts/check_tdd_commit_order.py not found or not configured for this project"
+            gate_check_status = "n/a"
 
     entry_lines = [
         f"## {datetime.now(timezone.utc).strftime('%Y-%m-%d')} — {args.label}",

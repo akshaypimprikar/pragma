@@ -12,6 +12,7 @@ Read `CLAUDE.md` first — it defines the architecture rules you enforce.
 Also read the following files if they exist — skip silently if absent:
 - `.claude/context/invariants.md` — project invariants; these supplement CLAUDE.md rules
 - `.claude/context/rejections.md` — past violations on this project; flag any repeats as HIGH severity
+- `.claude/context/incidents.md` — past bug root causes; flag any PR that reintroduces a previously-fixed symptom as HIGH severity, same as a rejections.md repeat
 
 ### Architecture, type-safety, build/test/coverage compliance — already verified by `/gates`
 

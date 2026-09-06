@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`/benchmark` command + `scripts/capture_pipeline_metrics.py`** — runs a fixed, disposable canary feature through spec→plan→feature→gates and logs objective metrics (commit count, wall-clock, RED-before-GREEN check result) to `.claude/context/benchmark-log.md`, so a change to a command file or model routing can be compared against a known baseline instead of judged by feel. Sourced from a practitioner pattern (fixed-task comparison across model configurations) surfaced in the 2026-09-03 Agentic AI Intelligence Report.
+
 ### Fixed
 - **`scripts/setup.sh`'s generated starter `CLAUDE.md` left the destination string's `OS=` pin out** — FinanceTracker hit an ambiguous-`iPhone 17`-destination bug once a second iOS runtime was installed and fixed it by pinning `OS=26.4.1` explicitly (commit `2c09d19`), but the fix wasn't back-ported to the template. Ported as a generic `<pin to your installed runtime, e.g. 26.4.1>` placeholder rather than hardcoding FinanceTracker's own version, plus the SpringBoard-corruption troubleshooting tip. Found by FinanceTracker's 2026-08-17 pipeline review.
 

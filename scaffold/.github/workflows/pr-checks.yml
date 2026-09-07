@@ -51,6 +51,7 @@ jobs:
           set -o pipefail
           SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
           echo "Selected simulator: $SIM_ID"
+          bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
             -project YOUR_PROJECT.xcodeproj \
             -scheme YOUR_SCHEME \

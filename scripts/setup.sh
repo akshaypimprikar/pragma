@@ -88,6 +88,7 @@ mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 success "Scripts ready"
 

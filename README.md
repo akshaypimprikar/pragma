@@ -62,7 +62,7 @@ Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 15 Claude Code slash commands covering the full SDLC |
+| **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
 | **Support scripts** | `scripts/` | Simulator selection and coverage enforcement for CI |
 
@@ -153,6 +153,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/status` | Reconstructs where work stands — use to resume any session |
 | `/trim-context` | Trims accumulated context after completing a plan |
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
+| `/benchmark <label>` | Runs a fixed canary feature through the pipeline and logs objective metrics (commits, timing, gate results) — for comparing pipeline changes against a baseline, not for feature work |
 
 ### Standalone skills
 

@@ -48,6 +48,8 @@ jobs:
           set -o pipefail
           SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
           echo "Selected simulator: $SIM_ID"
+          # If your UI tests depend on push, StoreKit, universal links, or Spotlight,
+          # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
             -project YOUR_PROJECT.xcodeproj \

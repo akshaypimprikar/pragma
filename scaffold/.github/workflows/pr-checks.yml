@@ -7,7 +7,8 @@
 # Also ensure the following scripts exist in your repo:
 #   scripts/select_simulator.py   — selects an available iPhone simulator UDID
 #   scripts/check_coverage.py     — enforces coverage thresholds from xccov JSON
-# Both scripts are included in this scaffold under scripts/.
+#   scripts/slim_simulator.sh     — optional simulator memory slimming, no-ops if simslim isn't installed
+# All three scripts are included in this scaffold under scripts/.
 # =============================================================================
 
 name: PR Checks
@@ -51,6 +52,8 @@ jobs:
           set -o pipefail
           SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
           echo "Selected simulator: $SIM_ID"
+          # If your tests depend on push, StoreKit, universal links, or Spotlight,
+          # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
             -project YOUR_PROJECT.xcodeproj \

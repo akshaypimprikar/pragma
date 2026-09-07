@@ -64,7 +64,7 @@ Three layers installed into your project:
 |---|---|---|
 | **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
-| **Support scripts** | `scripts/` | Simulator selection and coverage enforcement for CI |
+| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, and optional simulator memory slimming for CI |
 
 Each layer is independent — adopt all three or just the commands.
 

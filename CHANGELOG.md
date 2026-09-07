@@ -10,6 +10,9 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 - **`scripts/setup.sh`'s generated starter `CLAUDE.md` left the destination string's `OS=` pin out** — FinanceTracker hit an ambiguous-`iPhone 17`-destination bug once a second iOS runtime was installed and fixed it by pinning `OS=26.4.1` explicitly (commit `2c09d19`), but the fix wasn't back-ported to the template. Ported as a generic `<pin to your installed runtime, e.g. 26.4.1>` placeholder rather than hardcoding FinanceTracker's own version, plus the SpringBoard-corruption troubleshooting tip. Found by FinanceTracker's 2026-08-17 pipeline review.
+- **`pipeline-review.md`'s valid-skills registry was missing `benchmark`, `parallel-review`, `pr-followup`, and `pragma-review`**, all four actively self-invoked or cross-referenced elsewhere in the pipeline — added to the registry. Found by the 2026-09-07 `/pipeline-review` run.
+- **`review.md:61` referenced the line-level review skill as bare `/code-review`** instead of the registered `code-review:code-review` — corrected. This same reference had been flagged once before (2026-08-17) and closed against pragma PR #48, but #48 never actually touched `review.md`; the bug had been live for three weeks. Found again by the 2026-09-07 `/pipeline-review` run.
+- **`feature.md`, `gates.md`, and `pr-followup.md` documented `code-review:code-review` as manual-only / not agent-invokable**, contradicting current practice of running it automatically as part of the PR pipeline. Updated all three (plus `parallel-review.md` for consistency) so `code-review:code-review` auto-chains alongside `/review` and `/test`, with an explicit exception documented only for projects that have `disable-model-invocation` set on that skill. Found by the 2026-09-07 `/pipeline-review` run.
 
 ## [1.2.0] — 2026-08-17
 

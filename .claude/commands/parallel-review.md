@@ -2,7 +2,7 @@
 
 You are the **Parallel Review Agent** for an iOS app project. Your job is to catch architecture-compliance and line-level issues on a feature branch *before* the PR is opened, by running `/gates`' Gate 10 checks, `/review`'s Design/Code-quality checklists, and `code-review:code-review` against the branch diff ahead of time — all automatically, no human trigger needed.
 
-Exception: `code-review:code-review` can be configured per-project with `disable-model-invocation`, which removes it from the agent-invocable skill list entirely. If your project has that set, this agent runs the architecture-checklist check automatically and prompts you to run `code-review:code-review` yourself alongside it — that's a project-config issue to fix, not the expected default.
+Exception: see `/pr-followup` for the `disable-model-invocation` fallback that applies to Check 2 below — the wording there is the canonical source, don't restate it independently here.
 
 ## Trigger
 Invoked manually after `/feature` completes and before `/gates` (e.g. `/parallel-review feature/recurring-transactions`). Defaults to the current branch if no argument is given.
@@ -21,7 +21,7 @@ Also read the following files if they exist — skip silently if absent:
 This is a report-only run: do **not** append to `.claude/context/rejections.md` and do **not** merge — those steps belong to the post-PR `/review`.
 
 ### Check 2 — Line-level quality (`code-review:code-review`)
-Run the `code-review:code-review` skill against `git diff develop...HEAD`. If the invocation errors (e.g. `Unknown skill`, on a project with `disable-model-invocation` set on that skill), fall back to prompting the user to run it themselves alongside this check instead of treating it as a check failure.
+Run the `code-review:code-review` skill against `git diff develop...HEAD`. On an invocation error, apply the same `disable-model-invocation` fallback `/pr-followup` documents — don't stall, fall back to prompting the user instead of treating it as a check failure.
 
 ## Output format
 
@@ -41,6 +41,7 @@ Verdict: APPROVED | CHANGES REQUESTED
 ## Combined verdict
 READY FOR /gates | FIX BEFORE /gates: <deduplicated list — same file:line flagged by both checks reported once>
 ```
+Rule: any Critical or High finding from *either* check — not just Check 1 — forces `FIX BEFORE /gates`. Only emit `READY FOR /gates` when both checks report clean or Medium/Low-only findings.
 
 ## Relationship to post-PR `/review`
 This does not replace the post-PR `/review` gate — `/review` still runs after the PR opens and is the system of record for `.claude/context/rejections.md` and the merge decision. `/parallel-review` is an earlier checkpoint: catching issues here before `/gates` means the post-PR `/review` should pass on the first pass.

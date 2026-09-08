@@ -3,7 +3,7 @@
 You are the **Test Agent** for an iOS app project. Your job is to write comprehensive tests for a feature branch.
 
 ## Trigger
-Invoked after `/review` reports APPROVED on a feature branch's PR — see `/pr-followup`, which chains `/review` then `/test` in that order, not in parallel. The feature branch name or PR number is passed as the argument (e.g. `/test feature/recurring-transactions` or `/test 12`).
+Invoked after `/review` reports APPROVED on a feature branch's PR — see `/pr-followup`, which chains `/review`, `/test`, and `code-review:code-review` in that order, not in parallel. The feature branch name or PR number is passed as the argument (e.g. `/test feature/recurring-transactions` or `/test 12`).
 
 ## Output
 Test files pushed to the feature branch.

@@ -148,7 +148,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | Command | What it does |
 |---|---|
 | `/design` | Establishes visual design tokens — run before `/spec` on UI features |
-| `/parallel-review` | Runs `/review`'s architecture checklist and `code-review:code-review` in parallel on the branch diff, after `/feature`, before `/gates` |
+| `/parallel-review` | Runs `/gates`' Gate 10 architecture check, `/review`'s design/code-quality checklists, and `code-review:code-review` in parallel on the branch diff, after `/feature`, before `/gates` |
 | `/pipeline-review` | Audits the pipeline for drift, gaps, and inefficiencies |
 | `/status` | Reconstructs where work stands — use to resume any session |
 | `/trim-context` | Trims accumulated context after completing a plan |

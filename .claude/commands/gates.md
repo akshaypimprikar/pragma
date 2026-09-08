@@ -258,10 +258,8 @@ All 10 gates pass, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into review + test + code-review
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review`, `/test`,
-and `code-review:code-review` — all three run automatically, no human trigger
-needed (except on a project where `code-review:code-review` has
-`disable-model-invocation` set, in which case `/pr-followup` falls back to
-reminding you to run it yourself — see that command for details).
+and `code-review:code-review` — see that command for the exact fallback
+behavior on a `disable-model-invocation` project.
 
 ## Standalone version
 The gate logic above also exists as an installable skill independent of this

@@ -44,3 +44,21 @@
 **Rule violated:** No CLAUDE.md exists in this repo — no formal rule, caught on correctness grounds.
 **File:** README.md, `parallel-review.md`
 **Caught by:** code-review pass (round 5, documented in PR#55 body / `docs/pipeline-review/2026-09-07.md`)
+
+## 2026-09-08 — PR#56 — Round 1: overclaim about Gate 10's diff scope
+**What was wrong:** `parallel-review.md`'s Check 1 said Gate 10 "already uses `git diff develop...HEAD`, the same scope this command needs," with no exception noted. Gate 10's UI-selector-listing command actually scans all of `<AppName>UITests/*.swift` unconditionally, not the branch diff like every other Gate 10 command — the framing gave no warning of that one exception.
+**Rule violated:** No CLAUDE.md exists in this repo — no formal rule, caught on correctness grounds.
+**File:** `.claude/commands/parallel-review.md`
+**Caught by:** code-review pass (found while porting this file to FinanceTracker, financetracker-ios PR #105, against its actual Gate 9 — documented in PR#56 commit `8db91c4`)
+
+## 2026-09-08 — PR#56 — Round 2: run-on sentence, ambiguous phrasing, misleading fallback text
+**What was wrong:** Three more wording issues in the same file: Check 1 was a single ~150-word run-on sentence covering three different checks and scoping rules; `Done when`'s "combined verdict from the three above" was ambiguous (three checks, or three possible verdict strings?); and Check 2's fallback said to reuse `/pr-followup`'s wording "exactly as documented," but that wording is merge-specific ("run it yourself before merging") and misleading in this pre-PR context, where the next step is `/gates`, not a merge.
+**Rule violated:** No CLAUDE.md exists in this repo — no formal rule, caught on correctness grounds.
+**File:** `.claude/commands/parallel-review.md`
+**Caught by:** code-review pass (found on financetracker-ios PR #105, which ported this same file — documented in PR#56 commit `678fa95`)
+
+## 2026-09-08 — PR#56 — Round 3: reintroduced the fallback-string duplication-drift pattern
+**What was wrong:** Round 2's own fix ("adapt its wording") was itself an independently-authored copy of `pr-followup.md`'s fallback warning string with one word swapped — the exact duplication pattern PR#55's Round 2/3/5 entries above already flagged as a repeat-violation risk on this same file. Replaced with an explicit, mechanical substitution rule (take `/pr-followup`'s canonical string, swap `before merging` → `before /gates`) so there is no independently-maintained copy left to drift. Verified: the substitution renders correctly against `pr-followup.md`'s actual string, and the fix references the transformation rather than restating the text.
+**Rule violated:** No CLAUDE.md exists in this repo — no formal rule, caught on correctness grounds. (Repeats the pattern named in the PR#55 Round 2/3/5 entries above; caught and fixed pre-merge this time.)
+**File:** `.claude/commands/parallel-review.md`
+**Caught by:** code-review pass (found by `code-review:code-review` on PR#56 itself — documented in commit `989aaa4`)

@@ -24,7 +24,7 @@ If this project was derived from a workflow template (e.g. pragma), compare `.cl
 - App-specific content in the template that should use placeholders — **High**
 - Command files that exist in this project but have no template equivalent — **Medium**
 - Logic improvements in this project's commands not yet back-ported to the template — **Low**
-- Logic improvements present in the template but not yet pulled into this project's commands — **Low** (`/sync-workflow` only pushes project → template; no command pulls this direction automatically, so this comparison is the only thing that catches it)
+- Logic improvements present in the template but not yet pulled into this project's commands — **Medium** (higher than its counterpart above: this direction means the live pipeline is running stale/buggy logic already fixed elsewhere, not just a future scaffold missing an enhancement; `/sync-workflow` only pushes project → template, so this comparison is the only thing that catches it)
 
 ### 3. CLAUDE.md token budget
 Count lines in `CLAUDE.md`. Target: ≤50 lines.

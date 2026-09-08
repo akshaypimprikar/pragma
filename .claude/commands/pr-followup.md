@@ -5,9 +5,10 @@ after a PR is opened — none of the three need a human trigger.
 
 Note: `code-review:code-review` can be configured per-project with
 `disable-model-invocation`, which removes it from the agent-invocable skill
-list entirely — if your project has that set, this step will fail to invoke
-and you'll need to run it yourself before merging. That's a project-config
-issue to fix, not the expected default.
+list entirely — if your project has that set, step 4 below catches the
+invocation error and continues to reporting rather than halting the whole
+command; you'll still need to run the skill yourself before merging. That's
+a project-config issue to fix, not the expected default.
 
 ## Trigger
 Invoked right after `gh pr create` succeeds, or manually against an existing

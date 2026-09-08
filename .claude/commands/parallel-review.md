@@ -21,7 +21,7 @@ Also read the following files if they exist — skip silently if absent:
 This is a report-only run: do **not** append to `.claude/context/rejections.md` and do **not** merge — those steps belong to the post-PR `/review`.
 
 ### Check 2 — Line-level quality (`code-review:code-review`)
-Run the `code-review:code-review` skill against `git diff develop...HEAD`. On an invocation error, apply the same `disable-model-invocation` fallback `/pr-followup` documents: don't stall or wait on the user, print the fallback warning and continue to the Output format below.
+Run the `code-review:code-review` skill against `git diff develop...HEAD`. On an invocation error, apply `/pr-followup`'s `disable-model-invocation` fallback exactly as documented there and continue to the Output format below.
 
 ## Output format
 

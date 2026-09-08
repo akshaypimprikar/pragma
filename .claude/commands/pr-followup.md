@@ -19,9 +19,14 @@ PR: `/pr-followup 71` or `/pr-followup fix/some-branch`.
    `code-review:code-review` until the issues are addressed and the branch is
    re-reviewed.
 3. If the verdict is **APPROVED**, run `/test <PR>`.
-4. Run `code-review:code-review` against the PR.
-5. Report all three verdicts.
+4. Run `code-review:code-review` against the PR. If the invocation errors
+   (e.g. `Unknown skill`, on a project with `disable-model-invocation` set),
+   don't stall — print this line instead and continue to step 5:
+   `⚠️ code-review:code-review couldn't be agent-invoked on this project (disable-model-invocation?) — run it yourself before merging.`
+5. Report all three verdicts (or the fallback warning in place of the third).
 
 ## Done when
-`/review`, `/test`, and `code-review:code-review` have all reported. Do not
-merge — merging is the user's call once every configured check is clean.
+`/review` and `/test` have reported, and `code-review:code-review` has either
+reported or (on a `disable-model-invocation` setup) printed the fallback
+warning. Do not merge — merging is the user's call once every configured
+check is clean.

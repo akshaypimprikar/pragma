@@ -139,7 +139,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
 | `/review` | Reviews a PR for architecture compliance, posts its verdict as a real GitHub review |
 | `/test` | Writes tests for a feature branch — runs after `/review` reports APPROVED |
-| `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
+| `/pr-followup` | Auto-chains `/review`, `/test`, and `code-review:code-review` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |
 

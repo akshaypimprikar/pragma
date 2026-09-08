@@ -48,7 +48,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green, and all 10 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` runs (`code-review:code-review` is manual — it can't be agent-invoked).
+All tasks complete, full test suite green, and all 10 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` both run automatically via `/pr-followup` — no manual trigger needed (see that command for the `disable-model-invocation` fallback).
 
 To drive the entire feature-to-gates cycle autonomously:
 ```

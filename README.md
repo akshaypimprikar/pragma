@@ -9,6 +9,8 @@
 
 The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
 
+Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where enforcement runs in CI (independent of any one agent run) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
+
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
 <p>
@@ -20,7 +22,7 @@ Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature �
 
 ---
 
-**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
@@ -53,6 +55,22 @@ Then, either way, kick off your first feature:
 ```
 /spec "describe your feature idea"
 ```
+
+---
+
+## At a Glance — What Needs You, What Doesn't
+
+| Stage | Command | Needs your approval? |
+|---|---|---|
+| Spec | `/spec` | ✅ Yes — pick the approach |
+| Plan | `/plan` | ✅ Yes — approve the task list |
+| Build | `/feature` | Autonomous |
+| Pre-PR checks | `/gates` | Autonomous |
+| Review | `/review` | Autonomous — posts a real GitHub review |
+| Tests | `/test` | Autonomous |
+| Release | `/release` | Autonomous |
+
+Two touchpoints, spec and plan. Everything from `/feature` to a merged, released PR runs unattended.
 
 ---
 

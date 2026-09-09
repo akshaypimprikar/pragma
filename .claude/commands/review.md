@@ -70,6 +70,14 @@ Append one entry per violation to `.claude/context/rejections.md` in **two** cas
 
 Skip this step only if there is truly nothing to log — no CHANGES REQUESTED issues from this review *and* no documented pre-review fixes in the PR body.
 
+## A known tradeoff: context continuity, not context isolation
+
+`/review` typically runs in the same session as the `/feature` (and `/gates`) work it's reviewing — `gates.md` invokes gates "at the end of every `/feature` session," and `/pr-followup` chains `/review` immediately after, with no instruction to start fresh in between. That means the reviewer isn't blind to the implementer's reasoning the way a genuinely isolated reviewer role would be (an architecture some other pipelines use: an orchestrator, an implementer, and a reviewer that structurally cannot see the implementer's transcript, only a diff/plan/config).
+
+Pragma deliberately trades that isolation for something else: **external auditability**. Posting the verdict as a real, separate GitHub review object (below) means anyone auditing the repo from outside the session — not just the session itself — can see review happened and can compare its content against the diff. It does not, by itself, prevent the reviewer from being influenced by the same context the implementer used to write the code.
+
+If you want real context isolation instead (the stronger, more expensive guarantee), run `/review` as a fresh Claude Code session against the PR number rather than continuing from `/feature`'s session — nothing about this command requires session continuity, it's just the default flow's convenience.
+
 ## Posting the verdict to GitHub
 
 Reporting the verdict back in this session is not enough — nothing distinguishes it from prose written by the same session that wrote the code, so it isn't independently checkable by anyone auditing the repo from outside. Post it as a real, separate GitHub review object:

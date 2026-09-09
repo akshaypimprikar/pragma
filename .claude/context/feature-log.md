@@ -13,6 +13,11 @@
 **Key files changed:** `.claude/commands/pragma-review.md` (new), `.claude/commands/gates.md`, `.claude/commands/review.md`, `.claude/commands/feature.md`, `.claude/commands/plan.md`, `scripts/check_tdd_commit_order.py` (new), `scripts/setup.sh`, `.claude-plugin/plugin.json`
 **Key architectural decisions:** none
 
+## v1.3.0 — 2026-09-09
+**Features added:** `/benchmark` command + `scripts/capture_pipeline_metrics.py` — runs a fixed canary feature through spec→plan→feature→gates and logs objective metrics (commit count, wall-clock, RED-before-GREEN result) to `.claude/context/benchmark-log.md` for comparing pipeline changes against a baseline. `scripts/slim_simulator.sh` — optional CI simulator memory slimming via SimSlim, wired into all 4 UDID-resolution points across `pr-checks.yml`, `ui-tests.yml`, and `release.yml`; no-ops cleanly without the CLI installed. README restructuring — explicit contrast statement and an "At a Glance" human-vs-autonomous table surfaced right after Quick Start.
+**Key files changed:** `.claude/commands/benchmark.md` (new), `scripts/capture_pipeline_metrics.py` (new), `scripts/slim_simulator.sh` (new), `scaffold/.github/workflows/pr-checks.yml`, `scaffold/.github/workflows/ui-tests.yml`, `scaffold/.github/workflows/release.yml`, `README.md`, `.claude/commands/gates.md`, `.claude/commands/review.md`, `.claude/commands/pipeline-review.md`, `.claude/commands/trim-context.md`
+**Key architectural decisions:** none
+
 ## v1.1.0 — 2026-08-15
 **Features added:** Installable as a real Claude Code plugin (`.claude-plugin/plugin.json` + `marketplace.json`, `/pragma:init` interactive setup command replacing manual CLAUDE.md/invariants.md fill-in); README screenshots + "Why not a spec mode?" positioning section.
 **Key files changed:** `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.claude/commands/init.md` (new), `.claude/commands/review.md`, `.claude/commands/feature.md`, `.claude/commands/test.md`, `README.md`, `CHANGELOG.md`.

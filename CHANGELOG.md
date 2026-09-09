@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-09
+
 ### Added
 - **`/benchmark` command + `scripts/capture_pipeline_metrics.py`** — runs a fixed, disposable canary feature through spec→plan→feature→gates and logs objective metrics (commit count, wall-clock, RED-before-GREEN check result) to `.claude/context/benchmark-log.md`, so a change to a command file or model routing can be compared against a known baseline instead of judged by feel. Sourced from a practitioner pattern (fixed-task comparison across model configurations) surfaced in the 2026-09-03 Agentic AI Intelligence Report.
 - **`scripts/slim_simulator.sh` — optional CI simulator memory slimming via SimSlim** — wired into all 4 UDID-resolution points across `pr-checks.yml`, `ui-tests.yml`, and `release.yml`. No-ops cleanly if `simslim` isn't installed; never a hard dependency. Measured on a real production test run (FinanceTracker, full unit + UI suite): ~3x memory reduction (2.62GB → 0.83GB idle per simulator), 35s → 9s boot, zero test failures — including a test that exercises real `UNUserNotificationCenter` delivery, unaffected since SimSlim doesn't touch local-notification daemons. Sourced from a practitioner pattern (r/iOSProgramming, 161 upvotes) surfaced in the 2026-09-06 iOS Engineering Intelligence Report.

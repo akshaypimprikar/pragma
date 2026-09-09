@@ -45,6 +45,13 @@ Read each skill file. Flag content that is:
 
 Report findings. Only edit skills if clearly outdated — skills load on-demand so verbosity matters less than CLAUDE.md.
 
+### 5. Runtime read/tool-output waste (diagnostic only, no proxy required)
+If `headroom` is installed (`command -v headroom`), run `headroom audit-reads` — it streams local Claude Code transcripts read-only and sizes addressable waste by category (identical repeats, stale reads, line-number scaffolding). This is a diagnostic, not a compression layer: it doesn't touch anything, it just tells you where the waste actually is.
+
+Report the top category by byte share. If "stale (edit after read)" or "identical repeat" is unusually large relative to the last run, that's a *behavioral* signal, not a config fix — flag it in prose (e.g. "a file was re-read N times this session where the content hadn't changed — read once and hold it in context instead") rather than editing anything automatically; this section never changes files, unlike sections 1–4.
+
+Skip silently if `headroom` isn't installed — this section is optional, not a requirement to adopt the tool.
+
 ## Output
 For each section: what was found, what was changed (or "no changes needed").
 End with the new line count for CLAUDE.md.

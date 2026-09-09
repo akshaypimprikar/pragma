@@ -50,10 +50,10 @@ If `headroom` is installed (`command -v headroom`), run `headroom audit-reads --
 
 Report the top category by byte share for this run. `headroom` doesn't persist run history, and this command doesn't save one either, so there's no "last run" to compare against — report the current numbers as a point-in-time reading, not a trend. If a category is a large share of the total, that's a *behavioral* signal, not a config fix — flag it in prose (e.g. "a file was re-read N times this session where the content hadn't changed — read once and hold it in context instead") rather than editing anything automatically; this section never changes files, unlike sections 1–4.
 
-Skip silently if `headroom` isn't installed, or if `audit-reads` exits non-zero or returns malformed output — this section is optional, not a requirement to adopt the tool, and a diagnostic failing shouldn't block the rest of `/trim-context`.
+If `headroom` isn't installed, or `audit-reads` exits non-zero or returns malformed output, report that as section 5's outcome ("headroom not installed" / "audit-reads failed, skipped") rather than omitting a line for it — this section is optional to adopt, but still reports like every other section below.
 
 ## Output
-For each section: what was found, what was changed (or "no changes needed").
+For each section, including section 5: what was found, what was changed (or "no changes needed").
 End with the new line count for CLAUDE.md.
 
 ## Rules

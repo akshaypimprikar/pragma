@@ -56,7 +56,14 @@ git commit -m "chore: bump version to <version>"
 git push -u origin release/<version>
 ```
 
-### 5. Open PR to main
+### 5. Verify the release branch only touches release files
+CLAUDE.md's Merge rule exempts `release/*` PRs from `/review` and `code-review:code-review` on the assumption that they never carry new logic — only the mechanical version bump/CHANGELOG commit. Confirm that assumption before opening the PR:
+```bash
+git diff develop...HEAD --name-only
+```
+Every path in the output must be one of `<AppName>.xcodeproj/project.pbxproj`, `CHANGELOG.md`, or `.claude/context/feature-log.md`. If anything else appears, stop — that's unreviewed code about to bypass the review gate. Investigate before continuing.
+
+### 6. Open PR to main
 ```bash
 gh pr create \
   --title "release: v<version>" \
@@ -69,7 +76,7 @@ gh pr create \
 
 **Stop here.** Wait for the PR to be reviewed and merged before continuing.
 
-### 6. After merge — tag and back-merge to develop
+### 7. After merge — tag and back-merge to develop
 ```bash
 git checkout main && git pull
 git tag -a v<version> -m "Release <version>"
@@ -83,14 +90,14 @@ git branch -d release/<version>
 git push origin --delete release/<version>
 ```
 
-### 7. Create GitHub release
+### 8. Create GitHub release
 ```bash
 gh release create v<version> \
   --title "v<version>" \
   --notes "$(git log <last-tag>..v<version> --oneline)"
 ```
 
-### 8. Trigger pipeline review
+### 9. Trigger pipeline review
 Run `/pipeline-review` as a background task to capture any pipeline improvements surfaced during this release cycle. It will send a push notification when findings are ready.
 
 ## Done when

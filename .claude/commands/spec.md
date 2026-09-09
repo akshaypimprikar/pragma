@@ -22,18 +22,21 @@ Before asking anything, read:
 - Any existing related views or ViewModels
 - `docs/design-system.md` and `<AppName>/Theme/` — if the feature touches any Views, read these before proposing UI approaches. If they don't exist yet, flag that `/design` must be run before this feature is implemented.
 
-### 2. Ask clarifying questions
+### 2. Consult Apple documentation when needed
+When an approach depends on the exact behavior of an Apple API, fetch `https://developer.apple.com/documentation/<path>.md` (append `.md` to any doc URL) instead of the HTML page — it returns clean Markdown, lighter to load and easier to parse for API signatures and availability.
+
+### 3. Ask clarifying questions
 Ask only what you need to make architecture decisions. Typical questions:
 - Is this a new model or an extension of an existing one?
 - Does this require a new screen or extend an existing one?
 - Are there future extension points to design for now?
 - Any constraints (offline only, performance-sensitive, etc.)?
 
-### 3. Propose 2–3 approaches
+### 4. Propose 2–3 approaches
 For each approach: describe it, list tradeoffs, and flag scope creep risk.
 Wait for the user to choose before writing the spec.
 
-### 4. Write the full spec
+### 5. Write the full spec
 Follow this structure:
 
 ```markdown
@@ -73,7 +76,7 @@ What's explicitly deferred and where it plugs in later.
 What will be unit tested, integration tested, UI tested.
 ```
 
-### 5. Flag scope creep
+### 6. Flag scope creep
 If the feature idea implies multiple independent subsystems, say so and suggest splitting into sub-specs.
 
 ## Architecture Rules (from CLAUDE.md — enforce in every spec)
@@ -94,7 +97,7 @@ Before handing off to `/plan`, append to `.claude/context/decisions.md`:
 
 ```
 ## YYYY-MM-DD — <Feature Name>
-**Approaches considered:** <brief list of approaches from step 3>
+**Approaches considered:** <brief list of approaches from step 4>
 **Chosen:** <approach name>
 **Reason:** <one sentence — the rationale that drove the decision>
 ```

@@ -45,8 +45,19 @@ Read each skill file. Flag content that is:
 
 Report findings. Only edit skills if clearly outdated — skills load on-demand so verbosity matters less than CLAUDE.md.
 
+### 5. Runtime read/tool-output waste (diagnostic only, no proxy required)
+If `headroom` is installed (`command -v headroom`), run:
+```bash
+headroom audit-reads --path ~/.claude/projects/"$(pwd | sed 's/[^A-Za-z0-9]/-/g')" --format json
+```
+`--path` scopes it to this project only — its default with no `--path` is `~/.claude/projects`, every tracked project's transcripts combined, not this one. The transcript directory's name is this project's absolute path with every non-alphanumeric character (not just `/`) replaced by `-`; compute it with the `sed` command above rather than by hand — a path containing a `.`, space, or other punctuation (e.g. `akshaypimprikar.dev`, a folder name with parens or commas) transforms those characters too, not only slashes. It streams the scoped transcripts read-only and sizes addressable waste by category (identical repeats, stale reads, line-number scaffolding) as structured fields (`dedup_identical_bytes`, `stale_bytes`, `linenum_overhead_bytes`, etc.) — read those directly rather than parsing text output. This is a diagnostic, not a compression layer: it doesn't touch anything, it just tells you where the waste actually is.
+
+Report the top category by byte share for this run. `headroom` doesn't persist run history, and this command doesn't save one either, so there's no "last run" to compare against — report the current numbers as a point-in-time reading, not a trend. If a category is a large share of the total, that's a *behavioral* signal, not a config fix — flag it in prose (e.g. "a file was re-read N times this session where the content hadn't changed — read once and hold it in context instead") rather than editing anything automatically; this section never changes files, unlike sections 1–4.
+
+If `headroom` isn't installed, or `audit-reads` exits non-zero or returns malformed output, report that as section 5's outcome ("headroom not installed" / "audit-reads failed, skipped") rather than omitting a line for it — this section is optional to adopt, but still reports like every other section below.
+
 ## Output
-For each section: what was found, what was changed (or "no changes needed").
+For each section, including section 5: what was found, what was changed (or "no changes needed").
 End with the new line count for CLAUDE.md.
 
 ## Rules

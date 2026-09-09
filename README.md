@@ -9,6 +9,8 @@
 
 The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
 
+Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where enforcement runs in CI (independent of any one agent run) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
+
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
 <p>
@@ -20,7 +22,7 @@ Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature �
 
 ---
 
-**[Quick Start](#quick-start) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
@@ -56,15 +58,31 @@ Then, either way, kick off your first feature:
 
 ---
 
+## At a Glance — What Needs You, What Doesn't
+
+| Stage | Command | Needs your approval? |
+|---|---|---|
+| Spec | `/spec` | ✅ Yes — pick the approach |
+| Plan | `/plan` | ✅ Yes — approve the task list |
+| Build | `/feature` | Autonomous |
+| Pre-PR checks | `/gates` | Autonomous |
+| Review | `/review` | Autonomous — posts a real GitHub review |
+| Tests | `/test` | Autonomous |
+| Release | `/release` | Autonomous |
+
+Two touchpoints, spec and plan. Everything from `/feature` to a merged, released PR runs unattended.
+
+---
+
 ## What You Get
 
 Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 15 Claude Code slash commands covering the full SDLC |
+| **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
-| **Support scripts** | `scripts/` | Simulator selection and coverage enforcement for CI |
+| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, and optional simulator memory slimming for CI |
 
 Each layer is independent — adopt all three or just the commands.
 
@@ -139,7 +157,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/gates` | Verifies build, full test suite, and architecture compliance before PR |
 | `/review` | Reviews a PR for architecture compliance, posts its verdict as a real GitHub review |
 | `/test` | Writes tests for a feature branch — runs after `/review` reports APPROVED |
-| `/pr-followup` | Auto-chains `/review` then `/test` right after a PR opens |
+| `/pr-followup` | Auto-chains `/review`, `/test`, and `code-review:code-review` right after a PR opens |
 | `/bugfix "description"` | Regression test first, then fix — test-first always |
 | `/release 1.0.0` | Version bump, changelog, PR to main, git tag |
 
@@ -148,11 +166,12 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | Command | What it does |
 |---|---|
 | `/design` | Establishes visual design tokens — run before `/spec` on UI features |
-| `/parallel-review` | Runs `/review`'s architecture checklist and `code-review:code-review` in parallel on the branch diff, after `/feature`, before `/gates` |
+| `/parallel-review` | Runs `/gates`' Gate 10 architecture check, `/review`'s design/code-quality checklists, then `code-review:code-review`, against the branch diff after `/feature`, before `/gates` |
 | `/pipeline-review` | Audits the pipeline for drift, gaps, and inefficiencies |
 | `/status` | Reconstructs where work stands — use to resume any session |
 | `/trim-context` | Trims accumulated context after completing a plan |
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
+| `/benchmark <label>` | Runs a fixed canary feature through the pipeline and logs objective metrics (commits, timing, gate results) — for comparing pipeline changes against a baseline, not for feature work |
 
 ### Standalone skills
 

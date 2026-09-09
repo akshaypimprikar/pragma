@@ -12,6 +12,7 @@ Read `CLAUDE.md` first — it defines the architecture rules you enforce.
 Also read the following files if they exist — skip silently if absent:
 - `.claude/context/invariants.md` — project invariants; these supplement CLAUDE.md rules
 - `.claude/context/rejections.md` — past violations on this project; flag any repeats as HIGH severity
+- `.claude/context/incidents.md` — past bug root causes; flag any PR that reintroduces a previously-fixed symptom as HIGH severity, same as a rejections.md repeat
 
 ### Architecture, type-safety, build/test/coverage compliance — already verified by `/gates`
 
@@ -57,7 +58,7 @@ Final verdict:
 Append one entry per violation to `.claude/context/rejections.md` in **two** cases, not just one:
 
 1. This review's own verdict is CHANGES REQUESTED — log each issue found here.
-2. This review's own verdict is APPROVED, but the PR body documents bugs that were found and fixed *earlier* in this PR's lifecycle — a "Bugs found and fixed," "code-review round," or similar section from `/code-review` or manual verification. Log each of those too. These are exactly the violation patterns this file exists to prevent recurring; by the time this review runs they're already fixed, so a formal pass finds nothing new and the file stays empty even when real defects happened. Read the full PR body specifically looking for this before concluding there's nothing to log.
+2. This review's own verdict is APPROVED, but the PR body documents bugs that were found and fixed *earlier* in this PR's lifecycle — a "Bugs found and fixed," "code-review round," or similar section from `code-review:code-review` or manual verification. Log each of those too. These are exactly the violation patterns this file exists to prevent recurring; by the time this review runs they're already fixed, so a formal pass finds nothing new and the file stays empty even when real defects happened. Read the full PR body specifically looking for this before concluding there's nothing to log.
 
 ```
 ## YYYY-MM-DD — PR#<N> — <Violation Type>
@@ -68,6 +69,14 @@ Append one entry per violation to `.claude/context/rejections.md` in **two** cas
 ```
 
 Skip this step only if there is truly nothing to log — no CHANGES REQUESTED issues from this review *and* no documented pre-review fixes in the PR body.
+
+## A known tradeoff: context continuity, not context isolation
+
+`/review` typically runs in the same session as the `/feature` (and `/gates`) work it's reviewing — `gates.md` invokes gates "at the end of every `/feature` session," and `/pr-followup` chains `/review` immediately after, with no instruction to start fresh in between. That means the reviewer isn't blind to the implementer's reasoning the way a genuinely isolated reviewer role would be (an architecture some other pipelines use: an orchestrator, an implementer, and a reviewer that structurally cannot see the implementer's transcript, only a diff/plan/config).
+
+Pragma deliberately trades that isolation for something else: **external auditability**. Posting the verdict as a real, separate GitHub review object (below) means anyone auditing the repo from outside the session — not just the session itself — can see review happened and can compare its content against the diff. It does not, by itself, prevent the reviewer from being influenced by the same context the implementer used to write the code.
+
+If you want real context isolation instead (the stronger, more expensive guarantee), run `/review` as a fresh Claude Code session against the PR number rather than continuing from `/feature`'s session — nothing about this command requires session continuity, it's just the default flow's convenience.
 
 ## Posting the verdict to GitHub
 

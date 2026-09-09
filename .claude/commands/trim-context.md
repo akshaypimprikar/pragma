@@ -46,11 +46,11 @@ Read each skill file. Flag content that is:
 Report findings. Only edit skills if clearly outdated — skills load on-demand so verbosity matters less than CLAUDE.md.
 
 ### 5. Runtime read/tool-output waste (diagnostic only, no proxy required)
-If `headroom` is installed (`command -v headroom`), run `headroom audit-reads` — it streams local Claude Code transcripts read-only and sizes addressable waste by category (identical repeats, stale reads, line-number scaffolding). This is a diagnostic, not a compression layer: it doesn't touch anything, it just tells you where the waste actually is.
+If `headroom` is installed (`command -v headroom`), run `headroom audit-reads --path ~/.claude/projects/<this project's transcript dir> --format json` — scope `--path` to this project only (its default with no `--path` is `~/.claude/projects`, every tracked project's transcripts combined, not this one; the transcript dir name is this project's absolute path with `/` replaced by `-`). It streams the scoped transcripts read-only and sizes addressable waste by category (identical repeats, stale reads, line-number scaffolding) as structured fields (`dedup_identical_bytes`, `stale_bytes`, `linenum_overhead_bytes`, etc.) — read those directly rather than parsing text output. This is a diagnostic, not a compression layer: it doesn't touch anything, it just tells you where the waste actually is.
 
-Report the top category by byte share. If "stale (edit after read)" or "identical repeat" is unusually large relative to the last run, that's a *behavioral* signal, not a config fix — flag it in prose (e.g. "a file was re-read N times this session where the content hadn't changed — read once and hold it in context instead") rather than editing anything automatically; this section never changes files, unlike sections 1–4.
+Report the top category by byte share for this run. `headroom` doesn't persist run history, and this command doesn't save one either, so there's no "last run" to compare against — report the current numbers as a point-in-time reading, not a trend. If a category is a large share of the total, that's a *behavioral* signal, not a config fix — flag it in prose (e.g. "a file was re-read N times this session where the content hadn't changed — read once and hold it in context instead") rather than editing anything automatically; this section never changes files, unlike sections 1–4.
 
-Skip silently if `headroom` isn't installed — this section is optional, not a requirement to adopt the tool.
+Skip silently if `headroom` isn't installed, or if `audit-reads` exits non-zero or returns malformed output — this section is optional, not a requirement to adopt the tool, and a diagnostic failing shouldn't block the rest of `/trim-context`.
 
 ## Output
 For each section: what was found, what was changed (or "no changes needed").

@@ -89,7 +89,7 @@ addressed: false
 - <area>: no issues found
 ```
 
-Mark items `[x]` as they are resolved. When every item is checked, update the frontmatter to `addressed: true`.
+Mark items `[x]` as they are resolved. An item deliberately left open — not a live bug, a judgment call to defer — still counts as resolved for this purpose: check it `[x]` and append a `**Deferred <date>** — <reason>` note instead of leaving it `[ ]` forever, which would permanently block `/status`'s next-action check with no way to represent "won't-fix" separately from "not yet done." When every item is either fixed or explicitly deferred this way, update the frontmatter to `addressed: true`.
 
 ## Notify when done
 

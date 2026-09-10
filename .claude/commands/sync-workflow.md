@@ -10,11 +10,14 @@ Run manually after any change to CLAUDE.md, branch strategy, build commands, or 
 ### 0. Sync pragma's local checkout and create the sync branch first
 ```bash
 git -C <pragma path> checkout develop && git -C <pragma path> pull
-git -C <pragma path> checkout -b sync/<YYYY-MM-DD>
+git -C <pragma path> checkout -B sync/<YYYY-MM-DD>
 ```
 Do this before making any edits below — pulling *after* step 4 has already staged
 uncommitted changes risks a checkout/pull conflict against your own in-progress edits.
-All edits in steps 3-5 happen on this branch, not on `develop` directly.
+All edits in steps 3-5 happen on this branch, not on `develop` directly. `-B` (not `-b`)
+resets the branch if a same-day sync attempt left one behind from an earlier aborted run.
+If `checkout develop` itself fails (e.g. mid-rebase), resolve or abort that first — don't
+work around it by editing on the wrong branch.
 
 ### 1. Read the source of truth
 - Read `CLAUDE.md` from your project — branch strategy, build commands, simulator name, architecture rules
@@ -35,6 +38,7 @@ Check for drift in these areas (keep `<AppName>` placeholders — pragma is a te
 | Pre-flight check commands in `/release` | Your project's `/release` command |
 | Architecture rules checklist in `/review` | Your project's `/review` command |
 | New gates in `/gates` — **only if generalizable** | Your project's `/gates` command |
+| CI workflow flags (simulator selection, coverage, parallelism) | Your project's `.github/workflows/*.yml` vs. pragma's `scaffold/.github/workflows/*.yml` |
 
 ### 4. Apply updates
 Edit only the lines that differ. Do not copy project-specific paths or app names into the template — use `<AppName>` placeholders.
@@ -48,9 +52,11 @@ Pragma has no `CLAUDE.md` and no `/review` of its own — this is the
 only check that runs before a sync PR opens. Keep it lightweight: it exists to catch the
 specific ways a *template* repo can drift, not to re-litigate content already reviewed once
 in your project. Run against the staged diff, before `git commit` — stage first, since the
-checks below read `git diff --cached`:
+checks below read `git diff --cached`. Stage everything this sync touched, not just
+`.claude/commands/` — a CI workflow flag change under `scaffold/.github/workflows/` is just
+as much a sync output and must go through the same review:
 ```bash
-git -C <pragma path> add .claude/commands/
+git -C <pragma path> add .claude/commands/ scaffold/
 ```
 
 **a. No project-specific literals leaked into template content (advisory — eyeball each hit):**
@@ -70,7 +76,7 @@ Zero placeholders in a section that generalizes a project-specific check is the 
 the count — the pattern below starts from Gate 1 on purpose, not an oversight.
 ```bash
 awk 'BEGIN{expected=1} {if($1!=expected) print "non-sequential: expected "expected" got "$1; expected=$1+1}' \
-  <(grep -oE '^### Gate [1-9][0-9]*' <pragma path>/.claude/commands/gates.md | grep -oE '[0-9]+')
+  <(grep -oE '^### Gate [1-9][0-9]*' <pragma path>/.claude/commands/gates.md | grep -oE '[0-9]+' | sort -n)
 MAX=$(grep -oE '^### Gate [1-9][0-9]*' <pragma path>/.claude/commands/gates.md | grep -oE '[0-9]+' | sort -n | tail -1)
 if [ -z "$MAX" ]; then echo "ERROR: no '### Gate N' headers found in gates.md — check the file, not the count"; else
 grep -rniE "all [0-9]+ gates" <pragma path>/.claude/commands/*.md | grep -viE "all $MAX gates"
@@ -84,9 +90,11 @@ that directly rather than trusting the count-reference grep (an empty `$MAX` wou
 match every "all N gates" line as "stale," which is noise, not the real problem).
 
 ### 6. Open a PR — never push directly to main
-The branch was already created in step 0, and files staged for self-review in step 5 —
-no need to re-stage:
+The branch was already created in step 0. Re-stage before committing regardless of step 5's
+staging — if self-review in 5a/5b caught something and you fixed it, the fix is unstaged
+until you add it again:
 ```bash
+git -C <pragma path> add .claude/commands/ scaffold/
 git -C <pragma path> commit -m "chore: sync commands from <AppName> — <brief summary>"
 git -C <pragma path> push -u origin sync/<YYYY-MM-DD>
 gh pr create --repo akshaypimprikar/pragma \

@@ -56,5 +56,6 @@ jobs:
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -only-testing:YOUR_PROJECTUITests \
+            -parallel-testing-enabled NO \
             2>&1 | tee xcode.log
           grep -E "TEST SUCCEEDED|TEST FAILED" xcode.log

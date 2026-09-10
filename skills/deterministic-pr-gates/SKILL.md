@@ -131,9 +131,7 @@ Pass: every command returns no output. Fail: list every offending file and line,
 python3 scripts/check_gate_integrity.py <base-branch>
 ```
 
-Detects gate-weakening rather than code-quality issues: a gate-definition file (this skill's own file, a `CONSTRAINTS.md`, a `scripts/check_*.py`) edited on a `feature/*` branch, a previously-existing test deleted instead of fixed, a new suppression/skip marker introduced in the diff, an unfinished stub newly added to shipped code, or a numeric threshold in a gate-definition file lowered by this diff.
-
-Every other gate above is agent-instruction-driven — read the prompt, run the described commands, evaluate — with nothing stopping an agent under pressure to make a stuck gate pass from editing the gate definition instead of fixing the underlying violation. This gate is the one that checks the checks themselves, on the diff-detectable half of that problem (it cannot block the edit from happening mid-session — that needs a native `PreToolUse` hook in the consuming project, a separate architecture piece, not this gate).
+Detects gate-weakening rather than code-quality issues — the gate that checks the checks themselves, on the diff-detectable half of that problem (it cannot block an edit from happening mid-session, only catch it once this gate runs; a native `PreToolUse` hook would be needed for the rest, a separate architecture piece). Full rationale and the exact pattern list live in `CONSTRAINTS.md`'s `gate-integrity` dimension if you're also adopting that file — this section intentionally doesn't restate them to avoid a second copy drifting out of sync. If you're using this skill standalone (no `CONSTRAINTS.md`), the script's own docstring is the canonical description.
 
 Pass: script exits 0. Fail: fix the underlying issue directly, or — if the gate-definition change is legitimate maintenance — move it to its own `chore/*`/`fix/*` branch instead of bundling it with feature work.
 

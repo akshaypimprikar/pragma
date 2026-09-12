@@ -37,6 +37,13 @@ GATE_DEFINITION_FILES = (
     "skills/deterministic-pr-gates/SKILL.md",
 )
 GATE_SCRIPT_PREFIX = "scripts/check_"
+# Suppression/stub detection (checks 3 & 4) is about shipped application
+# code — a doc file describing these exact patterns in prose (this script's
+# own docstring, a CHANGELOG entry writing up a past bug) isn't code and a
+# substring match can't tell the two apart, so doc extensions are excluded
+# outright rather than relying only on the narrower GATE_DEFINITION_FILES/
+# GATE_SCRIPT_PREFIX exclusion below.
+DOC_EXTENSIONS = (".md", ".txt", ".rst")
 
 TEST_PATH_SEGMENT = re.compile(r"(^|/)tests?(/|$)", re.IGNORECASE)
 TEST_FILENAME = re.compile(r"(^|/)(test_[^/]+|[^/]+_test)\.(py|swift)$", re.IGNORECASE)
@@ -199,7 +206,7 @@ if deleted_tests:
 # patterns in their own prose/docstrings, which a substring match can't tell
 # apart from real code.
 for path, diff in diff_by_file.items():
-    if path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX):
+    if path.endswith(DOC_EXTENSIONS) or path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX):
         continue
     violations.extend(find_suppressions(path, diff))
     violations.extend(find_stubs(path, diff))

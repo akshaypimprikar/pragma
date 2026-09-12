@@ -170,6 +170,40 @@ git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path t
 Pass: every command returns no output (the UI-selector listing is cross-checked by hand/agent against your Views layer).
 Fail: list every offending file and line, grouped by which rule it violates. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least the layer-separation and type-safety examples instantiated here. Leave placeholder examples as-is only if CLAUDE.md defines no enforced rule of that shape yet; the two fully-generic checks (force-unwrap, UI-selector-matching) apply to any Swift/XCTest project regardless.
 
+### Gate 11 — Gate integrity (floor-guard)
+```bash
+python3 scripts/check_gate_integrity.py
+```
+Detects gate-weakening rather than code-quality issues: a gate-definition
+file (`gates.md`, `CONSTRAINTS.md`, a `scripts/check_*.py`) edited on a
+`feature/*` branch, a previously-existing test deleted instead of fixed, a
+new suppression/skip marker (`swiftlint:disable`, a Swift Testing
+`.disabled()` trait, `XCTSkip`) introduced in the diff, an unfinished stub
+(`fatalError("not implemented")`, a bare `fatalError()`) newly added to
+shipped code, or a numeric threshold in a gate-definition file lowered by
+this diff.
+
+This exists because Gates 0–10 are all agent-instruction-driven — read the
+prompt, run the described commands, evaluate — with nothing stopping an
+agent under pressure to make a stuck gate pass from editing this file's gate
+definition instead of fixing the underlying violation (see "A known
+limitation" below, which this gate closes for the diff-detectable half of
+that problem; it is not a `PreToolUse` hook and cannot block the edit from
+happening mid-session, only catch it once `/gates` runs).
+
+Documented as a `CONSTRAINTS.md` Floor dimension (`gate-integrity`) — see
+that file for the full dimension list and why platform-specific or
+per-project-tunable dimensions belong there instead of hardcoded gate prose.
+This gate's invocation here is unchanged either way, since gate-integrity
+itself has no per-project variables to configure; `CONSTRAINTS.md` is where
+future opt-in dimensions (coverage ratchet, accessibility) get a config seam
+without needing to touch this file.
+
+Pass: script exits 0. Fail: script lists each violation with the specific
+file/line/pattern matched — fix by addressing the underlying issue directly,
+or, if the gate-definition change is legitimate maintenance, move it to its
+own `chore/*` or `fix/*` branch instead of bundling it with feature work.
+
 ## Gate summary
 
 Report every gate before opening the PR:
@@ -185,6 +219,7 @@ Gates:
 [i] Abstraction bloat — no candidates found
 [✓] RED-before-GREEN commit order
 [✓] Architecture & layer-rule compliance
+[✓] Gate integrity
 ```
 
 When Gates 1 and 2 are skipped:
@@ -200,6 +235,7 @@ Gates:
 [i] Abstraction bloat — 1 candidate found (see report)
 [–] RED-before-GREEN commit order — skipped (no new files in scoped layers)
 [✓] Architecture & layer-rule compliance
+[✓] Gate integrity
 ```
 
 Fix any failures before continuing.
@@ -207,13 +243,13 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/loop Fix failing gates and re-check. Stop when all 10 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean.
+/loop Fix failing gates and re-check. Stop when all 11 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
 To drive the full feature-to-PR cycle autonomously (no interval = Claude self-paces):
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 10 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 11 gates pass.
 ```
 
 ## After all gates pass — open the PR
@@ -262,7 +298,7 @@ Gates 0–10 are all agent-instruction-driven checks — read the prompt, run th
 Closing this for real means adding a native `PreToolUse` hook — in a consuming project's generated `.claude/settings.json`, since pragma has none to ship — that blocks `Write`/`Edit` calls targeting `.claude/commands/*.md`, `CLAUDE.md`, and `.claude/context/invariants.md` during autonomous runs. That's a genuine architecture addition, not a gate tweak, so it's tracked here as a known limitation rather than implemented speculatively. Sourced from a practitioner pattern (`karanb192/claude-code-hooks`'s "config-guard" hook, built in direct response to the ChainDrop npm worm persisting itself via `.claude/settings.json` rewrites) surfaced in the 2026-09-08 Agentic AI Intelligence Report.
 
 ## Done when
-All 10 gates pass, PR is open, and the PR URL is returned to the user.
+All 11 gates pass, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into review + test + code-review
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review`, `/test`,

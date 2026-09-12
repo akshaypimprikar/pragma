@@ -125,6 +125,18 @@ Add one grep per enforced rule your project actually has (forbidden imports betw
 
 Pass: every command returns no output. Fail: list every offending file and line, grouped by which rule it violates.
 
+## Gate 10 — Gate integrity (floor-guard)
+
+```bash
+python3 scripts/check_gate_integrity.py <base-branch>
+```
+
+Detects gate-weakening rather than code-quality issues: a gate-definition file (this skill's own file, a `CONSTRAINTS.md`, a `scripts/check_*.py`) edited on a `feature/*` branch, a previously-existing test deleted instead of fixed, a new suppression/skip marker introduced in the diff, an unfinished stub newly added to shipped code, or a numeric threshold in a gate-definition file lowered by this diff.
+
+Every other gate above is agent-instruction-driven — read the prompt, run the described commands, evaluate — with nothing stopping an agent under pressure to make a stuck gate pass from editing the gate definition instead of fixing the underlying violation. This gate is the one that checks the checks themselves, on the diff-detectable half of that problem (it cannot block the edit from happening mid-session — that needs a native `PreToolUse` hook in the consuming project, a separate architecture piece, not this gate).
+
+Pass: script exits 0. Fail: fix the underlying issue directly, or — if the gate-definition change is legitimate maintenance — move it to its own `chore/*`/`fix/*` branch instead of bundling it with feature work.
+
 ## Gate summary
 
 Report every gate before signaling the branch is ready:
@@ -140,6 +152,7 @@ Gates:
 [–] Security — skipped (no sensitive files)
 [i] Abstraction bloat — no candidates found
 [✓] Architecture & layer-rule compliance
+[✓] Gate integrity
 ```
 
 Use `[✓]` pass, `[✗]` fail, `[–]` skipped with the reason, `[i]` informational/advisory. Fix every `[✗]` before opening the PR — this skill's entire value is that "ready for PR" means something verifiable, not a vibe.
@@ -149,7 +162,8 @@ Use `[✓]` pass, `[✗]` fail, `[–]` skipped with the reason, `[i]` informati
 1. Copy this file into your project's skills directory (or keep it here and reference it).
 2. Replace every `<placeholder>` with your project's real values: build/test commands, source extensions, branch-naming convention, layer paths.
 3. Write Gate 9's project-specific greps from your own documented architecture rules. This is the only gate that requires real thought — everything else is copy-and-fill.
-4. Run it once against a deliberately-broken diff (an unhandled force-unwrap, a missing test) to confirm each gate actually catches what it claims to.
+4. Copy `scripts/check_gate_integrity.py` alongside your project's other scripts — Gate 10 is the one gate here backed by a real script file rather than an inline command, since gate-weakening detection needs actual diff parsing, not a single grep.
+5. Run it once against a deliberately-broken diff (an unhandled force-unwrap, a missing test) to confirm each gate actually catches what it claims to.
 
 ## Relationship to a full agentic pipeline
 

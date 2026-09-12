@@ -88,9 +88,20 @@ mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 success "Scripts ready"
+
+# ── 3b. CONSTRAINTS.md ────────────────────────────────────────────────────────
+CONSTRAINTS_MD="$PROJECT_DIR/CONSTRAINTS.md"
+if [[ -f "$CONSTRAINTS_MD" ]]; then
+    warn "CONSTRAINTS.md already exists — skipping"
+else
+    info "Copying starter CONSTRAINTS.md…"
+    cp "$REPO_ROOT/CONSTRAINTS.md" "$CONSTRAINTS_MD"
+    success "CONSTRAINTS.md ready"
+fi
 
 # ── 4. CI workflows ───────────────────────────────────────────────────────────
 info "Copying CI workflows…"
@@ -167,8 +178,9 @@ echo -e "${BOLD}${GREEN}Setup complete.${RESET} Next steps:"
 echo ""
 echo -e "  1. Fill in ${CYAN}CLAUDE.md${RESET} — architecture rules + build commands"
 echo -e "  2. Seed ${CYAN}.claude/context/invariants.md${RESET} with your non-negotiable rules"
-echo -e "  3. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
-echo -e "  4. Run your first feature:"
+echo -e "  3. Review ${CYAN}CONSTRAINTS.md${RESET} — Gate 11 (gate integrity) is on by default; uncomment opt-in dimensions as you adopt them"
+echo -e "  4. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
+echo -e "  5. Run your first feature:"
 echo ""
 echo -e "     ${BOLD}/spec \"describe your feature idea\"${RESET}"
 echo ""

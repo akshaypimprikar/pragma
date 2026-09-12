@@ -57,5 +57,5 @@ To drive the entire feature-to-gates cycle autonomously:
 ```
 Or target only gate-fixing after tasks are done:
 ```
-/loop Fix failing gates. Stop when all 11 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated, RED commit precedes GREEN commit for every new file in a scoped layer, gate integrity clean.
+/loop Fix failing gates. Stop when all 11 gates pass: build succeeds, all tests pass, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
 ```

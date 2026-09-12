@@ -174,30 +174,24 @@ Fail: list every offending file and line, grouped by which rule it violates. Thi
 ```bash
 python3 scripts/check_gate_integrity.py
 ```
-Detects gate-weakening rather than code-quality issues: a gate-definition
-file (`gates.md`, `CONSTRAINTS.md`, a `scripts/check_*.py`) edited on a
-`feature/*` branch, a previously-existing test deleted instead of fixed, a
-new suppression/skip marker (`swiftlint:disable`, a Swift Testing
-`.disabled()` trait, `XCTSkip`) introduced in the diff, an unfinished stub
-(`fatalError("not implemented")`, a bare `fatalError()`) newly added to
-shipped code, or a numeric threshold in a gate-definition file lowered by
-this diff.
+On a `release/*` or `hotfix/*` branch (which PRs against `main`, not
+`develop`), pass the correct base explicitly instead:
+`python3 scripts/check_gate_integrity.py main` — the script defaults to
+diffing against `develop` when no argument is given.
 
-This exists because Gates 0–10 are all agent-instruction-driven — read the
-prompt, run the described commands, evaluate — with nothing stopping an
-agent under pressure to make a stuck gate pass from editing this file's gate
-definition instead of fixing the underlying violation (see "A known
-limitation" below, which this gate closes for the diff-detectable half of
-that problem; it is not a `PreToolUse` hook and cannot block the edit from
-happening mid-session, only catch it once `/gates` runs).
-
-Documented as a `CONSTRAINTS.md` Floor dimension (`gate-integrity`) — see
-that file for the full dimension list and why platform-specific or
-per-project-tunable dimensions belong there instead of hardcoded gate prose.
-This gate's invocation here is unchanged either way, since gate-integrity
-itself has no per-project variables to configure; `CONSTRAINTS.md` is where
-future opt-in dimensions (coverage ratchet, accessibility) get a config seam
-without needing to touch this file.
+Detects gate-weakening — a gate-definition file edited on a `feature/*`
+branch, a test deleted instead of fixed, a new suppression marker, an
+unfinished stub, or a lowered threshold — rather than code-quality issues.
+Catches the diff-detectable half of "A known limitation" below (self-modifying
+guardrail files); it cannot block the edit from happening mid-session, only
+catch it once `/gates` runs. Full rationale and the exact pattern list live
+in `CONSTRAINTS.md`'s `gate-integrity` dimension — this section intentionally
+doesn't restate them, to avoid a second copy drifting out of sync (this
+script's own docstring is the third; treat `CONSTRAINTS.md` as canonical if
+the two ever disagree). Numbered Gate 10 in the standalone
+`deterministic-pr-gates` skill — same script, same behavior, one number
+lower there because that file doesn't carry this pipeline's Gate 9
+(TDD-commit-order).
 
 Pass: script exits 0. Fail: script lists each violation with the specific
 file/line/pattern matched — fix by addressing the underlying issue directly,

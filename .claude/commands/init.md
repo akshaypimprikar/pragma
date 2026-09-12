@@ -28,7 +28,7 @@ Remove `init.md` and `pragma-review.md` from the copied set — both are pragma-
 
 ### 3. Copy context, scripts, and CI workflows
 
-Same as `scripts/setup.sh`, using `${CLAUDE_PLUGIN_ROOT}` as the source root: copy `${CLAUDE_PLUGIN_ROOT}/.claude/context/*.md` (skip any that already exist — never overwrite a project's existing decisions/rejections log), `${CLAUDE_PLUGIN_ROOT}/scripts/select_simulator.py`, `check_coverage.py`, `check_tdd_commit_order.py`, `capture_pipeline_metrics.py`, and `slim_simulator.sh`, and `${CLAUDE_PLUGIN_ROOT}/scaffold/.github/workflows/*.yml` into `.github/workflows/` — strip the leading setup-comment block from each workflow file, then substitute `YOUR_PROJECT` → app name and `YOUR_SCHEME` → scheme name. Skip any workflow file that already exists at the destination and warn instead of overwriting.
+Same as `scripts/setup.sh`, using `${CLAUDE_PLUGIN_ROOT}` as the source root: copy `${CLAUDE_PLUGIN_ROOT}/.claude/context/*.md` (skip any that already exist — never overwrite a project's existing decisions/rejections log), `${CLAUDE_PLUGIN_ROOT}/scripts/select_simulator.py`, `check_coverage.py`, `check_tdd_commit_order.py`, `check_gate_integrity.py`, `capture_pipeline_metrics.py`, and `slim_simulator.sh`, and `${CLAUDE_PLUGIN_ROOT}/scaffold/.github/workflows/*.yml` into `.github/workflows/` — strip the leading setup-comment block from each workflow file, then substitute `YOUR_PROJECT` → app name and `YOUR_SCHEME` → scheme name. Skip any workflow file that already exists at the destination and warn instead of overwriting. Also copy `${CLAUDE_PLUGIN_ROOT}/CONSTRAINTS.md` into the project root, same skip-if-exists rule as `CLAUDE.md` below.
 
 ### 4. Ask for real content, write only where safe
 
@@ -54,4 +54,4 @@ Next: run your first feature —
 
 ## Done when
 
-`.claude/commands/`, `.claude/context/`, `scripts/`, and `.github/workflows/` are populated in the target project; `CLAUDE.md` has real architecture and constraint content if it didn't already exist; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; neither file was overwritten if it was already there.
+`.claude/commands/`, `.claude/context/`, `scripts/`, `.github/workflows/`, and `CONSTRAINTS.md` are populated in the target project; `CLAUDE.md` has real architecture and constraint content if it didn't already exist; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; neither file was overwritten if it was already there.

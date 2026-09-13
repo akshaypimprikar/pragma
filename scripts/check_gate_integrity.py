@@ -183,7 +183,10 @@ def paired_threshold_drops(diff):
     removed_buf, added_buf, drops = [], [], []
 
     def normalize(line):
-        return PERCENT_PATTERN.sub("N%", line)
+        # line[1:] drops the diff marker (-/+) itself, so a removed and an
+        # added line compare equal on content alone, not on which side they
+        # came from.
+        return PERCENT_PATTERN.sub("N%", line[1:])
 
     def flush():
         added_by_norm = {}

@@ -18,19 +18,26 @@ Flags, via a single git diff against the base branch:
      and XCTSkip are checked everywhere; a Swift Testing .disabled() trait
      is checked in test files only, since SwiftUI's .disabled(condition)
      view modifier uses the identical syntax in ordinary application code.
-  4. An unfinished stub newly introduced in non-test code: a bare
-     fatalError()/preconditionFailure(), or either with a placeholder
-     message ("not implemented", "todo") — a message alone doesn't make it
-     legitimate, only a real, specific reason does.
+  4. An unfinished stub newly introduced in non-test code: a bare or
+     empty-string fatalError()/preconditionFailure(), or either with a
+     placeholder message ("not implemented", "todo") — a message alone
+     doesn't make it legitimate, only a real, specific reason does.
   5. A numeric threshold in a gate-definition file lowered by this diff,
      matched by normalized line content within each diff hunk (not
      position) so an unrelated number elsewhere in the file, or an unrelated
      line added/removed alongside the real edit, can't produce a false
-     positive or mask a real change.
+     positive or mask a real change; every percentage on a matched line is
+     compared, not just the first, so a line naming more than one threshold
+     doesn't hide a drop in a later one.
 
-Usage: python3 scripts/check_gate_integrity.py [base_ref]
+Usage: python3 scripts/check_gate_integrity.py [base_ref] [branch]
   base_ref defaults to 'develop', matching this pipeline's other gate
   scripts (see check_tdd_commit_order.py) and its gitflow convention.
+  branch overrides the detected current branch — needed in CI, where a PR
+  is usually checked out at a detached commit rather than a real branch;
+  GitHub Actions' pull_request trigger sets GITHUB_HEAD_REF for this
+  automatically, but any other CI provider (or a push-triggered GHA run)
+  has no such env var, so pass the branch explicitly there.
 """
 import os
 import re
@@ -38,6 +45,7 @@ import subprocess
 import sys
 
 BASE_REF = sys.argv[1] if len(sys.argv) > 1 else "develop"
+BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 
 GATE_DEFINITION_FILES = (
     ".claude/commands/gates.md",
@@ -50,8 +58,13 @@ GATE_SCRIPT_PREFIX = "scripts/check_"
 # own docstring, a CHANGELOG entry writing up a past bug) isn't code and a
 # substring match can't tell the two apart, so doc extensions are excluded
 # outright rather than relying only on the narrower GATE_DEFINITION_FILES/
-# GATE_SCRIPT_PREFIX exclusion below.
+# GATE_SCRIPT_PREFIX exclusion below. Only *this* file is excluded from
+# checks 3 & 4 by path, not every scripts/check_*.py — check #1 already
+# permits editing gate scripts on a chore/*/fix/* branch, and excluding a
+# sibling script's real code (not just prose) from stub/suppression
+# detection there would silently defeat that gate for those files.
 DOC_EXTENSIONS = (".md", ".txt", ".rst")
+SELF_PATH = "scripts/check_gate_integrity.py"
 
 TEST_PATH_SEGMENT = re.compile(r"(^|/)tests?(/|$)", re.IGNORECASE)
 TEST_FILENAME_UNDERSCORE = re.compile(r"(^|/)(test_[^/]+|[^/]+_test)\.py$", re.IGNORECASE)
@@ -78,9 +91,11 @@ TEST_ONLY_SUPPRESSION_PATTERNS = (
 PLACEHOLDER_STUB_MESSAGE = re.compile(
     r'(fatalError|preconditionFailure)\(\s*"(not implemented|unimplemented|todo|TODO)', re.IGNORECASE
 )
+# Bare call, or a call whose only argument is an empty string — neither
+# carries an actual reason, so both count as an unfinished placeholder.
 BARE_STUB_PATTERNS = (
-    re.compile(r"\bfatalError\(\)"),
-    re.compile(r"\bpreconditionFailure\(\)"),
+    re.compile(r'\bfatalError\(\s*(""\s*)?\)'),
+    re.compile(r'\bpreconditionFailure\(\s*(""\s*)?\)'),
 )
 PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
@@ -90,25 +105,35 @@ def run(*args):
         return subprocess.run(args, capture_output=True, text=True, check=True).stdout
     except subprocess.CalledProcessError as e:
         print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
-        print(
-            f"Gate integrity could not run — confirm this branch has a valid "
-            f"'{BASE_REF}' base ref to compare against (pass a different one "
-            "as this script's first argument if your project's trunk isn't "
-            "named 'develop').",
-            file=sys.stderr,
-        )
+        if BASE_REF in args:
+            print(
+                f"Gate integrity could not run — confirm this branch has a valid "
+                f"'{BASE_REF}' base ref to compare against (pass a different one "
+                "as this script's first argument if your project's trunk isn't "
+                "named 'develop').",
+                file=sys.stderr,
+            )
+        else:
+            print("Gate integrity could not run — see the git error above.", file=sys.stderr)
         sys.exit(2)
 
 
 def current_branch():
-    # GitHub Actions checks out a `pull_request` event at a detached commit,
-    # not the real branch — GITHUB_HEAD_REF carries the actual source branch
-    # name in that case, which is exactly the context check #1 below needs
-    # most. Falls back to git's own detection (capture_pipeline_metrics.py's
-    # existing convention) for local use or non-GHA CI, returning the
-    # literal string "HEAD" in detached-HEAD state rather than an empty
-    # string, so that state is explicit, not silent.
-    return os.environ.get("GITHUB_HEAD_REF") or run("git", "rev-parse", "--abbrev-ref", "HEAD").strip()
+    # Explicit override (this script's 2nd argument) wins — works for any CI
+    # provider. Otherwise, GitHub Actions specifically sets GITHUB_HEAD_REF
+    # to the real source branch on a pull_request-triggered run, which
+    # checks out a detached commit rather than that branch; that env var is
+    # unset on a push-triggered run or any non-GHA CI, so it's a narrower
+    # fallback than the override, not a full fix for detached HEAD in
+    # general. Last resort is git's own detection (capture_pipeline_metrics.py's
+    # existing convention), returning the literal string "HEAD" in
+    # detached-HEAD state rather than an empty string, so that state is
+    # explicit, not silent.
+    return (
+        BRANCH_OVERRIDE
+        or os.environ.get("GITHUB_HEAD_REF")
+        or run("git", "rev-parse", "--abbrev-ref", "HEAD").strip()
+    )
 
 
 def is_test_path(path):
@@ -198,8 +223,12 @@ def paired_threshold_drops(diff):
                 continue
             a = candidates.pop(0)
             rn, an = PERCENT_PATTERN.findall(r), PERCENT_PATTERN.findall(a)
-            if rn and an and float(an[0]) < float(rn[0]):
-                drops.append((float(rn[0]), float(an[0])))
+            # A line can carry more than one percentage ("≥90% test coverage
+            # and ≥80% doc coverage") — compare every position, not just the
+            # first, so a drop in a later number on the same line isn't missed.
+            for rv, av in zip(rn, an):
+                if float(av) < float(rv):
+                    drops.append((float(rv), float(av)))
         removed_buf.clear()
         added_buf.clear()
 
@@ -257,11 +286,12 @@ if deleted_tests:
     violations.append("Test file(s) deleted rather than fixed: " + ", ".join(deleted_tests))
 
 # 3 & 4. New suppression markers and unfinished stubs — application source
-# only. Gate-definition files and check_*.py scripts describe these exact
-# patterns in their own prose/docstrings, which a substring match can't tell
-# apart from real code.
+# only. Gate-definition files and this script's own file describe these
+# exact patterns in their own prose/docstrings, which a substring match
+# can't tell apart from real code; a sibling scripts/check_*.py's real code
+# is scanned like any other source file (see SELF_PATH above).
 for path, diff in diff_by_file.items():
-    if path.endswith(DOC_EXTENSIONS) or path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX):
+    if path.endswith(DOC_EXTENSIONS) or path in GATE_DEFINITION_FILES or path == SELF_PATH:
         continue
     violations.extend(find_suppressions(path, diff))
     violations.extend(find_stubs(path, diff))

@@ -5,25 +5,47 @@ pass without fixing the underlying violation, rather than a legitimate gate
 or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
-Flags, via git diff against the base branch:
+Flags, via a single git diff against the base branch:
   1. A gate-definition file (gates.md, CONSTRAINTS.md, a scripts/check_*.py)
      touched on a feature/* branch — a real feature never needs to change
-     what counts as passing.
-  2. A previously-existing test file deleted rather than fixed.
-  3. A new suppression/skip marker introduced in the diff (swiftlint:disable,
-     a Swift Testing .disabled() trait, XCTSkip).
-  4. An unfinished stub (fatalError("not implemented"), a bare fatalError()/
-     preconditionFailure()) newly introduced in non-test code.
-  5. A numeric threshold in a gate-definition file lowered by this diff.
+     what counts as passing. Only reliably checkable when the actual branch
+     name is known (see current_branch()); does not currently track a
+     gate-definition file across a rename.
+  2. A previously-existing test file deleted rather than fixed. Same
+     rename caveat as #1 — a test renamed away rather than deleted outright
+     isn't caught.
+  3. A new suppression/skip marker introduced in the diff: swiftlint:disable
+     and XCTSkip are checked everywhere; a Swift Testing .disabled() trait
+     is checked in test files only, since SwiftUI's .disabled(condition)
+     view modifier uses the identical syntax in ordinary application code.
+  4. An unfinished stub newly introduced in non-test code: a bare or
+     empty-string fatalError()/preconditionFailure(), or either with a
+     placeholder message ("not implemented", "todo") — a message alone
+     doesn't make it legitimate, only a real, specific reason does.
+  5. A numeric threshold in a gate-definition file lowered by this diff,
+     matched by normalized line content within each diff hunk (not
+     position) so an unrelated number elsewhere in the file, or an unrelated
+     line added/removed alongside the real edit, can't produce a false
+     positive or mask a real change; every percentage on a matched line is
+     compared, not just the first, so a line naming more than one threshold
+     doesn't hide a drop in a later one.
 
-Usage: python3 scripts/check_gate_integrity.py [base_ref]
-  base_ref defaults to 'develop'
+Usage: python3 scripts/check_gate_integrity.py [base_ref] [branch]
+  base_ref defaults to 'develop', matching this pipeline's other gate
+  scripts (see check_tdd_commit_order.py) and its gitflow convention.
+  branch overrides the detected current branch — needed in CI, where a PR
+  is usually checked out at a detached commit rather than a real branch;
+  GitHub Actions' pull_request trigger sets GITHUB_HEAD_REF for this
+  automatically, but any other CI provider (or a push-triggered GHA run)
+  has no such env var, so pass the branch explicitly there.
 """
+import os
 import re
 import subprocess
 import sys
 
 BASE_REF = sys.argv[1] if len(sys.argv) > 1 else "develop"
+BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 
 GATE_DEFINITION_FILES = (
     ".claude/commands/gates.md",
@@ -31,48 +53,223 @@ GATE_DEFINITION_FILES = (
     "skills/deterministic-pr-gates/SKILL.md",
 )
 GATE_SCRIPT_PREFIX = "scripts/check_"
+# Suppression/stub detection (checks 3 & 4) is about shipped application
+# code — a doc file describing these exact patterns in prose (this script's
+# own docstring, a CHANGELOG entry writing up a past bug) isn't code and a
+# substring match can't tell the two apart, so doc extensions are excluded
+# outright rather than relying only on the narrower GATE_DEFINITION_FILES/
+# GATE_SCRIPT_PREFIX exclusion below. Only *this* file is excluded from
+# checks 3 & 4 by path, not every scripts/check_*.py — check #1 already
+# permits editing gate scripts on a chore/*/fix/* branch, and excluding a
+# sibling script's real code (not just prose) from stub/suppression
+# detection there would silently defeat that gate for those files.
+DOC_EXTENSIONS = (".md", ".txt", ".rst")
+SELF_PATH = "scripts/check_gate_integrity.py"
 
-SUPPRESSION_PATTERNS = (
+TEST_PATH_SEGMENT = re.compile(r"(^|/)tests?(/|$)", re.IGNORECASE)
+TEST_FILENAME_UNDERSCORE = re.compile(r"(^|/)(test_[^/]+|[^/]+_test)\.py$", re.IGNORECASE)
+# Swift's own convention: <Type>Tests.swift (plural) or <Type>Test.swift
+# (singular, less common but real) — anchored to the end of the filename so
+# e.g. "ABTestsManager.swift" (a feature-flag file, not a test) doesn't match.
+TEST_FILENAME_SUFFIX = re.compile(r"[^/]*Tests?\.(swift|py)$")
+
+# Only .disabled( is ambiguous with SwiftUI's .disabled(condition) view
+# modifier — swiftlint:disable and XCTSkip have no such ambiguity in
+# application code, so they're checked everywhere, not just in test files.
+UNAMBIGUOUS_SUPPRESSION_PATTERNS = (
     re.compile(r"^\+.*//\s*swiftlint:disable"),
-    re.compile(r"^\+.*\.disabled\("),  # Swift Testing trait
     re.compile(r"^\+.*\bXCTSkip\b"),
 )
-STUB_PATTERNS = (
-    re.compile(r'^\+.*fatalError\(\s*"(not implemented|todo|TODO)'),
-    re.compile(r"^\+\s*fatalError\(\)\s*$"),
-    re.compile(r"^\+\s*preconditionFailure\(\)\s*$"),
+TEST_ONLY_SUPPRESSION_PATTERNS = (
+    re.compile(r"^\+.*\.disabled\("),  # Swift Testing trait
+)
+# A message alone doesn't make a fatalError/preconditionFailure legitimate —
+# "not implemented"/"todo" are placeholder text, not a documented
+# exhaustiveness reason — so those are flagged even though they carry a
+# message; anything else with a message is treated as a real, intentional
+# reason and left alone.
+PLACEHOLDER_STUB_MESSAGE = re.compile(
+    r'(fatalError|preconditionFailure)\(\s*"(not implemented|unimplemented|todo|TODO)', re.IGNORECASE
+)
+# Bare call, or a call whose only argument is an empty string — neither
+# carries an actual reason, so both count as an unfinished placeholder.
+BARE_STUB_PATTERNS = (
+    re.compile(r'\bfatalError\(\s*(""\s*)?\)'),
+    re.compile(r'\bpreconditionFailure\(\s*(""\s*)?\)'),
 )
 PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 
 def run(*args):
-    return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
+        if BASE_REF in args:
+            print(
+                f"Gate integrity could not run — confirm this branch has a valid "
+                f"'{BASE_REF}' base ref to compare against (pass a different one "
+                "as this script's first argument if your project's trunk isn't "
+                "named 'develop').",
+                file=sys.stderr,
+            )
+        else:
+            print("Gate integrity could not run — see the git error above.", file=sys.stderr)
+        sys.exit(2)
 
 
 def current_branch():
-    return run("git", "branch", "--show-current").strip()
+    # Explicit override (this script's 2nd argument) wins — works for any CI
+    # provider. Otherwise, GitHub Actions specifically sets GITHUB_HEAD_REF
+    # to the real source branch on a pull_request-triggered run, which
+    # checks out a detached commit rather than that branch; that env var is
+    # unset on a push-triggered run or any non-GHA CI, so it's a narrower
+    # fallback than the override, not a full fix for detached HEAD in
+    # general. Last resort is git's own detection (capture_pipeline_metrics.py's
+    # existing convention), returning the literal string "HEAD" in
+    # detached-HEAD state rather than an empty string, so that state is
+    # explicit, not silent.
+    return (
+        BRANCH_OVERRIDE
+        or os.environ.get("GITHUB_HEAD_REF")
+        or run("git", "rev-parse", "--abbrev-ref", "HEAD").strip()
+    )
 
 
-def changed_files(diff_filter=None):
-    args = ["git", "diff", f"{BASE_REF}...HEAD", "--name-only"]
-    if diff_filter:
-        args += [f"--diff-filter={diff_filter}"]
-    return [line for line in run(*args).splitlines() if line]
+def is_test_path(path):
+    return (
+        bool(TEST_FILENAME_SUFFIX.search(path))
+        or bool(TEST_PATH_SEGMENT.search(path))
+        or bool(TEST_FILENAME_UNDERSCORE.search(path))
+    )
 
 
-def file_diff(path):
-    return run("git", "diff", f"{BASE_REF}...HEAD", "--", path)
+def parse_diff_by_file(full_diff):
+    """Split one `git diff` invocation's output into {path: diff_text}."""
+    files = {}
+    current_path = None
+    buf = []
+    for line in full_diff.splitlines(keepends=True):
+        m = re.match(r"^diff --git a/.+ b/(.+)$", line)
+        if m:
+            if current_path is not None:
+                files[current_path] = "".join(buf)
+            current_path = m.group(1)
+            buf = [line]
+        elif current_path is not None:
+            buf.append(line)
+    if current_path is not None:
+        files[current_path] = "".join(buf)
+    return files
+
+
+def find_suppressions(path, diff):
+    hits = []
+    test_path = is_test_path(path)
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for pat in UNAMBIGUOUS_SUPPRESSION_PATTERNS:
+            if pat.match(line):
+                hits.append(f"{path}: new suppression marker — {line.strip()}")
+        if test_path:
+            for pat in TEST_ONLY_SUPPRESSION_PATTERNS:
+                if pat.match(line):
+                    hits.append(f"{path}: new suppression marker — {line.strip()}")
+    return hits
+
+
+def find_stubs(path, diff):
+    if is_test_path(path):
+        return []
+    hits = []
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        content = line[1:]
+        if PLACEHOLDER_STUB_MESSAGE.search(content):
+            hits.append(f"{path}: unfinished stub introduced in shipped code — {line.strip()}")
+            continue
+        for pat in BARE_STUB_PATTERNS:
+            if pat.search(content):
+                hits.append(f"{path}: unfinished stub introduced in shipped code — {line.strip()}")
+    return hits
+
+
+def paired_threshold_drops(diff):
+    """Within each contiguous removed/added block in a hunk, pair a removed
+    line to an added line only when they're identical once percentages are
+    normalized out — i.e. the same line's number changed. Plain positional
+    pairing (zip) breaks when a hunk's removed/added line counts differ
+    (e.g. an unrelated comment added alongside the real edit); matching by
+    normalized content instead finds the real pair regardless of position,
+    and simply skips lines with no textual counterpart rather than
+    mismatching them."""
+    removed_buf, added_buf, drops = [], [], []
+
+    def normalize(line):
+        # line[1:] drops the diff marker (-/+) itself, so a removed and an
+        # added line compare equal on content alone, not on which side they
+        # came from.
+        return PERCENT_PATTERN.sub("N%", line[1:])
+
+    def flush():
+        added_by_norm = {}
+        for a in added_buf:
+            added_by_norm.setdefault(normalize(a), []).append(a)
+        for r in removed_buf:
+            candidates = added_by_norm.get(normalize(r))
+            if not candidates:
+                continue
+            a = candidates.pop(0)
+            rn, an = PERCENT_PATTERN.findall(r), PERCENT_PATTERN.findall(a)
+            # A line can carry more than one percentage ("≥90% test coverage
+            # and ≥80% doc coverage") — compare every position, not just the
+            # first, so a drop in a later number on the same line isn't missed.
+            for rv, av in zip(rn, an):
+                if float(av) < float(rv):
+                    drops.append((float(rv), float(av)))
+        removed_buf.clear()
+        added_buf.clear()
+
+    for line in diff.splitlines():
+        if line.startswith("-") and not line.startswith("---"):
+            removed_buf.append(line)
+        elif line.startswith("+") and not line.startswith("+++"):
+            added_buf.append(line)
+        else:
+            flush()
+    flush()
+    return drops
 
 
 violations = []
 branch = current_branch()
 
-# 1. Gate-definition files touched on a feature/* branch
-if branch.startswith("feature/"):
+name_status = run("git", "diff", f"{BASE_REF}...HEAD", "--name-status")
+status_by_path = {}
+for line in name_status.splitlines():
+    if not line.strip():
+        continue
+    parts = line.split("\t")
+    status_by_path[parts[-1]] = parts[0][0]  # first letter: A/M/D/R...
+
+full_diff = run("git", "diff", f"{BASE_REF}...HEAD")
+diff_by_file = parse_diff_by_file(full_diff)
+
+# 1. Gate-definition files touched on a feature/* branch (any status — an
+# outright deletion is at least as suspicious as an edit)
+if branch == "HEAD":
+    print(
+        "NOTE: detached HEAD — cannot determine if this is a feature/* branch, "
+        "so check #1 (gate-definition files edited on a feature branch) is "
+        "inconclusive and was skipped rather than silently passed.",
+        file=sys.stderr,
+    )
+elif branch.startswith("feature/"):
     touched_defs = [
-        f
-        for f in changed_files()
-        if f in GATE_DEFINITION_FILES or f.startswith(GATE_SCRIPT_PREFIX)
+        p for p in status_by_path
+        if p in GATE_DEFINITION_FILES or p.startswith(GATE_SCRIPT_PREFIX)
     ]
     if touched_defs:
         violations.append(
@@ -84,56 +281,27 @@ if branch.startswith("feature/"):
         )
 
 # 2. Previously-existing test files deleted rather than fixed
-deleted_tests = [
-    f for f in changed_files("D") if "Tests" in f and f.endswith((".swift", ".py"))
-]
+deleted_tests = [p for p, s in status_by_path.items() if s == "D" and is_test_path(p)]
 if deleted_tests:
     violations.append("Test file(s) deleted rather than fixed: " + ", ".join(deleted_tests))
 
-# 3 & 4. New suppression markers and unfinished stubs, scanned from added lines
-# in application source only — gate-definition files, docs, and this script's
-# own siblings under scripts/ legitimately describe these patterns in prose
-# (e.g. this file's own docstring), which a naive substring match can't tell
-# apart from real code without a per-language parser.
-CODE_SCAN_EXCLUDE_EXTS = (".md", ".txt", ".rst")
-for path in changed_files("AM"):
-    if path.endswith(CODE_SCAN_EXCLUDE_EXTS):
+# 3 & 4. New suppression markers and unfinished stubs — application source
+# only. Gate-definition files and this script's own file describe these
+# exact patterns in their own prose/docstrings, which a substring match
+# can't tell apart from real code; a sibling scripts/check_*.py's real code
+# is scanned like any other source file (see SELF_PATH above).
+for path, diff in diff_by_file.items():
+    if path.endswith(DOC_EXTENSIONS) or path in GATE_DEFINITION_FILES or path == SELF_PATH:
         continue
-    if path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX) or path.startswith("scripts/"):
-        continue
-    diff = file_diff(path)
-    for line in diff.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
-            continue
-        for pat in SUPPRESSION_PATTERNS:
-            if pat.match(line):
-                violations.append(f"{path}: new suppression marker — {line.strip()}")
-        if "Tests" not in path:
-            for pat in STUB_PATTERNS:
-                if pat.match(line):
-                    violations.append(
-                        f"{path}: unfinished stub introduced in shipped code — {line.strip()}"
-                    )
+    violations.extend(find_suppressions(path, diff))
+    violations.extend(find_stubs(path, diff))
 
 # 5. Lowered numeric thresholds in gate-definition files
-for path in [f for f in changed_files("M") if f in GATE_DEFINITION_FILES]:
-    diff = file_diff(path)
-    removed = [
-        float(m)
-        for line in diff.splitlines()
-        if line.startswith("-") and not line.startswith("---")
-        for m in PERCENT_PATTERN.findall(line)
-    ]
-    added = [
-        float(m)
-        for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-        for m in PERCENT_PATTERN.findall(line)
-    ]
-    if removed and added and min(added) < min(removed):
+for path in [p for p, s in status_by_path.items() if s == "M" and p in GATE_DEFINITION_FILES]:
+    for before, after in paired_threshold_drops(diff_by_file.get(path, "")):
         violations.append(
-            f"{path}: a percentage/threshold value dropped from {min(removed)}% to "
-            f"{min(added)}% — confirm this is an intentional target change, not a "
+            f"{path}: a percentage/threshold value dropped from {before}% to "
+            f"{after}% — confirm this is an intentional target change, not a "
             "gate weakened to pass."
         )
 

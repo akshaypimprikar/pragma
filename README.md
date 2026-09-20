@@ -9,7 +9,7 @@
 
 The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
 
-Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where enforcement runs in CI (independent of any one agent run) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
+Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where CI re-runs the TDD-order and gate-integrity scripts plus the test suite (scope and limits under [CI Layer](#ci-layer)) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
 
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
@@ -137,7 +137,7 @@ Every major AI coding tool has shipped some flavor of spec-driven development �
 
 Three things pragma does that a spec mode alone doesn't:
 
-1. **CI-enforced, not just agent-enforced.** `/gates` runs locally before a PR opens; the same checks re-run independently in GitHub Actions (`pr-checks.yml`, `ui-tests.yml`) as enforcement that can't be skipped by rerunning the agent with a different prompt. Spec modes generate a plan; they don't wire in an enforcement layer the agent itself can't talk its way around.
+1. **Script gates re-run in CI, not just by the agent.** `/gates` runs locally before a PR opens; projects that install pragma also get a `gates` job in `pr-checks.yml` that re-runs the RED-before-GREEN commit-order check and the gate-integrity check using the base branch's copy of those scripts, so a PR can't edit the scripts that judge it. The agent-judged gates are not re-run, and the job only blocks a merge if you mark it a required status check — see [CI Layer](#ci-layer) for the exact scope and limits.
 2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, `feature-log.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, what shipped, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge. Even [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (93K+ stars, one of the largest skill frameworks for coding agents) names this as unsolved industry-wide in its own [comparison doc](https://github.com/addyosmani/agent-skills/blob/main/docs/comparison.md): "None of these has solved durable cross-session memory well yet: what an agent learned in one session rarely carries cleanly into the next... If that is your bottleneck, know that you are at the edge of what any of them ships today, and expect to stitch some of it yourself for now." This pipeline is that stitching, already built and running on a real codebase, not a future roadmap item.
 3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
 
@@ -179,7 +179,7 @@ Unlike the commands above, these work in any project without adopting the rest o
 
 | Skill | What it does |
 |---|---|
-| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — every gate is a real command with a pass/fail outcome, none of it asks an LLM to judge the diff |
+| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — nearly every gate is a real command with a pass/fail outcome; the exceptions are Gate 7 (security), where a grep decides whether a security review runs but the review itself is an LLM or manual judgment, and Gate 8 (abstraction bloat), which is advisory |
 
 ---
 
@@ -189,11 +189,25 @@ Three GitHub Actions workflows install into your project alongside the commands:
 
 | Workflow | Trigger | What it enforces |
 |---|---|---|
-| `pr-checks.yml` | PR to `develop` or `main` | Unit + integration tests, coverage ≥ 60% (warn < 80%) |
+| `pr-checks.yml` | PR to `develop` or `main` | `unit-tests` job: unit + integration tests, coverage ≥ 60% (warn < 80%). `gates` job: RED-before-GREEN commit order and gate integrity |
 | `ui-tests.yml` | PR to `develop` or `main`, push to either | UI tests |
 | `release.yml` | Tag push matching `v*.*.*` | Full test suite in Release configuration, GitHub Release creation |
 
-The agent layer (`/gates`, `/review`, `/test`) runs locally for fast feedback before a PR is opened. CI then re-runs the same checks independently as enforcement that can't be bypassed.
+The agent layer (`/gates`, `/review`, `/test`) runs locally for fast feedback before a PR is opened. CI re-runs only the script-checkable part of it:
+
+- **`gates` job** (`pr-checks.yml`) — runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the **base branch** and run against the PR head, so a PR can't edit the scripts that judge it. If the base branch has no copy of a script yet (the PR that first installs pragma), the PR's own copy runs and the job emits a warning. Any non-zero exit fails the job, including exit 2 (`SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the template's layer names — edit it to your project's layer folders).
+- **`unit-tests` job** — the test suite and `scripts/check_coverage.py`. This job runs the PR's own copy of `check_coverage.py`, not a base-branch copy.
+
+CI does **not** re-run the agent-judged parts: Gate 7's `security-review`, `/gates` Gate 10's UI-selector cross-check, or `/review`'s design-compliance checklist. It also does not re-run the other `/gates` checks (TODO/FIXME scan, branch naming, CHANGELOG entry, per-file new-code coverage, Gate 8 heuristics, the Gate 10 architecture greps).
+
+Limits worth knowing before you rely on it:
+
+- **It is a hard block only if you make it one.** Branch protection is opt-in; in a repo without it, a PR can merge with a red `gates` job. To enforce it: GitHub repo **Settings → Branches** (or **Rules → Rulesets**) → add a rule for `develop` and `main` → **Require status checks to pass before merging** → add `gates` (and `Unit Tests` / `UI Tests` if you want those to block too). `pr-checks.yml` only triggers on the paths in its `paths:` filter, and a required check that never triggers stays pending, so remove that filter if you make `gates` required.
+- **The workflow file comes from the PR ref**, so a PR can still edit or delete the `gates` job itself; only the scripts are protected. Review changes under `.github/workflows/` like gate-definition changes (for example, a `CODEOWNERS` entry for that path plus required code-owner review).
+- **Gate integrity only checks for edited gate-definition files on `feature/*` branches.** The same edit on a `chore/*` or `fix/*` branch is allowed by design; its other checks (deleted tests, new suppressions, stubs, lowered thresholds) apply on any branch.
+- `setup.sh` and `/pragma:init` skip workflow files that already exist, so an existing project has to copy the `gates` job from `scaffold/.github/workflows/pr-checks.yml` by hand.
+
+`/review` runs in the same Claude Code session as `/feature` and `/gates` by default, so the reviewer is not independent of the implementer's context; run `/review` in a fresh Claude Code session for context isolation.
 
 **Phase 2 — TestFlight upload** is documented but commented out in `release.yml`. It requires an Apple Developer Program membership, distribution certificate, and App Store Connect API key. When you're ready, the commented block shows exactly what to add.
 

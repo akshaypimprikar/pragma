@@ -15,7 +15,22 @@ Ask (skip any already given as arguments):
 - Project root path (default: current directory — confirm this is actually the repo root containing the `.xcodeproj`)
 - Xcode scheme name (default: same as the app name)
 
+**Path guard — run this before any copy or delete below.** Confirming the root above is your judgment; this is the check. Resolve real paths (so a symlink can't disguise the target) and stop with a clear message, without copying or deleting anything, if it fails:
+
+```bash
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
+PLUGIN_ROOT="$(cd "${CLAUDE_PLUGIN_ROOT}" && pwd -P)"
+ls -d "$PROJECT_DIR"/*.xcodeproj >/dev/null 2>&1 || echo "STOP: no .xcodeproj in $PROJECT_DIR — not an iOS project root"
+if [ "$PROJECT_DIR" = "$PLUGIN_ROOT" ] || [ "$PROJECT_DIR" -ef "$PLUGIN_ROOT" ]; then echo "STOP: $PROJECT_DIR is pragma itself"; fi
+if grep -qs '"name": *"pragma"' "$PROJECT_DIR/.claude-plugin/plugin.json"; then echo "STOP: $PROJECT_DIR is a pragma checkout"; fi
+if [ "$PROJECT_DIR/.claude/commands" -ef "$PLUGIN_ROOT/.claude/commands" ]; then echo "STOP: $PROJECT_DIR/.claude/commands is pragma's own commands"; fi
+```
+
+Any `STOP:` line means do not continue — if the target were pragma itself, step 2 would overwrite and then delete pragma's own `init.md` / `pragma-review.md`. Tell the user which check failed and ask for the correct project root.
+
 ### 2. Copy and substitute command files
+
+Before copying, compare each existing `$PROJECT_DIR/.claude/commands/*.md` with the pragma file of the same name (after `<AppName>` substitution). If any differ, the user customized them — copy the whole directory to `$PROJECT_DIR/.claude/commands.bak-<timestamp>/` first and tell them so; never overwrite customized commands silently.
 
 ```bash
 mkdir -p "$PROJECT_DIR/.claude/commands"

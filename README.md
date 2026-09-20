@@ -50,6 +50,8 @@ cd pragma
 
 This copies the same files and substitutes your app name, but leaves `CLAUDE.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
 
+Safety behavior of both installers (`setup.sh` enforces it in the script; `/pragma:init` follows it as written steps): they stop if the target is pragma's own checkout (symlinks resolved), and if your `.claude/commands/` already has files that differ from pragma's, they copy the whole directory to `.claude/commands.bak-<timestamp>/` before overwriting — diff it against the new files to re-apply your edits, then delete it. Existing context files, `CONSTRAINTS.md`, `CLAUDE.md`, and workflow files are skipped, not overwritten; files in `scripts/` are overwritten, so re-apply any edit you made to `SCOPED_LAYER_DIRS`.
+
 Then, either way, kick off your first feature:
 
 ```

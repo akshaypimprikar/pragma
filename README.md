@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/platform-iOS-black?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
 [![Swift](https://img.shields.io/badge/Swift-6.0%2B-FA7343?logo=swift&logoColor=white)](https://swift.org)
 
-The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
+The complete iOS development scaffold for the agentic era — agent commands, CI checks, and setup automation wired together so one engineer ships at team scale.
 
 Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where CI re-runs the TDD-order and gate-integrity scripts plus the test suite (scope and limits under [CI Layer](#ci-layer)) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
 
@@ -82,7 +82,7 @@ Three layers installed into your project:
 |---|---|---|
 | **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
-| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, and optional simulator memory slimming for CI |
+| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, TDD-order and gate-integrity checks, and optional simulator memory slimming for CI |
 
 Each layer is independent — adopt all three or just the commands.
 
@@ -141,7 +141,7 @@ Three things pragma does that a spec mode alone doesn't:
 2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, `feature-log.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, what shipped, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge. Even [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (93K+ stars, one of the largest skill frameworks for coding agents) names this as unsolved industry-wide in its own [comparison doc](https://github.com/addyosmani/agent-skills/blob/main/docs/comparison.md): "None of these has solved durable cross-session memory well yet: what an agent learned in one session rarely carries cleanly into the next... If that is your bottleneck, know that you are at the edge of what any of them ships today, and expect to stitch some of it yourself for now." This pipeline is that stitching, already built and running on a real codebase, not a future roadmap item.
 3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
 
-None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the enforcement and the memory to survive independently of any one session, IDE, or agent run.
+None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the memory to survive independently of any one session, IDE, or agent run, and the script-checkable gates to re-run in CI rather than only in the agent's session.
 
 ---
 
@@ -195,16 +195,17 @@ Three GitHub Actions workflows install into your project alongside the commands:
 
 The agent layer (`/gates`, `/review`, `/test`) runs locally for fast feedback before a PR is opened. CI re-runs only the script-checkable part of it:
 
-- **`gates` job** (`pr-checks.yml`) — runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the **base branch** and run against the PR head, so a PR can't edit the scripts that judge it. If the base branch has no copy of a script yet (the PR that first installs pragma), the PR's own copy runs and the job emits a warning. Any non-zero exit fails the job, including exit 2 (`SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the template's layer names — edit it to your project's layer folders).
+- **`gates` job** (`pr-checks.yml`) — runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the **base branch** and run against the PR head, so a PR can't edit the scripts that judge it. If the base branch has no copy of a script (expected only for the PR that first installs pragma, but it applies to any PR while the base lacks the file), the PR's own copy runs and the job emits a warning — that run is not protected against a PR that edits the script. Any non-zero exit fails the job, including exit 2 (`SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the template's layer names). Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma: once the scripts are on the base branch, a PR that changes them (to configure or to fix a bug) is judged by the base branch's existing copy.
 - **`unit-tests` job** — the test suite and `scripts/check_coverage.py`. This job runs the PR's own copy of `check_coverage.py`, not a base-branch copy.
 
 CI does **not** re-run the agent-judged parts: Gate 7's `security-review`, `/gates` Gate 10's UI-selector cross-check, or `/review`'s design-compliance checklist. It also does not re-run the other `/gates` checks (TODO/FIXME scan, branch naming, CHANGELOG entry, per-file new-code coverage, Gate 8 heuristics, the Gate 10 architecture greps).
 
 Limits worth knowing before you rely on it:
 
-- **It is a hard block only if you make it one.** Branch protection is opt-in; in a repo without it, a PR can merge with a red `gates` job. To enforce it: GitHub repo **Settings → Branches** (or **Rules → Rulesets**) → add a rule for `develop` and `main` → **Require status checks to pass before merging** → add `gates` (and `Unit Tests` / `UI Tests` if you want those to block too). `pr-checks.yml` only triggers on the paths in its `paths:` filter, and a required check that never triggers stays pending, so remove that filter if you make `gates` required.
+- **It is a hard block only if you make it one.** Branch protection is opt-in; in a repo without it, a PR can merge with a red `gates` job. To enforce it: GitHub repo **Settings → Branches** (or **Rules → Rulesets**) → add a rule for `develop` and `main` → **Require status checks to pass before merging** → add `gates` (and `Unit Tests` / `UI Tests` if you want those to block too). `pr-checks.yml` only triggers on the paths in its `paths:` filter, and a required check that never triggers stays pending, so remove that filter if you make `gates` required (which also makes the macOS `unit-tests` job run on every PR).
 - **The workflow file comes from the PR ref**, so a PR can still edit or delete the `gates` job itself; only the scripts are protected. Review changes under `.github/workflows/` like gate-definition changes (for example, a `CODEOWNERS` entry for that path plus required code-owner review).
-- **Gate integrity only checks for edited gate-definition files on `feature/*` branches.** The same edit on a `chore/*` or `fix/*` branch is allowed by design; its other checks (deleted tests, new suppressions, stubs, lowered thresholds) apply on any branch.
+- **Gate integrity only checks for edited gate-definition files on `feature/*` branches**, and the branch name is chosen by the PR author. The same edit on a `chore/*` or `fix/*` branch is allowed by design; its other checks (deleted tests, new suppressions, stubs, lowered thresholds) apply on any branch.
+- On PRs into `main`, the TDD-order check reads everything since `main`; a repo that squash-merges into `develop` can see squashed commits (test and implementation in one commit) flagged on a release PR.
 - `setup.sh` and `/pragma:init` skip workflow files that already exist, so an existing project has to copy the `gates` job from `scaffold/.github/workflows/pr-checks.yml` by hand.
 
 `/review` runs in the same Claude Code session as `/feature` and `/gates` by default, so the reviewer is not independent of the implementer's context; run `/review` in a fresh Claude Code session for context isolation.

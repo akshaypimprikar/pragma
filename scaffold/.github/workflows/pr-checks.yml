@@ -83,8 +83,9 @@ jobs:
   #
   # The scripts are taken from the BASE branch checkout, not the PR head, so a PR
   # cannot edit the scripts that judge it. Bootstrap exception: if the base branch
-  # has no copy of a script yet (the PR that first installs pragma), the PR head's
-  # copy runs instead, with a ::warning:: — that one PR controls its own judge.
+  # has no copy of a script (expected only for the PR that first installs pragma,
+  # but it applies to any PR while the base lacks the file), the PR head's copy
+  # runs instead, with a ::warning:: — that run is judged by the PR's own script.
   # This job only blocks merges if you mark `gates` a required status check in
   # branch protection. The workflow file itself still comes from the PR ref, so a
   # PR can edit this job.

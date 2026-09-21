@@ -28,7 +28,7 @@ These screenshots are not mockups. They show what 100+ merged PRs of `/spec → 
 
 ## Quick Start
 
-To install pragma as a Claude Code plugin, do these steps. You do not need to clone the repository or run a shell script.
+Recommended: install pragma as a Claude Code plugin. You do not need to clone the repository or run a shell script.
 
 Run these commands in Claude Code, in the root of your iOS project repository:
 
@@ -40,7 +40,7 @@ Run these commands in Claude Code, in the root of your iOS project repository:
 
 `/pragma:init` does the same work as `scripts/setup.sh`. It copies commands, context files, CI workflows, and support scripts. It replaces the placeholder app name in all of them. It also asks you questions about the architecture and key constraints of your app. It uses your answers for the content of `CLAUDE.md`. It also seeds `.claude/context/invariants.md` from the same answers. `setup.sh` leaves both files as templates for you to fill in later.
 
-Or clone the repository and run the setup script:
+Alternative: clone the repository and run the setup script directly:
 
 ```bash
 git clone https://github.com/akshaypimprikar/pragma
@@ -124,7 +124,7 @@ You approve twice: after `/spec` and after `/plan`. An agent or automated CI doe
 
 ### Harness Design
 
-In April 2026, Martin Fowler wrote ["Harness Engineering for Coding Agent Users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html). The article defines `Agent = Model + Harness`. It splits the harness into two parts. Feedforward guides steer the agent before it acts. Feedback sensors check what the agent did afterward. They check maintainability, architecture fitness, and behavioral correctness. This pipeline maps onto these categories:
+Martin Fowler's ["Harness Engineering for Coding Agent Users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (April 2026) frames `Agent = Model + Harness`. It splits the harness into two parts. Feedforward guides steer the agent before it acts. Feedback sensors check what the agent did afterward. They check maintainability, architecture fitness, and behavioral correctness. This pipeline maps onto these categories:
 
 | Fowler category | Pragma stage |
 |---|---|
@@ -164,7 +164,7 @@ The built-in spec modes are not bad. They are a reasonable default for teams tha
 | `/gates` | Makes sure that the build passes, the full test suite passes, and the architecture follows the rules, before you open a PR |
 | `/review` | Reviews a PR for architecture compliance. Posts its verdict as a real GitHub review. |
 | `/test` | Writes tests for a feature branch. Runs after `/review` reports APPROVED. |
-| `/pr-followup` | Runs `/review`, `/test`, and `code-review:code-review` in a chain, right after a PR opens |
+| `/pr-followup` | Runs `/review`, `/test`, and `code-review:code-review` automatically in a chain, right after a PR opens. None of the three needs a human trigger. |
 | `/bugfix "description"` | Writes a regression test first, then the fix. Always test first. |
 | `/release 1.0.0` | Bumps the version, updates the changelog, opens a PR to main, and creates a git tag |
 
@@ -202,7 +202,7 @@ Pragma installs three GitHub Actions workflows into your project with the comman
 
 The agent layer (`/gates`, `/review`, `/test`) runs locally and gives fast feedback before you open a PR. CI re-runs only the part that a script can check:
 
-- `gates` job (`pr-checks.yml`): runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the base branch, and they run against the PR head. A PR cannot edit the scripts that judge it. If the base branch has no copy of a script, the copy in the PR runs and the job emits a warning. That run is not protected against a PR that edits the script. This is expected only for the PR that first installs pragma, but it applies to any PR while the base branch lacks the file. Any non-zero exit fails the job. This includes exit 2, which happens when `SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the layer names of the template. Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma. After the scripts are on the base branch, the existing copy on the base branch judges any PR that changes them, whether to configure them or to fix a bug.
+- `gates` job (`pr-checks.yml`): runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the base branch, and they run against the PR head. A PR cannot edit the scripts that judge it. If the base branch has no copy of a script, the copy in the PR runs and the job emits a warning. A missing base copy is expected only for the PR that first installs pragma. It applies to any PR while the base branch lacks the file. The run of the PR's own copy is not protected against a PR that edits the script. Any non-zero exit fails the job. This includes exit 2, which happens when `SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the layer names of the template. Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma. After the scripts are on the base branch, the existing copy on the base branch judges any PR that changes them, whether to configure them or to fix a bug.
 - `unit-tests` job: runs the test suite and `scripts/check_coverage.py`. This job runs the copy of `check_coverage.py` from the PR, not a copy from the base branch.
 
 CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7, the UI-selector cross-check in Gate 10 of `/gates`, and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps.

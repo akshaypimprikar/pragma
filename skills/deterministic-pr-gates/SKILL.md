@@ -9,7 +9,7 @@ description: Run deterministic, scriptable pre-PR verification gates (build, ful
 
 Most "quality gate" agent skills work by asking an LLM to read a diff and judge it: is this good code, does it follow our conventions, is anything missing. That's a real capability, but it's non-deterministic — the same diff can pass on one run and get flagged on the next, and a confident-sounding judgment is not the same as a verified fact.
 
-This skill does the opposite. Every gate is a real command with a checkable outcome: an exit code, a grep match, a coverage percentage against a threshold. Nothing here asks a model to opine. If a gate passes, it passed because a build succeeded, a test suite went green, or a pattern genuinely didn't match — not because an LLM said it looked fine.
+This skill does the opposite. Nearly every gate is a real command with a checkable outcome: an exit code, a grep match, a coverage percentage against a threshold. The two exceptions are Gate 7 (a security review, run by a dedicated skill or by hand when sensitive paths change) and Gate 8 (advisory: it surfaces abstraction and duplication candidates and a human decides). Everywhere else, if a gate passes, it passed because a build succeeded, a test suite went green, or a pattern genuinely didn't match — not because an LLM said it looked fine.
 
 Use an LLM-judgment skill *in addition* to this one for things that are genuinely subjective (does this variable name communicate intent, is this abstraction premature). Use this skill for everything that has a yes/no answer, so the two never overlap and neither goes soft on the other's job.
 
@@ -33,10 +33,14 @@ If this returns no output, no source code changed on this branch — skip the Bu
 
 Swift/Xcode example:
 ```bash
+LOG=$(mktemp -t build)
 xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
   -configuration Debug -destination 'platform=<simulator platform>,name=<simulator>' \
-  2>&1 | xcsift
+  > "$LOG" 2>&1; RC=$?
+xcsift < "$LOG"
+[ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "BUILD SUCCEEDED" "$LOG" && echo "GATE 1 PASS" || echo "GATE 1 FAIL (xcodebuild exit $RC)"
 ```
+Capture the log file instead of piping to `xcsift`: a pipeline hides `xcodebuild`'s exit status, so an empty or crashed run would print a clean-looking summary.
 
 Node/TypeScript example:
 ```bash

@@ -58,10 +58,15 @@ final class Mock<Model>Repository: <Model>RepositoryProtocol {
 
 ## Build command (run from git root — see CLAUDE.md for exact path)
 ```bash
+LOG=$(mktemp -t test)
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
-  2>&1 | xcsift
+  > "$LOG" 2>&1; RC=$?
+xcsift < "$LOG"
+[ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" \
+  && echo "TESTS PASS" || echo "TESTS FAIL (xcodebuild exit $RC, log bytes $(wc -c < "$LOG"))"
 ```
+The log file replaces a `| xcsift` pipeline, which hides `xcodebuild`'s exit status (an empty or crashed run then prints a clean-looking summary). See `/gates` Gate 2 for the executed-test-count check.
 
 ## Tip — autonomous test-fixing loop
 If new tests fail after writing them, the user can run (as a separate top-level command, not from within this agent):

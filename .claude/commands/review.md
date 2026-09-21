@@ -32,7 +32,7 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    ```bash
    gh pr view <PR> --json headRefOid -q .headRefOid
    git rev-parse HEAD
-   git status --porcelain      # must print nothing
+   git status --porcelain -- . ':!.claude/context/rejections.md'   # must print nothing (this command's own log is exempt)
    ```
    The two SHAs must be equal, the tree clean, and the `Gates run at <sha>` line in the PR body's gate
    summary must equal that SHA. A missing line, a different SHA, or commits landed after `/gates` ran
@@ -46,11 +46,13 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    BR=$(gh pr view <PR> --json headRefName -q .headRefName)
    BASE=origin/$(gh pr view <PR> --json baseRefName -q .baseRefName)   # origin/main for release/* and hotfix/*
    T=$(mktemp -d)
-   for s in check_gate_integrity check_tdd_commit_order; do
-     git show "${BASE}:scripts/${s}.py" > "$T/${s}.py" 2>/dev/null || echo "NOT VERIFIED: scripts/${s}.py not on ${BASE}"
-   done
-   python3 "$T/check_gate_integrity.py" "$BASE" "$BR"    # Gate 11
-   python3 "$T/check_tdd_commit_order.py" "$BASE"        # Gate 9
+   run_gate() {  # never run an empty file: `git show > f` leaves a 0-byte f when the script is missing
+     name=$1; shift
+     if git show "${BASE}:scripts/${name}.py" > "$T/${name}.py" 2>/dev/null; then python3 "$T/${name}.py" "$@"
+     else echo "NOT VERIFIED: scripts/${name}.py not on ${BASE}"; fi
+   }
+   run_gate check_gate_integrity "$BASE" "$BR"    # Gate 11
+   run_gate check_tdd_commit_order "$BASE"        # Gate 9
    ```
    A script that is not on the base branch yet (the PR introducing it, or before it merges) is reported
    as `NOT VERIFIED: <script> not on <base>` and, for a PR that adds it, run from the PR copy
@@ -58,7 +60,7 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    `SCOPED_LAYER_DIRS` is still the template default: report that, not a pass. Also re-run the grep-only
    gates exactly as written in `gates.md`, substituting `$BASE` (the fetched `origin/<base>`) for
    `develop` in every command (local `develop` may be stale after `git fetch`): Gate 3
-   (TODO/FIXME/HACK), Gate 4 (branch name), Gate 5 (CHANGELOG), and Gate 10's grep commands. Each grep
+   (TODO/FIXME/HACK), Gate 4 (branch name — check `$BR`, since `git branch --show-current` is empty on a detached checkout), Gate 5 (CHANGELOG), and Gate 10's grep commands. Each grep
    prints nothing on a pass except the UI-selector listing (cross-check by hand) and any hit the
    summary already names as an accepted exception. Any result that disagrees with the pasted summary —
    a script exits non-zero, a grep prints a hit the summary does not name — is **CHANGES REQUESTED**,

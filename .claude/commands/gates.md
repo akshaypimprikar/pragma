@@ -30,11 +30,11 @@ the SHA, because the gate summary must describe the commit that actually opens t
 
 ### Gate 0 — Build-relevant change check (runs first; determines if Gates 1–2 apply)
 ```bash
-git diff develop...HEAD --name-only -- '*.swift' '*.pbxproj' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved'
+git diff develop...HEAD --name-only -- '*.swift' '*.pbxproj' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xcscheme' '*.xctestplan'
 ```
 If this returns **no output**, skip Gates 1 and 2 — nothing that affects the build or test suite changed. Continue from Gate 3.
 If any file is listed, run Gates 1 and 2 as normal. Project, config, plist, entitlement and
-package-pin changes are included on purpose: a build-setting change (e.g. a default actor-isolation
+package-manifest, scheme and test-plan changes are included on purpose (a test-plan edit changes which tests run; add any other build input your project has — asset or string catalogs, data models): a build-setting change (e.g. a default actor-isolation
 or language-mode setting in the `.pbxproj`) can break the build or change runtime behavior without
 touching a `.swift` file. Gates 3–11 still scope their own greps to `*.swift` where they say so.
 
@@ -67,7 +67,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase .* passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase .* failed" "$LOG")
+PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "GATE 2 PASS ($PASSED tests executed)" || echo "GATE 2 FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
@@ -76,7 +76,8 @@ Pass: `GATE 2 PASS` with an executed-test count above zero. The count is require
 matches nothing. The count is read from per-test-case result lines (`Test case '…' passed` for Swift
 Testing, `Test Case '…' passed` for XCTest — the regex accepts both capitalizations; adjust it if your
 Xcode version words the lines differently, and confirm on a real run that it counts your suite).
-Fail: empty log, non-zero exit, any failed test case, or zero executed tests. Report the
+Fail: empty log, non-zero exit, any failed test case, or zero
+executed tests (a test that fails once and passes on `-retry-tests-on-failure` still counts as failed here — fail-closed on purpose). Report the
 executed-test count in the gate summary.
 
 ### Gate 3 — No TODO/FIXME/HACK in changed files
@@ -303,7 +304,7 @@ To drive the full feature-to-PR cycle autonomously (no interval = Claude self-pa
 ## After all gates pass — open the PR
 
 ### Write candidate invariants (conditional)
-If any gate caught a violation pattern that is NOT already listed in `.claude/context/invariants.md`, append a candidate comment at the bottom of that file:
+If any gate caught a violation pattern that is NOT already listed in `.claude/context/invariants.md`, append a candidate comment at the bottom of that file, commit it, and restart from the pre-step (the commit moves HEAD, so the gate summary must be re-run against the new SHA):
 
 ```
 <!-- [CANDIDATE] YYYY-MM-DD: <describe the violation pattern — e.g. "ViewModel imported SwiftDataRepository directly in feature/X"> -->
@@ -334,6 +335,8 @@ gh pr create \
 EOF
 )"
 ```
+
+If `/gates` is re-run after the PR is open (a fix cycle changes HEAD), update the PR body's gate section with the new summary — `gh pr edit <PR> --body-file <file>` — so its `Gates run at <sha>` matches the new HEAD; `/review` rejects a stale one.
 
 **Always pass `--base develop`** — `gh pr create` defaults to `main` (repo default), which bypasses gitflow.
 Exceptions: `release/*` and `hotfix/*` branches use `--base main`.

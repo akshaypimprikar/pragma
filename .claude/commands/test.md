@@ -63,10 +63,11 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-[ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" \
-  && echo "TESTS PASS" || echo "TESTS FAIL (xcodebuild exit $RC, log bytes $(wc -c < "$LOG"))"
+PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")
+[ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
+  && echo "TESTS PASS ($PASSED tests executed)" || echo "TESTS FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
-The log file replaces a `| xcsift` pipeline, which hides `xcodebuild`'s exit status (an empty or crashed run then prints a clean-looking summary). See `/gates` Gate 2 for the executed-test-count check.
+The log file replaces a `| xcsift` pipeline, which hides `xcodebuild`'s exit status (an empty or crashed run then prints a clean-looking summary). The executed-test count is required for the same reason as in `/gates` Gate 2: `xcodebuild test` prints `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change matches nothing.
 
 ## Tip — autonomous test-fixing loop
 If new tests fail after writing them, the user can run (as a separate top-level command, not from within this agent):

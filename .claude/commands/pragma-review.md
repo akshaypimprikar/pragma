@@ -45,7 +45,7 @@ Advisory — eyeball every hit. A worked example in prose is fine (pragma's own 
 For every newly added or changed section that generalizes a source project's concrete rule (an architecture check, a gate, a build command), confirm it uses `<AppName>`-style placeholder tokens for anything project-specific — a type name, a file path, a field name — matching the style already used throughout `gates.md`'s Gate 9/10 examples. Zero placeholders in a section that's supposed to be generic is the leak.
 
 ### 3. Gate numbering/count consistency (if `.claude/commands/gates.md` changed)
-`Gate 0` (the Swift-change pre-check) is intentionally excluded from both the sequence and the count — that's a convention, not an oversight.
+`Gate 0` (the build-relevant change check) is intentionally excluded from both the sequence and the count — that's a convention, not an oversight.
 ```bash
 awk 'BEGIN{expected=1} {if($1!=expected) print "non-sequential: expected "expected" got "$1; expected=$1+1}' \
   <(grep -oE '^### Gate [1-9][0-9]*' .claude/commands/gates.md | grep -oE '[0-9]+')

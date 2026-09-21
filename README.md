@@ -210,7 +210,7 @@ Limits worth knowing before you rely on it:
 - On PRs into `main`, the TDD-order check reads everything since `main`; a repo that squash-merges into `develop` can see squashed commits (test and implementation in one commit) flagged on a release PR.
 - `setup.sh` and `/pragma:init` skip workflow files that already exist, so an existing project has to copy the `gates` job from `scaffold/.github/workflows/pr-checks.yml` by hand.
 
-`/review` runs in the same Claude Code session as `/feature` and `/gates` by default, so the reviewer is not independent of the implementer's context; run `/review` in a fresh Claude Code session for context isolation.
+`/review` runs in the same Claude Code session as `/feature` and `/gates` by default, so the reviewer is not independent of the implementer's context. It does not take the pasted gate summary on trust: it checks the summary's SHA against the PR head, re-runs the scripted gates (gate integrity, TDD order) and the grep-only gates from the base branch, and treats any disagreement as CHANGES REQUESTED. Gates 1, 2, 6, 7 and 8 (build, tests, coverage, security, advisory heuristics) are not re-run there. Run `/review` in a fresh Claude Code session for context isolation.
 
 **Phase 2 — TestFlight upload** is documented but commented out in `release.yml`. It requires an Apple Developer Program membership, distribution certificate, and App Store Connect API key. When you're ready, the commented block shows exactly what to add.
 

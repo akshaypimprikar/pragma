@@ -72,7 +72,7 @@ name — matching the style already used throughout pragma's `gates.md` Gate 9/1
 Zero placeholders in a section that generalizes a project-specific check is the leak.
 
 **c. Gate numbering and counts stay internally consistent (deterministic):**
-`Gate 0` (the Swift-change pre-check) is intentionally excluded from both the sequence and
+`Gate 0` (the build-relevant change check) is intentionally excluded from both the sequence and
 the count — the pattern below starts from Gate 1 on purpose, not an oversight.
 ```bash
 awk 'BEGIN{expected=1} {if($1!=expected) print "non-sequential: expected "expected" got "$1; expected=$1+1}' \

@@ -10,7 +10,10 @@
 #     scaffold/.github/workflows/ into your project, excluding pragma-only
 #     meta-commands (init.md, pragma-review.md) that only make sense inside
 #     the pragma repo itself
-#   - Replaces <AppName> in all command files with APP_NAME
+#   - Replaces <AppName> in the copied command files with APP_NAME
+#   - Before overwriting, backs up .claude/commands/ to
+#     .claude/commands.bak-<timestamp>/ if any existing command file differs
+#     from what pragma is about to write (i.e. you customized it)
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
 #   - Generates a starter CLAUDE.md if one doesn't exist
 
@@ -33,11 +36,19 @@ SCHEME="${3:-$APP_NAME}"
 [[ -z "$APP_NAME" ]] && die "Usage: $0 APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+# pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
+# string comparison; -ef (same device+inode) covers anything pwd -P doesn't.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
 
-[[ "$PROJECT_DIR" == "$REPO_ROOT" ]] && die "PROJECT_DIR resolves to pragma's own repo root ($REPO_ROOT) — this would delete pragma's own init.md/pragma-review.md. Pass an explicit path to your iOS project as the second argument."
+if [[ "$PROJECT_DIR" == "$REPO_ROOT" || "$PROJECT_DIR" -ef "$REPO_ROOT" ]]; then
+    die "PROJECT_DIR resolves to pragma's own repo root ($REPO_ROOT) — this would delete pragma's own init.md/pragma-review.md. Pass an explicit path to your iOS project as the second argument."
+fi
+# Same guard for a different clone/worktree of pragma: not the same path, same damage.
+if grep -qs '"name": *"pragma"' "$PROJECT_DIR/.claude-plugin/plugin.json"; then
+    die "PROJECT_DIR ($PROJECT_DIR) is a pragma checkout (.claude-plugin/plugin.json names it) — this would delete its init.md/pragma-review.md. Pass the path to your iOS project as the second argument."
+fi
 
 echo ""
 echo -e "${BOLD}Pragma setup${RESET}"
@@ -58,15 +69,41 @@ sedi() {
 # ── 1. Commands ───────────────────────────────────────────────────────────────
 info "Copying command files…"
 mkdir -p "$PROJECT_DIR/.claude/commands"
+
+# Belt-and-braces for the rm below: a symlinked .claude/ or .claude/commands/
+# can point at pragma's own commands even when PROJECT_DIR itself does not.
+[[ "$PROJECT_DIR/.claude/commands" -ef "$REPO_ROOT/.claude/commands" ]] && die "$PROJECT_DIR/.claude/commands resolves to pragma's own .claude/commands — refusing to copy onto or delete from it."
+
+# Back up before overwriting: an existing command that differs from what we're
+# about to write (after <AppName> substitution) is a customization, and cp -r
+# below would silently replace it.
+PRAGMA_CMDS="$(cd "$REPO_ROOT/.claude/commands" && find . -name '*.md' | sed 's|^\./||')"
+CUSTOMIZED=""
+while IFS= read -r rel; do
+    dest="$PROJECT_DIR/.claude/commands/$rel"
+    [[ -f "$dest" ]] || continue
+    sed "s|<AppName>|${APP_NAME}|g" "$REPO_ROOT/.claude/commands/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
+done <<< "$PRAGMA_CMDS"
+if [[ -n "$CUSTOMIZED" ]]; then
+    BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
+    # Same-second re-run must not nest inside the earlier backup.
+    while [[ -e "$BACKUP_DIR" ]]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
+    # -L: a symlinked .claude/commands must be backed up as files, not as another symlink.
+    cp -RL "$PROJECT_DIR/.claude/commands" "$BACKUP_DIR"
+    warn "Existing command file(s) differ from pragma's:${CUSTOMIZED}"
+    warn "Backed up .claude/commands/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
+fi
+
 cp -r "$REPO_ROOT/.claude/commands/." "$PROJECT_DIR/.claude/commands/"
 
 # Pragma-only meta-commands — operate on this repo itself, not a consumer project
 rm -f "$PROJECT_DIR/.claude/commands/init.md" "$PROJECT_DIR/.claude/commands/pragma-review.md"
 
 info "Substituting <AppName> in commands…"
-find "$PROJECT_DIR/.claude/commands" -name "*.md" | while read -r f; do
-    sedi "s|<AppName>|${APP_NAME}|g" "$f"
-done
+while IFS= read -r rel; do
+    dest="$PROJECT_DIR/.claude/commands/$rel"
+    if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
+done <<< "$PRAGMA_CMDS"
 success "Commands ready ($(find "$PROJECT_DIR/.claude/commands" -name "*.md" | wc -l | tr -d ' ') files)"
 
 # ── 2. Context ────────────────────────────────────────────────────────────────

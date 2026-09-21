@@ -77,15 +77,19 @@ mkdir -p "$PROJECT_DIR/.claude/commands"
 # Back up before overwriting: an existing command that differs from what we're
 # about to write (after <AppName> substitution) is a customization, and cp -r
 # below would silently replace it.
+PRAGMA_CMDS="$(cd "$REPO_ROOT/.claude/commands" && find . -name '*.md' | sed 's|^\./||')"
 CUSTOMIZED=""
-for f in "$REPO_ROOT/.claude/commands/"*.md; do
-    dest="$PROJECT_DIR/.claude/commands/$(basename "$f")"
+while IFS= read -r rel; do
+    dest="$PROJECT_DIR/.claude/commands/$rel"
     [[ -f "$dest" ]] || continue
-    sed "s|<AppName>|${APP_NAME}|g" "$f" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $(basename "$f")"
-done
+    sed "s|<AppName>|${APP_NAME}|g" "$REPO_ROOT/.claude/commands/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
+done <<< "$PRAGMA_CMDS"
 if [[ -n "$CUSTOMIZED" ]]; then
     BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
-    cp -R "$PROJECT_DIR/.claude/commands" "$BACKUP_DIR"
+    # Same-second re-run must not nest inside the earlier backup.
+    while [[ -e "$BACKUP_DIR" ]]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
+    # -L: a symlinked .claude/commands must be backed up as files, not as another symlink.
+    cp -RL "$PROJECT_DIR/.claude/commands" "$BACKUP_DIR"
     warn "Existing command file(s) differ from pragma's:${CUSTOMIZED}"
     warn "Backed up .claude/commands/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
 fi
@@ -96,10 +100,10 @@ cp -r "$REPO_ROOT/.claude/commands/." "$PROJECT_DIR/.claude/commands/"
 rm -f "$PROJECT_DIR/.claude/commands/init.md" "$PROJECT_DIR/.claude/commands/pragma-review.md"
 
 info "Substituting <AppName> in commands…"
-for f in "$REPO_ROOT/.claude/commands/"*.md; do
-    dest="$PROJECT_DIR/.claude/commands/$(basename "$f")"
+while IFS= read -r rel; do
+    dest="$PROJECT_DIR/.claude/commands/$rel"
     if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
-done
+done <<< "$PRAGMA_CMDS"
 success "Commands ready ($(find "$PROJECT_DIR/.claude/commands" -name "*.md" | wc -l | tr -d ' ') files)"
 
 # ── 2. Context ────────────────────────────────────────────────────────────────

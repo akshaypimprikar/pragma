@@ -106,7 +106,10 @@ def run(*args):
         return subprocess.run(args, capture_output=True, text=True, check=True).stdout
     except subprocess.CalledProcessError as e:
         print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
-        if BASE_REF in args:
+        # BASE_REF never appears as its own arg — every call site embeds it in a
+        # formatted ref spec like f"{BASE_REF}...HEAD" — so this has to search
+        # each arg for it as a substring, not check tuple membership.
+        if any(BASE_REF in a for a in args):
             print(
                 f"Gate integrity could not run — confirm this branch has a valid "
                 f"'{BASE_REF}' base ref to compare against (pass a different one "

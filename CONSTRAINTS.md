@@ -1,14 +1,14 @@
 # Constraints
 
 Per-project quality dimensions that `/gates` enforces or offers, kept separate
-from `gates.md` itself so platform-specific or project-tunable pieces don't
+from `gates/SKILL.md` itself so platform-specific or project-tunable pieces don't
 need to be hardcoded into the gate definitions. Each dimension: a name, a
 cost tier (`fast` = every commit, `task` = per-`/gates` run, `full` =
 pre-release only), and a concrete check.
 
-This file is additive to `gates.md`, not a replacement for it — build, test,
-and security-pattern checks stay defined directly in `gates.md` Gate 1/2/7
-(and in your project's `CLAUDE.md`). Nothing here duplicates those; adding a
+This file is additive to `gates/SKILL.md`, not a replacement for it — build, test,
+and security-pattern checks stay defined directly in `gates/SKILL.md` Gate 1/2/7
+(and in your project's `AGENTS.md`/`CLAUDE.md`). Nothing here duplicates those; adding a
 second source of truth for the same commands is worse than not having this
 file at all.
 
@@ -17,8 +17,8 @@ file at all.
 1. **gate-integrity** — tier: `task` — `python3 scripts/check_gate_integrity.py [base-branch] [branch]`
    (`base-branch` defaults to `develop`, pass `main` explicitly on a
    `release/*`/`hotfix/*` branch; `branch` overrides branch detection — see
-   below). Canonical description — `gates.md` Gate 11 and the standalone
-   `deterministic-pr-gates` skill's Gate 10 (same script, one number lower
+   below). Canonical description — `gates/SKILL.md` Gate 11 and the standalone
+   `deterministic-pr-gates/SKILL.md` skill's Gate 10 (same script, one number lower
    there since that file has no Gate 9 TDD-commit-order equivalent) both
    point here rather than restating this, to avoid a third copy drifting out
    of sync.
@@ -27,7 +27,7 @@ file at all.
    described commands, evaluate — with nothing stopping an agent under
    pressure to make a stuck gate pass from editing the gate definition
    instead of fixing the underlying violation. This dimension catches the
-   diff-detectable half of that problem: a gate-definition file (`gates.md`,
+   diff-detectable half of that problem: a gate-definition file (`gates/SKILL.md`,
    this file, or this script's own file specifically — a sibling
    `scripts/check_*.py`'s real code is scanned like any other source file)
    edited on a `feature/*` branch, a previously-existing test deleted
@@ -73,5 +73,5 @@ file at all.
    - android (future): TalkBack manual checklist
    Deferred as of 2026-09-10 — tracked here so the platform-specific check
    has a config seam to land in once built, rather than getting hardcoded
-   into `gates.md` directly.
+   into `gates/SKILL.md` directly.
 -->

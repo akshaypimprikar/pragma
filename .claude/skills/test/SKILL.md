@@ -69,11 +69,11 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")
+PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "TESTS PASS ($PASSED tests executed)" || echo "TESTS FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
-The log file replaces a `| xcsift` pipeline, which hides `xcodebuild`'s exit status (an empty or crashed run then prints a clean-looking summary). The executed-test count is required for the same reason as in `/gates` Gate 2: `xcodebuild test` prints `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change matches nothing.
+The log file replaces a `| xcsift` pipeline, which hides `xcodebuild`'s exit status (an empty or crashed run then prints a clean-looking summary). The executed-test count is required for the same reason as in `/gates` Gate 2: `xcodebuild test` prints `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change matches nothing. The count is read from XCTest's `Test Case '…' passed` format and Swift Testing's own `✔ Test "…" passed …` format — same caveat as Gate 2: this hasn't been confirmed against every Xcode version's exact wording, run it once against a real green suite before trusting it.
 
 ## Tip — autonomous test-fixing loop
 If new tests fail after writing them, the user can run (as a separate top-level command, not from within this agent):

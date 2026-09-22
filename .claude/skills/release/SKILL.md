@@ -2,6 +2,7 @@
 name: release
 description: Prepare and tag a release — pre-flight checks, version bump, CHANGELOG, and tag. Invoke with a version number.
 disable-model-invocation: true
+model: claude-haiku-4-5-20251001
 ---
 
 # Release Agent

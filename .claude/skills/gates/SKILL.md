@@ -2,6 +2,7 @@
 name: gates
 description: Verify a feature branch meets all pre-PR criteria (build, tests, coverage, gate integrity, and more) before opening the pull request. Invoke at the end of a feature session, passing the branch name.
 disable-model-invocation: true
+model: claude-haiku-4-5-20251001
 ---
 
 # Gates Agent

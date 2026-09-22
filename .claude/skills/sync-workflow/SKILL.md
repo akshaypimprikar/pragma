@@ -79,13 +79,15 @@ Zero placeholders in a section that generalizes a project-specific check is the 
 
 **c. Gate numbering and counts stay internally consistent (deterministic):**
 `Gate 0` (the build-relevant change check) is intentionally excluded from both the sequence and
-the count — the pattern below starts from Gate 1 on purpose, not an oversight.
+the count — the pattern below starts from Gate 1 on purpose, not an oversight. `deterministic-pr-gates/SKILL.md`
+is excluded from the count-reference grep below: it's a standalone skill with its own independent
+gate numbering (one fewer than `gates/SKILL.md`), not a second copy of the same list.
 ```bash
 awk 'BEGIN{expected=1} {if($1!=expected) print "non-sequential: expected "expected" got "$1; expected=$1+1}' \
   <(grep -oE '^### Gate [1-9][0-9]*' <pragma path>/.claude/skills/gates/SKILL.md | grep -oE '[0-9]+' | sort -n)
 MAX=$(grep -oE '^### Gate [1-9][0-9]*' <pragma path>/.claude/skills/gates/SKILL.md | grep -oE '[0-9]+' | sort -n | tail -1)
 if [ -z "$MAX" ]; then echo "ERROR: no '### Gate N' headers found in gates/SKILL.md — check the file, not the count"; else
-grep -rniE "all [0-9]+ gates" <pragma path>/.claude/skills/*/SKILL.md | grep -viE "all $MAX gates"
+grep -rniE "all [0-9]+ gates" <pragma path>/.claude/skills/*/SKILL.md | grep -v "deterministic-pr-gates/SKILL.md" | grep -viE "all $MAX gates"
 fi
 ```
 Pass: the sequential check prints nothing, and the count-reference grep returns no lines

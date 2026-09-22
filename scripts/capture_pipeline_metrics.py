@@ -103,7 +103,7 @@ def main():
     is_new = not LOG_PATH.exists()
     with LOG_PATH.open("a") as f:
         if is_new:
-            f.write("# Benchmark Log\n\nAppend-only. One entry per /benchmark run. See .claude/commands/benchmark.md.\n\n")
+            f.write("# Benchmark Log\n\nAppend-only. One entry per /benchmark run. See .claude/skills/benchmark/SKILL.md.\n\n")
         f.write(entry + "\n")
 
     print(f"Appended entry to {LOG_PATH}")

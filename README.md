@@ -22,7 +22,7 @@ Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature �
 
 ---
 
-**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
@@ -38,7 +38,7 @@ Inside Claude Code, in your iOS project's repo root:
 /pragma:init MyApp
 ```
 
-`/pragma:init` does what `scripts/setup.sh` does — copies commands, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
+`/pragma:init` does what `scripts/setup.sh` does — copies skills, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `AGENTS.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
 
 **Alternative — clone and run the setup script directly:**
 
@@ -48,9 +48,11 @@ cd pragma
 ./scripts/setup.sh MyApp /path/to/your-ios-project
 ```
 
-This copies the same files and substitutes your app name, but leaves `CLAUDE.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
+This copies the same files and substitutes your app name, but leaves `AGENTS.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
 
-Safety behavior of both installers (`setup.sh` enforces it in the script; `/pragma:init` is written instructions the agent carries out, so it is not a hard guarantee): they stop if the target is pragma's own checkout (symlinks resolved), and if your `.claude/commands/` already has files that differ from pragma's (including files from an earlier pragma version or a different app name), they copy the whole directory to `.claude/commands.bak-<timestamp>/` before overwriting — diff it against the new files to re-apply your edits, then delete it. Existing context files, `CONSTRAINTS.md`, `CLAUDE.md`, and workflow files are skipped, not overwritten; files in `scripts/` are overwritten, so re-apply any edit you made to `SCOPED_LAYER_DIRS`.
+Both installers write `.claude/skills/<name>/SKILL.md` — the [SKILL.md format](https://github.com/agentskills/agentskills), an open standard also read by Cursor, GitHub Copilot, Windsurf, Zed, and others directly from that same path, alongside `AGENTS.md` for the instructions layer (with a one-line `CLAUDE.md` importing it for Claude Code). Pragma's own pipeline is developed and tested in Claude Code; cross-tool compatibility for the skill/instruction *files* rests on those tools' own documented support for the shared formats, not on pragma having been run against each one.
+
+Safety behavior of both installers (`setup.sh` enforces it in the script; `/pragma:init` is written instructions the agent carries out, so it is not a hard guarantee): they stop if the target is pragma's own checkout (symlinks resolved), and if your `.claude/skills/` already has files that differ from pragma's (including files from an earlier pragma version or a different app name), they copy the whole directory to `.claude/skills.bak-<timestamp>/` before overwriting — diff it against the new files to re-apply your edits, then delete it. If your project still has a `.claude/commands/<name>.md` from a pragma version that shipped commands instead of skills, it's backed up to `.claude/commands.bak-<timestamp>/` and removed, so it can't shadow the new skill of the same name. Existing context files, `CONSTRAINTS.md`, `AGENTS.md`, `CLAUDE.md`, and workflow files are skipped, not overwritten; files in `scripts/` are overwritten, so re-apply any edit you made to `SCOPED_LAYER_DIRS`.
 
 Then, either way, kick off your first feature:
 
@@ -82,11 +84,11 @@ Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
+| **Agent skills** | `.claude/skills/` | 16 Agent Skills (SKILL.md) covering the full SDLC, invoked the same way Claude Code's commands always were |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
 | **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, TDD-order and gate-integrity checks, and optional simulator memory slimming for CI |
 
-Each layer is independent — adopt all three or just the commands.
+Each layer is independent — adopt all three or just the skills.
 
 ---
 
@@ -147,7 +149,7 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 
 ---
 
-## Commands
+## Skills
 
 ### Core pipeline
 
@@ -175,19 +177,19 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
 | `/benchmark <label>` | Runs a fixed canary feature through the pipeline and logs objective metrics (commits, timing, gate results) — for comparing pipeline changes against a baseline, not for feature work |
 
-### Standalone skills
+### Works without the rest of the pipeline
 
-Unlike the commands above, these work in any project without adopting the rest of the pipeline.
+Unlike the skills above, this one works in any project without adopting the rest of the pipeline.
 
 | Skill | What it does |
 |---|---|
-| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — nearly every gate is a real command with a pass/fail outcome; the exceptions are Gate 7 (security), where a grep decides whether a security review runs but the review itself is an LLM or manual judgment, and Gate 8 (abstraction bloat), which is advisory |
+| [`deterministic-pr-gates`](.claude/skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — nearly every gate is a real command with a pass/fail outcome; the exceptions are Gate 7 (security), where a grep decides whether a security review runs but the review itself is an LLM or manual judgment, and Gate 8 (abstraction bloat), which is advisory |
 
 ---
 
 ## CI Layer
 
-Three GitHub Actions workflows install into your project alongside the commands:
+Three GitHub Actions workflows install into your project alongside the skills:
 
 | Workflow | Trigger | What it enforces |
 |---|---|---|
@@ -249,7 +251,7 @@ The agent never proceeds to the next task if tests are red.
 
 ## Customising for Your Project
 
-**Architecture assumptions (defaults — override in `CLAUDE.md`):**
+**Architecture assumptions (defaults — override in `AGENTS.md`):**
 
 - **MVVM + Repository** — views contain no business logic, ViewModels depend on protocols never concrete implementations
 - **SwiftData** for persistence — Domain Services have zero SwiftData imports
@@ -262,14 +264,14 @@ The agent never proceeds to the next task if tests are red.
 ./scripts/setup.sh MyApp /path/to/your-project
 ```
 
-Copies everything and substitutes all placeholders. Then fill in `CLAUDE.md` and seed `invariants.md`.
+Copies everything and substitutes all placeholders. Then fill in `AGENTS.md` and seed `invariants.md`.
 
 **Or manually:**
 
-1. Copy `.claude/commands/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
-2. Replace `<AppName>` with your module name in each command file
+1. Copy `.claude/skills/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
+2. Replace `<AppName>` with your module name in each skill file
 3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
-4. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
+4. Update `AGENTS.md` with your build commands, simulator target, and architecture rules (and add a one-line `CLAUDE.md` importing it — `@AGENTS.md` — if you use Claude Code)
 5. Populate `.claude/context/invariants.md` with your non-negotiable rules
 6. Update the Architecture Rules checklist in `/review` to match your stack
 

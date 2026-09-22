@@ -1,3 +1,9 @@
+---
+name: pipeline-review
+description: Audit the agent pipeline itself for drift, staleness, gaps, and inefficiencies, producing a severity-rated report. Runs automatically after every release and on a weekly schedule; can also be invoked manually.
+disable-model-invocation: true
+---
+
 # Pipeline Review Agent
 
 You are the **Pipeline Review Agent** for an iOS app project. Your job is to audit the agent pipeline for drift, staleness, gaps, and inefficiencies — and produce a severity-rated, actionable report.
@@ -12,7 +18,7 @@ Run this entire audit in the background. Save findings and send a push notificat
 ## What to audit
 
 ### 1. Stale skill references
-Check every file in `.claude/commands/` for references to skills that are not in the current registry.
+Check every file in `.claude/skills/` for references to skills that are not in the current registry.
 
 Current valid skills:
 `plan`, `spec`, `design`, `review`, `feature`, `test`, `bugfix`, `release`, `gates`, `pipeline-review`, `sync-workflow`, `trim-context`, `simplify`, `security-review`, `code-review:code-review`, `ios-build-verify`, `ios-coverage`, `ios-swiftdata-test-fixture`, `update-config`, `keybindings-help`, `fewer-permission-prompts`, `schedule`, `loop`, `claude-api`, `init`, `claude-code-setup:claude-automation-recommender`, `run`, `verify`, `status`, `benchmark`, `parallel-review`, `pr-followup`, `pragma-review`
@@ -20,21 +26,21 @@ Current valid skills:
 Flag any skill name used in a command file that does not appear on this list. Severity: **Critical**.
 
 ### 2. Template drift
-If this project was derived from a workflow template (e.g. pragma), compare `.claude/commands/` against the template. Flag:
+If this project was derived from a workflow template (e.g. pragma), compare `.claude/skills/` against the template. Flag:
 - App-specific content in the template that should use placeholders — **High**
-- Command files that exist in this project but have no template equivalent — **Medium**
-- Logic improvements in this project's commands not yet back-ported to the template — **Low**
-- Logic improvements present in the template but not yet pulled into this project's commands — **Medium** (higher than its counterpart above: this direction means the live pipeline is running stale/buggy logic already fixed elsewhere, not just a future scaffold missing an enhancement; `/sync-workflow` only pushes project → template, so this comparison is the only thing that catches it)
+- Skill files that exist in this project but have no template equivalent — **Medium**
+- Logic improvements in this project's skills not yet back-ported to the template — **Low**
+- Logic improvements present in the template but not yet pulled into this project's skills — **Medium** (higher than its counterpart above: this direction means the live pipeline is running stale/buggy logic already fixed elsewhere, not just a future scaffold missing an enhancement; `/sync-workflow` only pushes project → template, so this comparison is the only thing that catches it)
 
-### 3. CLAUDE.md token budget
-Count lines in `CLAUDE.md`. Target: ≤50 lines.
+### 3. AGENTS.md token budget
+Count lines in `AGENTS.md` (or `CLAUDE.md`, for a project still on the pre-AGENTS.md convention). Target: ≤50 lines.
 If over budget, list the specific sections that could be trimmed. Severity: **Medium** if 51–60 lines, **High** if >60 lines.
 
 ### 4. Memory staleness
 Read every file in `~/.claude/projects/<project>/memory/`.
 Flag any memory that:
 - References a branch, PR, or task that no longer exists in `git log` or `gh pr list`
-- Describes a failure mode that has since been fixed in the command files (the fix is the source of truth)
+- Describes a failure mode that has since been fixed in the skill files (the fix is the source of truth)
 - Has not been confirmed valid in >60 days and makes a specific factual claim
 Severity: **Medium** per stale entry.
 
@@ -43,13 +49,13 @@ Check whether the following gates exist as command files or documented steps in 
 
 | Gate | Required location | Severity if missing |
 |---|---|---|
-| Pre-PR gate (`/gates`) | `.claude/commands/gates.md` | Critical |
+| Pre-PR gate (`/gates`) | `.claude/skills/gates/SKILL.md` | Critical |
 | Build verification (separate from tests) | Gate 1 of `/gates` | High |
 | CHANGELOG incremental update | Step in `/feature` | High |
-| `/review` before `/test` (not parallel) | `feature.md` Done-when + `CLAUDE.md` | High |
+| `/review` before `/test` (not parallel) | `feature/SKILL.md` Done-when + `AGENTS.md`/`CLAUDE.md` | High |
 | Coverage check (`ios-coverage` skill) | `/gates` or post-`/test` step | Medium |
 | Security check for sensitive PRs | `security-review` skill reference | Medium |
-| Session recovery command (`/status`) | `.claude/commands/status.md` | Low |
+| Session recovery command (`/status`) | `.claude/skills/status/SKILL.md` | Low |
 
 ### 6. Command file completeness
 Each command file must have: **Trigger**, **Process**, **Done when** sections.

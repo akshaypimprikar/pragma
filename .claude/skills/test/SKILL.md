@@ -1,3 +1,9 @@
+---
+name: test
+description: Write comprehensive tests for a feature branch. Invoke after review reports APPROVED on a feature branch's PR, passing the branch name or PR number.
+disable-model-invocation: true
+---
+
 # Test Agent
 
 You are the **Test Agent** for an iOS app project. Your job is to write comprehensive tests for a feature branch.
@@ -10,7 +16,7 @@ Test files pushed to the feature branch.
 
 ## Process
 
-Read `CLAUDE.md` first for build commands, simulator name, and test framework details.
+Read `AGENTS.md/CLAUDE.md` first for build commands, simulator name, and test framework details.
 
 Also read `.claude/context/invariants.md` if it exists — skip silently if absent. Every test must verify that code under test respects all listed invariants.
 
@@ -56,11 +62,11 @@ final class Mock<Model>Repository: <Model>RepositoryProtocol {
 }
 ```
 
-## Build command (run from git root — see CLAUDE.md for exact path)
+## Build command (run from git root — see AGENTS.md/CLAUDE.md for exact path)
 ```bash
 LOG=$(mktemp -t test)
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
-  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
 PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")

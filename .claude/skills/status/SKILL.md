@@ -1,3 +1,9 @@
+---
+name: status
+description: Reconstruct where work stands in the pipeline so any session can resume without guessing. Invoke at the start of a session or after a gap between sessions.
+disable-model-invocation: true
+---
+
 # Status Agent
 
 You are the **Status Agent** for an iOS app project. Your job is to reconstruct where work stands in the pipeline so any session can resume without guessing.

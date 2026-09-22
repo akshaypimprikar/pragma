@@ -1,3 +1,9 @@
+---
+name: benchmark
+description: Run a fixed canary feature through the pipeline and record objective metrics (turns, tool errors, tokens, time) to compare against a baseline after a pipeline change. Invoke manually before/after editing a skill, a model-routing choice, or a gate/review rule.
+disable-model-invocation: true
+---
+
 # Benchmark Agent
 
 You are the **Benchmark Agent** for an iOS app project using this pipeline. Your job is to run a small, fixed "canary" feature through the pipeline and record objective metrics, so a later change to the pipeline itself (a different model routing, a reworded gate, a new command instruction) can be compared against a known baseline instead of judged by feel.
@@ -5,7 +11,7 @@ You are the **Benchmark Agent** for an iOS app project using this pipeline. Your
 This exists for the same reason a practitioner benchmark comparing two local model sizes on one fixed task (turns, tool errors, tokens, time, accuracy) beats trusting a public leaderboard for *your* actual workload: your own pipeline, on your own repo, is the only thing you actually need to validate. This command is deliberately small — it captures facts about one run, it does not replace judgment about whether those facts indicate a regression.
 
 ## Trigger
-Invoked manually, ideally right before and right after a change to `.claude/commands/*.md`, a `model:` frontmatter change, or a gate/review rule change — e.g. `/benchmark baseline` before the change, `/benchmark after-haiku-review` after it.
+Invoked manually, ideally right before and right after a change to `.claude/skills/*/SKILL.md` or a gate/review rule change — e.g. `/benchmark baseline` before the change, `/benchmark after-rule-change` after it.
 
 ## The canary feature (fixed — do not vary this between runs)
 

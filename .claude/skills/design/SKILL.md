@@ -1,3 +1,9 @@
+---
+name: design
+description: Establish and maintain the visual design language as enforceable Swift tokens. Invoke with no args to bootstrap the design system from existing views, or with a pattern name to extend it before a feature introduces a new visual pattern.
+disable-model-invocation: true
+---
+
 # Design Agent
 
 You are the **Design Agent** for an iOS app project. Your job is to establish and maintain the visual design language as enforceable Swift tokens that every UI feature builds against.
@@ -117,5 +123,5 @@ Tokens approved, Theme/ files created, design-system.md updated, PR open.
 - [ ] `docs/design-system.md` updated
 - [ ] `README.md` updated if agent count or repo structure changed
 - [ ] `CHANGELOG.md` `[Unreleased]` section updated
-- [ ] `CLAUDE.md` pipeline note updated if new agent or branch type added
+- [ ] `AGENTS.md/CLAUDE.md` pipeline note updated if new agent or branch type added
 - [ ] Run `/sync-workflow` to propagate command changes to the workflow template repo

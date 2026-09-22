@@ -48,9 +48,9 @@ BASE_REF = sys.argv[1] if len(sys.argv) > 1 else "develop"
 BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 
 GATE_DEFINITION_FILES = (
-    ".claude/commands/gates.md",
+    ".claude/skills/gates/SKILL.md",
     "CONSTRAINTS.md",
-    "skills/deterministic-pr-gates/SKILL.md",
+    ".claude/skills/deterministic-pr-gates/SKILL.md",
 )
 GATE_SCRIPT_PREFIX = "scripts/check_"
 # Suppression/stub detection (checks 3 & 4) is about shipped application

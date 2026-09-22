@@ -1,5 +1,7 @@
 ---
-model: claude-haiku-4-5-20251001
+name: gates
+description: Verify a feature branch meets all pre-PR criteria (build, tests, coverage, gate integrity, and more) before opening the pull request. Invoke at the end of a feature session, passing the branch name.
+disable-model-invocation: true
 ---
 
 # Gates Agent
@@ -11,7 +13,7 @@ Invoked at the end of every `/feature` session before `gh pr create` (e.g. `/gat
 
 ## Process
 
-All commands run from the git root (see `CLAUDE.md` for the exact path and project name).
+All commands run from the git root (see `AGENTS.md/CLAUDE.md` for the exact path and project name).
 
 Read `.claude/context/invariants.md` if it exists — skip silently if absent. Any gate that catches a violation not already listed as an invariant should append it as a `[CANDIDATE]` entry (see "## After all gates pass").
 
@@ -42,7 +44,7 @@ touching a `.swift` file. Gates 3–11 still scope their own greps to `*.swift` 
 ```bash
 LOG=$(mktemp -t gate1-build)
 xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
-  -configuration Debug -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -configuration Debug -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "BUILD SUCCEEDED" "$LOG" \
@@ -64,7 +66,7 @@ for the two known Xcode 27 patterns.
 ```bash
 LOG=$(mktemp -t gate2-test)
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
-  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
 PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")
@@ -160,7 +162,7 @@ stands when `/gates` runs.
 Skip this gate if the branch adds no new files in the scoped layer directories (exit 0 with
 nothing checked — different from exit 2, which means the directories themselves are wrong).
 
-### Gate 10 — Architecture & layer-rule compliance (template — instantiate from your CLAUDE.md's enforced architectural rules)
+### Gate 10 — Architecture & layer-rule compliance (template — instantiate from your AGENTS.md/CLAUDE.md's enforced architectural rules)
 This is the single authoritative check for layer-separation, type-safety, and
 pattern rules. `/review` re-runs this gate's grep-only commands at the PR HEAD SHA and
 compares the result to your gate summary, but does not repeat the build, test, or
@@ -168,7 +170,7 @@ coverage runs (a full local cycle is expensive; running it once here instead of 
 in `/review` is the point of Gates 1, 2, and 6).
 ```bash
 # Example: a layer that must not import a forbidden module (e.g. Domain Services must not import a persistence framework)
-git diff develop...HEAD --name-only -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -ln '^import <forbidden import>' 2>/dev/null
+git diff develop...HEAD --name-only -- '*.swift' | grep '<path to the constrained layer, per AGENTS.md/CLAUDE.md>' | xargs grep -ln '^import <forbidden import>' 2>/dev/null
 
 # Example: repository/protocol layer purity — protocols should import only the minimum (e.g. Foundation), never the persistence framework or UI framework directly
 git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your repository-protocol layer>' | xargs grep -n '^import <forbidden import>' 2>/dev/null
@@ -199,7 +201,7 @@ git diff develop...HEAD --name-only -- '*.swift' | xargs grep -nHiE \
 # Generic (not project-specific): no force-unwrap-via-try!/as! in changed production code (Tests excluded)
 git diff develop...HEAD --name-only -- '*.swift' | grep -v 'Tests/' | xargs grep -nE '\btry!|as!' 2>/dev/null
 
-# Generic: unit/integration tests must use the test framework CLAUDE.md specifies, not an alternative
+# Generic: unit/integration tests must use the test framework AGENTS.md/CLAUDE.md specifies, not an alternative
 git diff develop...HEAD --name-only -- '<your test target>/*.swift' | xargs grep -l '<pattern matching the forbidden alternative framework, e.g. XCTestCase for a Testing-framework project>' 2>/dev/null
 
 # Generic: UI test selectors must match a real accessibilityIdentifier in production views
@@ -217,10 +219,10 @@ git diff develop...HEAD --name-only -- '*.swift' | grep '<path to your Models la
 # Example: new Domain Services must have no stored mutable state — no `var` stored properties.
 # Excludes computed properties (bodies opening with `{` or protocol `{ get }` requirements),
 # which the naive pattern alone can't distinguish from genuinely stored `var`s.
-git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to the constrained layer, per CLAUDE.md>' | xargs grep -nE '^\s*(private\s+)?var\s+\w+\s*[:=]' 2>/dev/null | grep -v '{\s*$' | grep -v '{ get'
+git diff develop...HEAD --name-only --diff-filter=A -- '*.swift' | grep '<path to the constrained layer, per AGENTS.md/CLAUDE.md>' | xargs grep -nE '^\s*(private\s+)?var\s+\w+\s*[:=]' 2>/dev/null | grep -v '{\s*$' | grep -v '{ get'
 ```
 Pass: every command returns no output (the UI-selector listing is cross-checked by hand/agent against your Views layer).
-Fail: list every offending file and line, grouped by which rule it violates. This gate exists to catch CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least the layer-separation and type-safety examples instantiated here. Leave placeholder examples as-is only if CLAUDE.md defines no enforced rule of that shape yet; the two fully-generic checks (force-unwrap, UI-selector-matching) apply to any Swift/XCTest project regardless.
+Fail: list every offending file and line, grouped by which rule it violates. This gate exists to catch AGENTS.md/CLAUDE.md's architectural rules *before* a PR is opened rather than only at `/review` (post-PR) — every consuming project should have at least the layer-separation and type-safety examples instantiated here. Leave placeholder examples as-is only if AGENTS.md/CLAUDE.md defines no enforced rule of that shape yet; the two fully-generic checks (force-unwrap, UI-selector-matching) apply to any Swift/XCTest project regardless.
 
 ### Gate 11 — Gate integrity (floor-guard)
 ```bash
@@ -329,9 +331,9 @@ gh pr create \
 
 ## Test plan
 - [ ] Full test suite passes (TEST SUCCEEDED)
-- [ ] Tested on simulator (see CLAUDE.md)
+- [ ] Tested on simulator (see AGENTS.md/CLAUDE.md)
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+<append your coding agent's own PR-attribution footer here, if it uses one — e.g. Claude Code appends "🤖 Generated with [Claude Code](https://claude.com/claude-code)">
 EOF
 )"
 ```
@@ -343,11 +345,11 @@ Exceptions: `release/*` and `hotfix/*` branches use `--base main`.
 
 ## A known limitation: no native guard against self-modifying guardrail files
 
-Gates 0–11 are all agent-instruction-driven checks — read the prompt, run the described commands, evaluate. Nothing in this pipeline uses Claude Code's native `PreToolUse` hook mechanism to block a `Write`/`Edit` tool call against this file, `CLAUDE.md`, or `.claude/context/invariants.md` while an agent session is running. That means an agent under pressure to make a stuck gate pass — most exposed during an unattended `/loop` run with no human turn in between — has nothing stopping it from editing this file's gate definition instead of fixing the underlying violation, then reporting a clean gate summary afterward.
+Gates 0–11 are all agent-instruction-driven checks — read the prompt, run the described commands, evaluate. Nothing in this pipeline uses Claude Code's native `PreToolUse` hook mechanism to block a `Write`/`Edit` tool call against this file, `AGENTS.md/CLAUDE.md`, or `.claude/context/invariants.md` while an agent session is running. That means an agent under pressure to make a stuck gate pass — most exposed during an unattended `/loop` run with no human turn in between — has nothing stopping it from editing this file's gate definition instead of fixing the underlying violation, then reporting a clean gate summary afterward.
 
 `/pipeline-review`'s Settings hygiene check (item 7) reads `.claude/settings.json` in the *consuming* project for hook-config hygiene, but that's a periodic, after-the-fact audit — not a live block during a session. Pragma itself ships no `.claude/settings.json` of its own (confirmed N/A in the 2026-09-07 pipeline review; pragma is plugin/template source, and settings.json is generated per consuming project, not by pragma's own setup path).
 
-Closing this for real means adding a native `PreToolUse` hook — in a consuming project's generated `.claude/settings.json`, since pragma has none to ship — that blocks `Write`/`Edit` calls targeting `.claude/commands/*.md`, `CLAUDE.md`, and `.claude/context/invariants.md` during autonomous runs. That's a genuine architecture addition, not a gate tweak, so it's tracked here as a known limitation rather than implemented speculatively. Sourced from a practitioner pattern (`karanb192/claude-code-hooks`'s "config-guard" hook, built in direct response to the ChainDrop npm worm persisting itself via `.claude/settings.json` rewrites) surfaced in the 2026-09-08 Agentic AI Intelligence Report.
+Closing this for real means adding a native `PreToolUse` hook — in a consuming project's generated `.claude/settings.json`, since pragma has none to ship — that blocks `Write`/`Edit` calls targeting `.claude/skills/*/SKILL.md`, `AGENTS.md`, `AGENTS.md/CLAUDE.md`, and `.claude/context/invariants.md` during autonomous runs. That's a genuine architecture addition, not a gate tweak, so it's tracked here as a known limitation rather than implemented speculatively. Sourced from a practitioner pattern (`karanb192/claude-code-hooks`'s "config-guard" hook, built in direct response to the ChainDrop npm worm persisting itself via `.claude/settings.json` rewrites) surfaced in the 2026-09-08 Agentic AI Intelligence Report.
 
 ## Done when
 All 11 gates pass, PR is open, and the PR URL is returned to the user.

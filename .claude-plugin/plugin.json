@@ -22,5 +22,5 @@
     "ci-cd"
   ],
   "commands": ["./.claude/commands/"],
-  "skills": ["./skills/"]
+  "skills": ["./.claude/skills/"]
 }

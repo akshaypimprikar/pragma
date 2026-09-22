@@ -117,13 +117,18 @@ success "Skills ready ($(find "$PROJECT_DIR/.claude/skills" -name "SKILL.md" | w
 # compare against), so every match is backed up unconditionally rather than
 # guessed at — safe by construction, never a silent delete.
 if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
+    # One backup dir for the whole migration, computed before the loop — not
+    # per file inside it. date's 1-second resolution means recomputing this
+    # per iteration collides across most/all of a multi-file migration, so
+    # each file would land in its own separate -x-suffixed directory instead
+    # of one consolidated backup.
+    MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
+    while [[ -e "$MIGRATE_BACKUP_DIR" ]]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
     MIGRATED=""
     while IFS= read -r rel; do
         name="$(dirname "$rel")"
         old="$PROJECT_DIR/.claude/commands/$name.md"
         [[ -f "$old" ]] || continue
-        MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
-        while [[ -e "$MIGRATE_BACKUP_DIR" ]]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
         mkdir -p "$MIGRATE_BACKUP_DIR"
         cp -L "$old" "$MIGRATE_BACKUP_DIR/"
         rm -f "$old"
@@ -131,7 +136,7 @@ if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
     done <<< "$PRAGMA_SKILLS"
     if [[ -n "$MIGRATED" ]]; then
         warn "Superseded old .claude/commands/ file(s) by the new skill of the same name:${MIGRATED}"
-        warn "Each was backed up before removal — check .claude/commands.bak-*/ if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
+        warn "Each was backed up before removal — check ${MIGRATE_BACKUP_DIR#"$PROJECT_DIR"/} if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
     fi
 fi
 

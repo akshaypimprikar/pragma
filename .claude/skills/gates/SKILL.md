@@ -69,15 +69,19 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase '.*' passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed" "$LOG")
+PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "GATE 2 PASS ($PASSED tests executed)" || echo "GATE 2 FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
 Pass: `GATE 2 PASS` with an executed-test count above zero. The count is required because
 `xcodebuild test` can report `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change
-matches nothing. The count is read from per-test-case result lines (`Test case '…' passed` for Swift
-Testing, `Test Case '…' passed` for XCTest — the regex accepts both capitalizations; adjust it if your
-Xcode version words the lines differently, and confirm on a real run that it counts your suite).
+matches nothing. The count is read from per-test-case result lines: `Test Case '…' passed` for XCTest,
+and `✔ Test "…" passed …` for Swift Testing's own console format (not `Test case '…' passed` — that
+older wording doesn't match what `xcodebuild test` actually prints for a Swift Testing suite). Both
+symbol variants (`✔`/`✓`, `✘`/`✗`) are matched since different Xcode/terminal versions render this
+differently — this has not been confirmed against every Xcode version's exact output, so **run it once
+against a real green suite before trusting it**, and adjust the pattern if your version words or
+formats the lines differently.
 Fail: empty log, non-zero exit, any failed test case, or zero
 executed tests (a test that fails once and passes on `-retry-tests-on-failure` still counts as failed here — fail-closed on purpose). Report the
 executed-test count in the gate summary.

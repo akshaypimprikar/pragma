@@ -39,6 +39,7 @@ Usage: python3 scripts/check_gate_integrity.py [base_ref] [branch]
   automatically, but any other CI provider (or a push-triggered GHA run)
   has no such env var, so pass the branch explicitly there.
 """
+import difflib
 import os
 import re
 import subprocess
@@ -198,13 +199,16 @@ def find_stubs(path, diff):
 
 def paired_threshold_drops(diff):
     """Within each contiguous removed/added block in a hunk, pair a removed
-    line to an added line only when they're identical once percentages are
-    normalized out — i.e. the same line's number changed. Plain positional
-    pairing (zip) breaks when a hunk's removed/added line counts differ
-    (e.g. an unrelated comment added alongside the real edit); matching by
-    normalized content instead finds the real pair regardless of position,
-    and simply skips lines with no textual counterpart rather than
-    mismatching them."""
+    line to an added line once percentages are normalized out. Plain
+    positional pairing (zip) breaks when a hunk's removed/added line counts
+    differ (e.g. an unrelated comment added alongside the real edit), so
+    pairing is content-based instead: an exact normalized match first (the
+    same line, only the number changed), falling back to the closest
+    remaining line by text similarity when nothing matches exactly (the
+    line was reworded alongside the percentage change, not just the
+    number). A similarity floor on the fallback keeps it from mismatching
+    two genuinely unrelated lines; anything left over — no exact or
+    close-enough match — is skipped rather than force-paired."""
     removed_buf, added_buf, drops = [], [], []
 
     def normalize(line):
@@ -214,19 +218,36 @@ def paired_threshold_drops(diff):
         return PERCENT_PATTERN.sub("N%", line[1:])
 
     def flush():
-        added_by_norm = {}
-        for a in added_buf:
-            added_by_norm.setdefault(normalize(a), []).append(a)
+        added_remaining = list(added_buf)
         for r in removed_buf:
-            candidates = added_by_norm.get(normalize(r))
-            if not candidates:
+            rn = normalize(r)
+            # Fast path: same line except the number itself changed.
+            a = next((cand for cand in added_remaining if normalize(cand) == rn), None)
+            if a is None:
+                # No exact match — the line may have been reworded alongside
+                # the percentage change ("must be" → "should be"), not just
+                # the number, so normalize() alone won't find its pair.
+                # Fall back to the closest remaining added line by text
+                # similarity, so a drop isn't missed just because the
+                # sentence around it also changed. The similarity floor
+                # keeps this from pairing genuinely unrelated lines to
+                # each other — an unrelated line elsewhere in the hunk
+                # scores far below it.
+                best, best_ratio = None, 0.0
+                for cand in added_remaining:
+                    ratio = difflib.SequenceMatcher(None, rn, normalize(cand)).ratio()
+                    if ratio > best_ratio:
+                        best, best_ratio = cand, ratio
+                if best is not None and best_ratio >= 0.5:
+                    a = best
+            if a is None:
                 continue
-            a = candidates.pop(0)
-            rn, an = PERCENT_PATTERN.findall(r), PERCENT_PATTERN.findall(a)
+            added_remaining.remove(a)
+            rn_vals, an_vals = PERCENT_PATTERN.findall(r), PERCENT_PATTERN.findall(a)
             # A line can carry more than one percentage ("≥90% test coverage
             # and ≥80% doc coverage") — compare every position, not just the
             # first, so a drop in a later number on the same line isn't missed.
-            for rv, av in zip(rn, an):
+            for rv, av in zip(rn_vals, an_vals):
                 if float(av) < float(rv):
                     drops.append((float(rv), float(av)))
         removed_buf.clear()

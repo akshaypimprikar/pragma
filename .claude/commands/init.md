@@ -33,20 +33,58 @@ Any `STOP:` line (the block exits non-zero) means do not continue — if the tar
 
 ### 2. Copy and substitute skill files
 
-Before copying, compare each existing `$PROJECT_DIR/.claude/skills/*/SKILL.md` with the pragma file of the same name (after `<AppName>` substitution). If any differ, the user customized them — copy the whole directory to `$PROJECT_DIR/.claude/skills.bak-<timestamp>/` first and tell them so; never overwrite customized skills silently.
+Before copying, compare each existing `$PROJECT_DIR/.claude/skills/*/SKILL.md` with the pragma file of the same name (after `<AppName>` substitution). If any differ, the user customized them — copy the whole directory to `$PROJECT_DIR/.claude/skills.bak-<timestamp>/` first and tell them so; never overwrite customized skills silently. Also migrate any leftover `$PROJECT_DIR/.claude/commands/<name>.md` from a pre-skills pragma install: it's not diffable against this repo's old content (that content no longer exists here to compare against), so back up every match unconditionally to `$PROJECT_DIR/.claude/commands.bak-<timestamp>/` and remove it, so it can't shadow the new same-named skill; tell the user if they'd customized one, they should re-apply it into the matching `.claude/skills/<name>/SKILL.md`. The single block below implements both — do not skip straight to the final `cp -r`, it would silently discard any customization the comparison found, and skipping the migration loop would leave the old command file in place to collide with the new skill.
 
 ```bash
 mkdir -p "$PROJECT_DIR/.claude/skills"
+PRAGMA_SKILLS="$(cd "${CLAUDE_PLUGIN_ROOT}/.claude/skills" && find . -name 'SKILL.md' | sed 's|^\./||')"
+
+# Customized-skill backup (compare before overwrite)
+CUSTOMIZED=""
+while IFS= read -r rel; do
+  dest="$PROJECT_DIR/.claude/skills/$rel"
+  [ -f "$dest" ] || continue
+  sed "s|<AppName>|$APP_NAME|g" "${CLAUDE_PLUGIN_ROOT}/.claude/skills/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
+done <<< "$PRAGMA_SKILLS"
+if [ -n "$CUSTOMIZED" ]; then
+  BACKUP_DIR="$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)"
+  while [ -e "$BACKUP_DIR" ]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
+  cp -RL "$PROJECT_DIR/.claude/skills" "$BACKUP_DIR"
+  echo "Existing skill file(s) differ from pragma's:${CUSTOMIZED}"
+  echo "Backed up .claude/skills/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
+fi
+
+# Migrate an older command-based install — one backup dir for the whole
+# migration, computed once here, not recomputed per file inside the loop:
+# date's 1-second resolution would otherwise scatter a multi-file migration
+# across several separate backup directories instead of one.
+if [ -d "$PROJECT_DIR/.claude/commands" ]; then
+  MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
+  while [ -e "$MIGRATE_BACKUP_DIR" ]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
+  MIGRATED=""
+  while IFS= read -r rel; do
+    name="$(dirname "$rel")"
+    old="$PROJECT_DIR/.claude/commands/$name.md"
+    [ -f "$old" ] || continue
+    mkdir -p "$MIGRATE_BACKUP_DIR"
+    cp -L "$old" "$MIGRATE_BACKUP_DIR/"
+    rm -f "$old"
+    MIGRATED="$MIGRATED $name"
+  done <<< "$PRAGMA_SKILLS"
+  if [ -n "$MIGRATED" ]; then
+    echo "Superseded old .claude/commands/ file(s) by the new skill of the same name:${MIGRATED}"
+    echo "Each was backed up before removal — check ${MIGRATE_BACKUP_DIR#"$PROJECT_DIR"/} if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
+  fi
+fi
+
 cp -r "${CLAUDE_PLUGIN_ROOT}/.claude/skills/." "$PROJECT_DIR/.claude/skills/"
 (cd "${CLAUDE_PLUGIN_ROOT}/.claude/skills" && find . -name "SKILL.md") | while read -r rel; do
   sed -i '' "s|<AppName>|$APP_NAME|g" "$PROJECT_DIR/.claude/skills/$rel"
 done
 ```
-(Use GNU `sed -i` without the trailing `''` on Linux — detect with `sed --version 2>/dev/null | grep -q GNU`.)
+(Use GNU `sed -i` without the trailing `''` on Linux — detect with `sed --version 2>/dev/null | grep -q GNU`.) This mirrors `scripts/setup.sh`'s equivalent logic exactly — reuse that behavior rather than reinventing it, so the two installers don't drift apart on what counts as "customized."
 
 `.claude/skills/` ships only consumer-facing skills — `init.md` and `pragma-review.md` stay pragma-repo-only meta-commands under `.claude/commands/` and are never part of this copy.
-
-**Migrate an older command-based install.** If `$PROJECT_DIR/.claude/commands/<name>.md` exists for any `<name>` just installed as a skill, it's a leftover from a pragma version that shipped commands instead of skills — left in place it would shadow or collide with the new skill answering to the same name. There's no old-format reference left in this repo to diff it against, so back up every match unconditionally (never a silent delete) to `$PROJECT_DIR/.claude/commands.bak-<timestamp>/`, then remove the original, and tell the user which names were migrated and where the backup is — in case they'd customized one, they should re-apply that customization into the matching `.claude/skills/<name>/SKILL.md`.
 
 ### 3. Copy context, scripts, and CI workflows
 

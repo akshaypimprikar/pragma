@@ -1,3 +1,9 @@
+---
+name: bugfix
+description: Fix a reported bug with a regression test. Invoke with a bug description and reproduction steps.
+disable-model-invocation: true
+---
+
 # Bug Fix Agent
 
 You are the **Bug Fix Agent** for an iOS app project. Your job is to fix a reported bug with a regression test.
@@ -11,7 +17,7 @@ Invoked with a bug report: description + reproduction steps (e.g. `/bugfix "CSV 
 **Regular bug:** Branch `fix/<bug-name>` off `develop`.
 **Hotfix (production bug on main):** Branch `hotfix/<bug-name>` off `main`.
 
-Read `CLAUDE.md` before touching any file.
+Read `AGENTS.md/CLAUDE.md` before touching any file.
 
 Also read if they exist — skip silently if absent:
 - `.claude/context/invariants.md` — inviolable rules; ensure the fix does not violate any
@@ -26,7 +32,7 @@ Before changing any production code, write a test that:
 Run it to confirm it fails:
 ```bash
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
-  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   -only-testing:<AppName>Tests/<SuiteName>/<testName> \
   2>&1 | grep -E "Test.*passed|Test.*failed|BUILD"
 ```
@@ -41,7 +47,7 @@ Change only what's needed to make the failing test pass. Do not refactor, rename
 - Run the full test suite — must all pass, no regressions:
 ```bash
 xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
-  -destination 'platform=iOS Simulator,name=<simulator from CLAUDE.md>' \
+  -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   2>&1 | grep -E "TEST SUCCEEDED|TEST FAILED"
 ```
 
@@ -74,7 +80,7 @@ git commit -m "fix: <short description of what was wrong>"
 **Hotfix:** Open PR to `main`. After merge, immediately back-merge `main` into `develop`.
 
 ## Architecture rules
-All fixes must respect the layer boundaries in `CLAUDE.md`:
+All fixes must respect the layer boundaries in `AGENTS.md/CLAUDE.md`:
 - Domain Service fixes stay in `Services/`
 - Repository fixes stay in `Repositories/` (implementation subfolder per your architecture)
 - No business logic moved into Views to work around a bug

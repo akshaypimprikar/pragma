@@ -26,9 +26,8 @@ on:
       - 'scripts/**'
       # Gate-definition files that scripts/check_gate_integrity.py guards; without
       # these a PR that only edits them would never trigger this workflow.
-      - '.claude/commands/**'
+      - '.claude/skills/**'
       - 'CONSTRAINTS.md'
-      - 'skills/deterministic-pr-gates/**'
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}

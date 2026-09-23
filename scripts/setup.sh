@@ -6,16 +6,22 @@
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
 #
 # What it does:
-#   - Copies .claude/commands/, .claude/context/, scripts/, and
-#     scaffold/.github/workflows/ into your project, excluding pragma-only
-#     meta-commands (init.md, pragma-review.md) that only make sense inside
-#     the pragma repo itself
-#   - Replaces <AppName> in the copied command files with APP_NAME
-#   - Before overwriting, backs up .claude/commands/ to
-#     .claude/commands.bak-<timestamp>/ if any existing command file differs
+#   - Copies .claude/skills/, .claude/context/, scripts/, and
+#     scaffold/.github/workflows/ into your project. .claude/skills/ is the
+#     SKILL.md format (an open standard also read by Cursor, Codex, GitHub
+#     Copilot, Windsurf, and others), replacing the old .claude/commands/
+#     directory (Claude Code-only) as pragma's pipeline layer
+#   - Replaces <AppName> in the copied skill files with APP_NAME
+#   - Before overwriting, backs up .claude/skills/ to
+#     .claude/skills.bak-<timestamp>/ if any existing skill file differs
 #     from what pragma is about to write (i.e. you customized it)
+#   - Migrates an older install: any .claude/commands/<name>.md that shares
+#     a name with a skill being installed is backed up alongside it and
+#     removed, so the old command can't shadow or collide with the new skill
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
-#   - Generates a starter CLAUDE.md if one doesn't exist
+#   - Generates a starter AGENTS.md if one doesn't exist, plus a CLAUDE.md
+#     that imports it (@AGENTS.md), so any AGENTS.md-reading agent and
+#     Claude Code both pick up the same content
 
 set -euo pipefail
 
@@ -66,45 +72,73 @@ sedi() {
     fi
 }
 
-# ── 1. Commands ───────────────────────────────────────────────────────────────
-info "Copying command files…"
-mkdir -p "$PROJECT_DIR/.claude/commands"
+# ── 1. Skills ────────────────────────────────────────────────────────────────
+info "Copying skill files…"
+mkdir -p "$PROJECT_DIR/.claude/skills"
 
-# Belt-and-braces for the rm below: a symlinked .claude/ or .claude/commands/
-# can point at pragma's own commands even when PROJECT_DIR itself does not.
-[[ "$PROJECT_DIR/.claude/commands" -ef "$REPO_ROOT/.claude/commands" ]] && die "$PROJECT_DIR/.claude/commands resolves to pragma's own .claude/commands — refusing to copy onto or delete from it."
+# Belt-and-braces for the rm below: a symlinked .claude/ or .claude/skills/
+# can point at pragma's own skills even when PROJECT_DIR itself does not.
+[[ "$PROJECT_DIR/.claude/skills" -ef "$REPO_ROOT/.claude/skills" ]] && die "$PROJECT_DIR/.claude/skills resolves to pragma's own .claude/skills — refusing to copy onto or delete from it."
 
-# Back up before overwriting: an existing command that differs from what we're
+# Back up before overwriting: an existing skill that differs from what we're
 # about to write (after <AppName> substitution) is a customization, and cp -r
 # below would silently replace it.
-PRAGMA_CMDS="$(cd "$REPO_ROOT/.claude/commands" && find . -name '*.md' | sed 's|^\./||')"
+PRAGMA_SKILLS="$(cd "$REPO_ROOT/.claude/skills" && find . -name 'SKILL.md' | sed 's|^\./||')"
 CUSTOMIZED=""
 while IFS= read -r rel; do
-    dest="$PROJECT_DIR/.claude/commands/$rel"
+    dest="$PROJECT_DIR/.claude/skills/$rel"
     [[ -f "$dest" ]] || continue
-    sed "s|<AppName>|${APP_NAME}|g" "$REPO_ROOT/.claude/commands/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
-done <<< "$PRAGMA_CMDS"
+    sed "s|<AppName>|${APP_NAME}|g" "$REPO_ROOT/.claude/skills/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
+done <<< "$PRAGMA_SKILLS"
 if [[ -n "$CUSTOMIZED" ]]; then
-    BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_DIR="$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)"
     # Same-second re-run must not nest inside the earlier backup.
     while [[ -e "$BACKUP_DIR" ]]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
-    # -L: a symlinked .claude/commands must be backed up as files, not as another symlink.
-    cp -RL "$PROJECT_DIR/.claude/commands" "$BACKUP_DIR"
-    warn "Existing command file(s) differ from pragma's:${CUSTOMIZED}"
-    warn "Backed up .claude/commands/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
+    # -L: a symlinked .claude/skills must be backed up as files, not as another symlink.
+    cp -RL "$PROJECT_DIR/.claude/skills" "$BACKUP_DIR"
+    warn "Existing skill file(s) differ from pragma's:${CUSTOMIZED}"
+    warn "Backed up .claude/skills/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
 fi
 
-cp -r "$REPO_ROOT/.claude/commands/." "$PROJECT_DIR/.claude/commands/"
+cp -r "$REPO_ROOT/.claude/skills/." "$PROJECT_DIR/.claude/skills/"
 
-# Pragma-only meta-commands — operate on this repo itself, not a consumer project
-rm -f "$PROJECT_DIR/.claude/commands/init.md" "$PROJECT_DIR/.claude/commands/pragma-review.md"
-
-info "Substituting <AppName> in commands…"
+info "Substituting <AppName> in skills…"
 while IFS= read -r rel; do
-    dest="$PROJECT_DIR/.claude/commands/$rel"
+    dest="$PROJECT_DIR/.claude/skills/$rel"
     if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
-done <<< "$PRAGMA_CMDS"
-success "Commands ready ($(find "$PROJECT_DIR/.claude/commands" -name "*.md" | wc -l | tr -d ' ') files)"
+done <<< "$PRAGMA_SKILLS"
+success "Skills ready ($(find "$PROJECT_DIR/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ') files)"
+
+# ── 1b. Migrate an older command-based install ────────────────────────────────
+# A project set up before this version has .claude/commands/<name>.md for the
+# same names now shipped as .claude/skills/<name>/SKILL.md. Left in place, the
+# old command would shadow or collide with the new skill. We can't diff it
+# against pragma's old content (that content no longer exists in this repo to
+# compare against), so every match is backed up unconditionally rather than
+# guessed at — safe by construction, never a silent delete.
+if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
+    # One backup dir for the whole migration, computed before the loop — not
+    # per file inside it. date's 1-second resolution means recomputing this
+    # per iteration collides across most/all of a multi-file migration, so
+    # each file would land in its own separate -x-suffixed directory instead
+    # of one consolidated backup.
+    MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
+    while [[ -e "$MIGRATE_BACKUP_DIR" ]]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
+    MIGRATED=""
+    while IFS= read -r rel; do
+        name="$(dirname "$rel")"
+        old="$PROJECT_DIR/.claude/commands/$name.md"
+        [[ -f "$old" ]] || continue
+        mkdir -p "$MIGRATE_BACKUP_DIR"
+        cp -L "$old" "$MIGRATE_BACKUP_DIR/"
+        rm -f "$old"
+        MIGRATED="$MIGRATED $name"
+    done <<< "$PRAGMA_SKILLS"
+    if [[ -n "$MIGRATED" ]]; then
+        warn "Superseded old .claude/commands/ file(s) by the new skill of the same name:${MIGRATED}"
+        warn "Each was backed up before removal — check ${MIGRATE_BACKUP_DIR#"$PROJECT_DIR"/} if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
+    fi
+fi
 
 # ── 2. Context ────────────────────────────────────────────────────────────────
 info "Copying context files…"
@@ -158,14 +192,24 @@ for f in "$REPO_ROOT/scaffold/.github/workflows/"*.yml; do
 done
 success "CI workflows ready"
 
-# ── 5. CLAUDE.md ──────────────────────────────────────────────────────────────
+# ── 5. AGENTS.md / CLAUDE.md ──────────────────────────────────────────────────
+# AGENTS.md carries the real content so any AGENTS.md-reading agent picks it
+# up; CLAUDE.md becomes a one-line import so Claude Code's own behavior is
+# unchanged. If CLAUDE.md already exists with real content (pre-dating this
+# split), leave both alone rather than silently overwriting it with a stub —
+# that would delete whatever the user already wrote.
+AGENTS_MD="$PROJECT_DIR/AGENTS.md"
 CLAUDE_MD="$PROJECT_DIR/CLAUDE.md"
 if [[ -f "$CLAUDE_MD" ]]; then
-    warn "CLAUDE.md already exists — skipping"
+    warn "CLAUDE.md already exists — skipping AGENTS.md/CLAUDE.md generation (reconcile manually if you want AGENTS.md too)"
+elif [[ -f "$AGENTS_MD" ]]; then
+    info "AGENTS.md already exists — writing CLAUDE.md as an import stub…"
+    echo '@AGENTS.md' > "$CLAUDE_MD"
+    success "CLAUDE.md generated (imports AGENTS.md)"
 else
-    info "Generating starter CLAUDE.md…"
-    cat > "$CLAUDE_MD" <<CLAUDEMD
-# CLAUDE.md
+    info "Generating starter AGENTS.md…"
+    cat > "$AGENTS_MD" <<CLAUDEMD
+# AGENTS.md
 
 ${APP_NAME} — iOS app (SwiftUI + SwiftData).
 
@@ -206,14 +250,16 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\`/\`hotfix/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. Agents report their verdict and stop.
 CLAUDEMD
-    success "CLAUDE.md generated"
+    success "AGENTS.md generated"
+    echo '@AGENTS.md' > "$CLAUDE_MD"
+    success "CLAUDE.md generated (imports AGENTS.md)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${GREEN}Setup complete.${RESET} Next steps:"
 echo ""
-echo -e "  1. Fill in ${CYAN}CLAUDE.md${RESET} — architecture rules + build commands"
+echo -e "  1. Fill in ${CYAN}AGENTS.md${RESET} — architecture rules + build commands (CLAUDE.md imports it)"
 echo -e "  2. Seed ${CYAN}.claude/context/invariants.md${RESET} with your non-negotiable rules"
 echo -e "  3. Review ${CYAN}CONSTRAINTS.md${RESET} — Gate 11 (gate integrity) is on by default and will flag any in-flight feature/* branch already editing gates.md/CONSTRAINTS.md/a check_*.py script; uncomment opt-in dimensions as you adopt them"
 echo -e "  4. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"

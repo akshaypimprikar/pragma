@@ -1,3 +1,9 @@
+---
+name: trim-context
+description: Audit and reduce always-on token costs in the project's instruction files. Invoke manually after completing any plan.
+disable-model-invocation: true
+---
+
 # Trim Context Agent
 
 ## Trigger
@@ -9,18 +15,18 @@ Audit and reduce always-on token costs.
 
 ## What to audit
 
-### 1. CLAUDE.md (target: ≤50 lines)
-Read `CLAUDE.md` and flag any content that violates these rules:
+### 1. AGENTS.md (target: ≤50 lines)
+Read `AGENTS.md` (or `CLAUDE.md` on the pre-AGENTS.md convention) and flag any content that violates these rules:
 
 | Keep | Remove |
 |---|---|
-| Build commands + simulator name | Anything already in `.claude/commands/` |
+| Build commands + simulator name | Anything already in `.claude/skills/` |
 | Layer rules (enforced in code decisions) | Model/service tables (readable from source) |
 | Non-obvious domain constraints | Navigation structure (visible in source) |
 | Test framework (import Testing, not XCTest) | ASCII diagrams |
 | File inclusion note (PBXFileSystemSynchronizedRootGroup) | Verbose descriptions of obvious patterns |
 
-If CLAUDE.md exceeds 50 lines or contains removable content, edit it in place and report what was cut.
+If AGENTS.md exceeds 50 lines or contains removable content, edit it in place and report what was cut.
 
 ### 2. Memory index (~/.claude/projects/.../memory/MEMORY.md)
 Read the index and each linked file. Flag entries that are:
@@ -41,9 +47,9 @@ Edit in place, report changes.
 ### 4. Skill files (~/.claude/skills/)
 Read each skill file. Flag content that is:
 - Outdated (wrong simulator name, wrong paths, obsolete commands)
-- Duplicated verbatim in CLAUDE.md or a command file
+- Duplicated verbatim in AGENTS.md/CLAUDE.md or a command file
 
-Report findings. Only edit skills if clearly outdated — skills load on-demand so verbosity matters less than CLAUDE.md.
+Report findings. Only edit skills if clearly outdated — skills load on-demand so verbosity matters less than AGENTS.md/CLAUDE.md.
 
 ### 5. Runtime read/tool-output waste (diagnostic only, no proxy required)
 If `headroom` is installed (`command -v headroom`), run:
@@ -58,12 +64,12 @@ If `headroom` isn't installed, or `audit-reads` exits non-zero or returns malfor
 
 ## Output
 For each section, including section 5: what was found, what was changed (or "no changes needed").
-End with the new line count for CLAUDE.md.
+End with the new line count for AGENTS.md/CLAUDE.md.
 
 ## Rules
 - Do not remove content that is genuinely useful and not available elsewhere
 - Do not add new content — this is a reduction pass only
-- Commit any changes to CLAUDE.md and settings.json with message `chore: trim context after <plan-name>`
+- Commit any changes to AGENTS.md/CLAUDE.md and settings.json with message `chore: trim context after <plan-name>`
 
 ## Done when
-CLAUDE.md is ≤50 lines, stale memory entries removed, settings.json allow list tightened, and changes committed.
+AGENTS.md/CLAUDE.md is ≤50 lines, stale memory entries removed, settings.json allow list tightened, and changes committed.

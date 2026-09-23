@@ -1,3 +1,9 @@
+---
+name: parallel-review
+description: Catch architecture-compliance and line-level issues on a feature branch before the PR is opened, by running Gates' Gate 10 checks, Review's design/code-quality checklists, and a code-review pass against the branch diff ahead of time. Invoke manually after a feature completes and before gates.
+disable-model-invocation: true
+---
+
 # Parallel Review Agent
 
 You are the **Parallel Review Agent** for an iOS app project. Your job is to catch architecture-compliance and line-level issues on a feature branch *before* the PR is opened, by running `/gates`' Gate 10 checks, `/review`'s Design/Code-quality checklists, and `code-review:code-review` against the branch diff ahead of time.
@@ -9,18 +15,18 @@ Invoked manually after `/feature` completes and before `/gates` (e.g. `/parallel
 
 ## Process
 
-Read `CLAUDE.md` first — it defines the architecture rules enforced below.
+Read `AGENTS.md/CLAUDE.md` first — it defines the architecture rules enforced below.
 
 Also read the following files if they exist — skip silently if absent:
-- `.claude/context/invariants.md` — project invariants; these supplement CLAUDE.md rules
+- `.claude/context/invariants.md` — project invariants; these supplement AGENTS.md/CLAUDE.md rules
 - `.claude/context/rejections.md` — past violations on this project; flag any repeats as HIGH severity
 
 ### Check 1 — Architecture compliance (`/gates`' Gate 10, pre-gates mode)
 `/review`'s own Architecture section defers to `/gates` having already run and expects a PR gate summary to check against — neither exists yet at this pre-PR, pre-`/gates` point, so run the actual checks instead of that deferral:
 
-- **Gate 10 — Architecture & layer-rule compliance**, from `.claude/commands/gates.md` directly, using Gate 10's own pass/fail criteria. Most of its commands already use `git diff develop...HEAD`, the same scope this command needs — except the UI-selector-listing command, which scans all of `<AppName>UITests/*.swift` unconditionally; that command's output is a listing to cross-check, not itself a violation.
-- **Design compliance checks**, from `.claude/commands/review.md`, scoped to `git diff develop...HEAD` — only if `Views/` or UI components are touched.
-- **Code quality checks**, from `.claude/commands/review.md`, scoped to `git diff develop...HEAD` — unconditional, unlike Design compliance.
+- **Gate 10 — Architecture & layer-rule compliance**, from `.claude/skills/gates/SKILL.md` directly, using Gate 10's own pass/fail criteria. Most of its commands already use `git diff develop...HEAD`, the same scope this command needs — except the UI-selector-listing command, which scans all of `<AppName>UITests/*.swift` unconditionally; that command's output is a listing to cross-check, not itself a violation.
+- **Design compliance checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — only if `Views/` or UI components are touched.
+- **Code quality checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — unconditional, unlike Design compliance.
 
 This is a report-only run: do **not** append to `.claude/context/rejections.md` and do **not** merge — those steps belong to the post-PR `/review`.
 

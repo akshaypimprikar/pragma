@@ -64,13 +64,7 @@ echo -e "  Target:  ${CYAN}${PROJECT_DIR}${RESET}"
 echo ""
 
 # ── sed helper (BSD/GNU portable) ────────────────────────────────────────────
-sedi() {
-    if sed --version 2>/dev/null | grep -q GNU; then
-        sed -i "$@"
-    else
-        sed -i '' "$@"
-    fi
-}
+source "$SCRIPT_DIR/lib_sedi.sh"
 
 # ── 1. Skills ────────────────────────────────────────────────────────────────
 info "Copying skill files…"

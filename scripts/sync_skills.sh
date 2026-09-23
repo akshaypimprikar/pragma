@@ -15,6 +15,17 @@ SKILLS_SRC="$1"
 PROJECT_DIR="$2"
 APP_NAME="$3"
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_sedi.sh"
+
+# Appends -x until $1 no longer exists — a same-second re-run must not nest
+# inside the earlier backup. Used for both the skills.bak and commands.bak
+# directories below.
+unique_backup_dir() {
+    local dir="$1"
+    while [[ -e "$dir" ]]; do dir="${dir}-x"; done
+    echo "$dir"
+}
+
 mkdir -p "$PROJECT_DIR/.claude/skills"
 
 PRAGMA_SKILLS="$(cd "$SKILLS_SRC" && find . -name 'SKILL.md' | sed 's|^\./||')"
@@ -29,9 +40,7 @@ while IFS= read -r rel; do
     sed "s|<AppName>|${APP_NAME}|g" "$SKILLS_SRC/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
 done <<< "$PRAGMA_SKILLS"
 if [[ -n "$CUSTOMIZED" ]]; then
-    BACKUP_DIR="$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)"
-    # Same-second re-run must not nest inside the earlier backup.
-    while [[ -e "$BACKUP_DIR" ]]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
+    BACKUP_DIR="$(unique_backup_dir "$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)")"
     # -L: a symlinked .claude/skills must be backed up as files, not as another symlink.
     cp -RL "$PROJECT_DIR/.claude/skills" "$BACKUP_DIR"
     echo "WARN: existing skill file(s) differ from pragma's:${CUSTOMIZED}"
@@ -42,13 +51,7 @@ cp -r "$SKILLS_SRC/." "$PROJECT_DIR/.claude/skills/"
 
 while IFS= read -r rel; do
     dest="$PROJECT_DIR/.claude/skills/$rel"
-    if [[ -f "$dest" ]]; then
-        if sed --version 2>/dev/null | grep -q GNU; then
-            sed -i "s|<AppName>|${APP_NAME}|g" "$dest"
-        else
-            sed -i '' "s|<AppName>|${APP_NAME}|g" "$dest"
-        fi
-    fi
+    if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
 done <<< "$PRAGMA_SKILLS"
 
 # Migrate an older command-based install — one backup dir for the whole
@@ -56,8 +59,7 @@ done <<< "$PRAGMA_SKILLS"
 # date's 1-second resolution would otherwise scatter a multi-file migration
 # across several separate backup directories instead of one.
 if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
-    MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
-    while [[ -e "$MIGRATE_BACKUP_DIR" ]]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
+    MIGRATE_BACKUP_DIR="$(unique_backup_dir "$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)")"
     MIGRATED=""
     while IFS= read -r rel; do
         name="$(dirname "$rel")"

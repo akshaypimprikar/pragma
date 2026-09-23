@@ -26,7 +26,13 @@ on:
       - 'scripts/**'
       # Gate-definition files that scripts/check_gate_integrity.py guards; without
       # these a PR that only edits them would never trigger this workflow.
+      # Keep in step with GUARDED_PATH_GLOBS in that script.
       - '.claude/skills/**'
+      - '.claude/settings.json'
+      - '.claude/hooks/**'
+      - '.claude/context/invariants.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
       - 'CONSTRAINTS.md'
 
 concurrency:

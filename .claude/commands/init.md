@@ -45,6 +45,14 @@ This is the same operation `scripts/setup.sh` performs — both invoke `scripts/
 
 Same as `scripts/setup.sh`, using `${CLAUDE_PLUGIN_ROOT}` as the source root: copy `${CLAUDE_PLUGIN_ROOT}/.claude/context/*.md` (skip any that already exist — never overwrite a project's existing decisions/rejections log), `${CLAUDE_PLUGIN_ROOT}/scripts/select_simulator.py`, `check_coverage.py`, `check_tdd_commit_order.py`, `check_gate_integrity.py`, `capture_pipeline_metrics.py`, and `slim_simulator.sh`, and `${CLAUDE_PLUGIN_ROOT}/scaffold/.github/workflows/*.yml` into `.github/workflows/` — strip the leading setup-comment block from each workflow file, then substitute `YOUR_PROJECT` → app name and `YOUR_SCHEME` → scheme name. Skip any workflow file that already exists at the destination and warn instead of overwriting. Also copy `${CLAUDE_PLUGIN_ROOT}/CONSTRAINTS.md` into the project root, same skip-if-exists rule as `AGENTS.md` below.
 
+Then install the guard hook, the same step `scripts/setup.sh` runs (default on; skip it only if the user asks not to have it):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/install_guard_hook.py" "${CLAUDE_PLUGIN_ROOT}" "$PROJECT_DIR"
+```
+
+This copies `scaffold/.claude/hooks/guard_protected_paths.py` to `.claude/hooks/` and merges one `PreToolUse` entry into the project's `.claude/settings.json` without touching its other settings (the original is backed up; a second run changes nothing). If the script exits non-zero, the project's `settings.json` is invalid or has an unexpected `hooks` shape: it left everything as found. Show the user the error, do not edit `settings.json` yourself, and continue with the rest of setup. Tell the user in the final report that the hook blocks edits to skills, `AGENTS.md`/`CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json` and `.claude/hooks/` on `feature/*` branches, so those changes belong on a `chore/*` or `fix/*` branch.
+
 ### 4. Ask for real content, write only where safe
 
 Ask the same three questions regardless of what already exists in the target project:
@@ -69,4 +77,4 @@ Next: run your first feature —
 
 ## Done when
 
-`.claude/skills/`, `.claude/context/`, `scripts/`, `.github/workflows/`, and `CONSTRAINTS.md` are populated in the target project; any superseded `.claude/commands/<name>.md` from an older install has been backed up and removed; `AGENTS.md` has real architecture and constraint content if it didn't already exist, and `CLAUDE.md` imports it; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; no existing file was overwritten.
+`.claude/skills/`, `.claude/context/`, `scripts/`, `.github/workflows/`, and `CONSTRAINTS.md` are populated in the target project; any superseded `.claude/commands/<name>.md` from an older install has been backed up and removed; `AGENTS.md` has real architecture and constraint content if it didn't already exist, and `CLAUDE.md` imports it; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; no existing file was overwritten except `.claude/hooks/guard_protected_paths.py` (backed up first if it differed) and `.claude/settings.json` (backed up first, and only the guard entry added). The guard hook is installed and registered, or the user was told why not.

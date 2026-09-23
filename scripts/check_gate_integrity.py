@@ -6,8 +6,8 @@ or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
 Flags, via a single git diff against the base branch:
-  1. A gate-definition file (see GATE_DEFINITION_FILES/GATE_SCRIPT_PREFIX
-     below for the exact list — not repeated here so this docstring can't
+  1. A gate-definition file (see GATE_DEFINITION_FILES/GATE_SCRIPT_PREFIX/
+     GUARDED_PATH_GLOBS below for the exact list — not repeated here so this docstring can't
      drift out of sync with it the way an inline copy already had)
      touched on a feature/* branch — a real feature never needs to change
      what counts as passing. Only reliably checkable when the actual branch
@@ -42,6 +42,7 @@ Usage: python3 scripts/check_gate_integrity.py [base_ref] [branch]
   has no such env var, so pass the branch explicitly there.
 """
 import difflib
+import fnmatch
 import os
 import re
 import subprocess
@@ -67,6 +68,22 @@ GATE_DEFINITION_FILES = (
     ".claude/skills/deterministic-pr-gates/SKILL.md",
 )
 GATE_SCRIPT_PREFIX = "scripts/check_"
+# Wider than GATE_DEFINITION_FILES, and used by check #1 only: every file the
+# PreToolUse hook (scaffold/.claude/hooks/guard_protected_paths.py) blocks on a
+# feature/* branch. The hook stops the edit live but only inside a Claude Code
+# session; a plain commit + push bypasses it, so this list is the CI-side
+# backstop for the same set. Keep it in step with the hook's PROTECTED_GLOBS.
+# `*` crosses `/` (fnmatch), so nested paths match; the match is
+# case-insensitive because macOS volumes are.
+GUARDED_PATH_GLOBS = (
+    ".claude/skills/*/SKILL.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONSTRAINTS.md",
+    ".claude/context/invariants.md",
+    ".claude/settings.json",
+    ".claude/hooks/*",
+)
 # Suppression/stub detection (checks 3 & 4) is about shipped application
 # code — a doc file describing these exact patterns in prose (this script's
 # own docstring, a CHANGELOG entry writing up a past bug) isn't code and a
@@ -79,6 +96,15 @@ GATE_SCRIPT_PREFIX = "scripts/check_"
 # detection there would silently defeat that gate for those files.
 DOC_EXTENSIONS = (".md", ".txt", ".rst")
 SELF_PATH = "scripts/check_gate_integrity.py"
+
+
+def is_guarded_path(path):
+    """True for a gate-definition file, a gate script, or anything the guard hook protects."""
+    if path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX):
+        return True
+    low = path.lower()
+    return any(fnmatch.fnmatchcase(low, g.lower()) for g in GUARDED_PATH_GLOBS)
+
 
 TEST_PATH_SEGMENT = re.compile(r"(^|/)tests?(/|$)", re.IGNORECASE)
 TEST_FILENAME_UNDERSCORE = re.compile(r"(^|/)(test_[^/]+|[^/]+_test)\.py$", re.IGNORECASE)
@@ -357,10 +383,7 @@ if branch == "HEAD":
         file=sys.stderr,
     )
 elif branch.startswith("feature/"):
-    touched_defs = [
-        p for p in status_by_path
-        if p in GATE_DEFINITION_FILES or p.startswith(GATE_SCRIPT_PREFIX)
-    ]
+    touched_defs = [p for p in status_by_path if is_guarded_path(p)]
     if touched_defs:
         violations.append(
             "Gate-definition file(s) modified on a feature/* branch: "

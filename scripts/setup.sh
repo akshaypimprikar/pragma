@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
+# --no-guard-hook — skip installing the PreToolUse guard hook (see below)
 #
 # What it does:
 #   - Copies .claude/skills/, .claude/context/, scripts/, and
@@ -19,6 +20,10 @@
 #     a name with a skill being installed is backed up alongside it and
 #     removed, so the old command can't shadow or collide with the new skill
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
+#   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
+#     entry into .claude/settings.json (other settings are kept; the original
+#     is backed up). The hook blocks edits to gate-definition files on
+#     feature/* branches during a Claude Code session. Skip with --no-guard-hook
 #   - Generates a starter AGENTS.md if one doesn't exist, plus a CLAUDE.md
 #     that imports it (@AGENTS.md), so any AGENTS.md-reading agent and
 #     Claude Code both pick up the same content
@@ -35,11 +40,21 @@ warn()    { echo -e "${YELLOW}  !${RESET} $*"; }
 die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 
 # ── Args ─────────────────────────────────────────────────────────────────────
+INSTALL_GUARD_HOOK=1
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+# ${arr[@]+...}: an empty array under `set -u` is an unbound variable in bash 3.2 (macOS default)
+set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
 # pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
@@ -111,6 +126,20 @@ else
     info "Copying starter CONSTRAINTS.md…"
     cp "$REPO_ROOT/CONSTRAINTS.md" "$CONSTRAINTS_MD"
     success "CONSTRAINTS.md ready"
+fi
+
+# ── 3c. Guard hook ────────────────────────────────────────────────────────────
+if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
+    info "Installing the PreToolUse guard hook…"
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "python3 not found — skipping the guard hook (install python3 and re-run, or pass --no-guard-hook)"
+    elif python3 "$SCRIPT_DIR/install_guard_hook.py" "$REPO_ROOT" "$PROJECT_DIR"; then
+        success "Guard hook ready"
+    else
+        warn "Guard hook not installed (see the error above) — fix .claude/settings.json and re-run, or pass --no-guard-hook"
+    fi
+else
+    info "Skipping the guard hook (--no-guard-hook)"
 fi
 
 # ── 4. CI workflows ───────────────────────────────────────────────────────────
@@ -202,7 +231,10 @@ echo -e "  1. Fill in ${CYAN}AGENTS.md${RESET} — architecture rules + build co
 echo -e "  2. Seed ${CYAN}.claude/context/invariants.md${RESET} with your non-negotiable rules"
 echo -e "  3. Review ${CYAN}CONSTRAINTS.md${RESET} — Gate 11 (gate integrity) is on by default and will flag any in-flight feature/* branch already editing gates.md/CONSTRAINTS.md/a check_*.py script; uncomment opt-in dimensions as you adopt them"
 echo -e "  4. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
-echo -e "  5. Run your first feature:"
+if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
+    echo -e "  5. The guard hook blocks edits to skills, AGENTS.md/CLAUDE.md, CONSTRAINTS.md, .claude/settings.json and .claude/hooks/ on feature/* branches — make those changes on a chore/* or fix/* branch"
+fi
+echo -e "  Then run your first feature:"
 echo ""
 echo -e "     ${BOLD}/spec \"describe your feature idea\"${RESET}"
 echo ""

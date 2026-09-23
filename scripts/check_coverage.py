@@ -11,6 +11,21 @@ import sys
 FAIL_THRESHOLD = 0.60
 WARN_THRESHOLD = 0.80
 
+# Files that genuinely can't be covered by a CI simulator run — e.g. code that
+# requires live hardware-eligible capability (Apple Intelligence, ARKit, a
+# real device sensor) and is verified by manual/on-device testing instead.
+# Leave empty by default; add a repo-relative path (e.g. "App/Services/
+# ARKitTracker.swift", not a bare name) with a comment naming the real
+# constraint and how it's verified instead — this is an escape hatch for a
+# genuine coverage-tooling gap, not a way to silence a file that's just
+# under-tested. Matched by path suffix, not name or exact path: xccov's own
+# "path" field is the absolute filesystem path at build time, which differs
+# between machines and CI runners — an exact-match would silently never fire
+# outside whichever environment it was copied from. A path-suffix match still
+# distinguishes two files sharing a basename in different directories, unlike
+# a bare-name match.
+HARDWARE_DEPENDENT_EXCEPTIONS = set()
+
 with open(sys.argv[1]) as f:
     report = json.load(f)
 
@@ -27,6 +42,8 @@ for target in report.get("targets", []):
         # UI-only files contain no business logic — tested via UI tests, not unit tests
         if (name.endswith("View.swift") or name.endswith("Sheet.swift") or
                 name.endswith("Row.swift") or name.startswith("Color+")):
+            continue
+        if any(path.endswith(rel) for rel in HARDWARE_DEPENDENT_EXCEPTIONS):
             continue
         if "lineCoverage" not in file:
             schema_drift_files.append(name)

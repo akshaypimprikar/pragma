@@ -6,7 +6,9 @@ or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
 Flags, via a single git diff against the base branch:
-  1. A gate-definition file (gates.md, CONSTRAINTS.md, a scripts/check_*.py)
+  1. A gate-definition file (see GATE_DEFINITION_FILES/GATE_SCRIPT_PREFIX
+     below for the exact list — not repeated here so this docstring can't
+     drift out of sync with it the way an inline copy already had)
      touched on a feature/* branch — a real feature never needs to change
      what counts as passing. Only reliably checkable when the actual branch
      name is known (see current_branch()); does not currently track a
@@ -48,6 +50,17 @@ import sys
 BASE_REF = sys.argv[1] if len(sys.argv) > 1 else "develop"
 BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 
+# core.quotepath=false: without it, git octal-escapes any non-ASCII byte in a
+# path (e.g. "café.swift" -> "caf\303\251.swift") in diff/--name-status
+# output, which would never match a plain-ASCII GATE_DEFINITION_FILES entry
+# or a suppression-scan path check. --src-prefix/--dst-prefix: parse_diff_by_file's
+# a/ b/ header parsing must not silently break under a contributor's global
+# diff.noprefix/diff.mnemonicPrefix git config — applied here, to every
+# git-diff call, not just the narrower text_diff_for() re-fetch below, so a
+# config-dependent header format can't mis-parse (or drop) the main diff
+# every other check reads.
+GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff", "--src-prefix=a/", "--dst-prefix=b/")
+
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
     "CONSTRAINTS.md",
@@ -77,9 +90,11 @@ TEST_FILENAME_SUFFIX = re.compile(r"[^/]*Tests?\.(swift|py)$")
 # Only .disabled( is ambiguous with SwiftUI's .disabled(condition) view
 # modifier — swiftlint:disable and XCTSkip have no such ambiguity in
 # application code, so they're checked everywhere, not just in test files.
+# XCTSkipIf/XCTSkipUnless are the same suppression mechanism as bare
+# XCTSkip, just conditional — matched too, not just the unconditional form.
 UNAMBIGUOUS_SUPPRESSION_PATTERNS = (
     re.compile(r"^\+.*//\s*swiftlint:disable"),
-    re.compile(r"^\+.*\bXCTSkip\b"),
+    re.compile(r"^\+.*\bXCTSkip(If|Unless)?\b"),
 )
 TEST_ONLY_SUPPRESSION_PATTERNS = (
     re.compile(r"^\+.*\.disabled\("),  # Swift Testing trait
@@ -103,7 +118,13 @@ PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 def run(*args):
     try:
-        return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+        # errors="replace": a diff containing bytes that aren't valid UTF-8
+        # (a binary-ish file, or another encoding entirely) must not crash
+        # this script outright — decode what's decodable and substitute the
+        # rest, rather than raising UnicodeDecodeError mid-gate-run.
+        return subprocess.run(
+            args, capture_output=True, text=True, errors="replace", check=True
+        ).stdout
     except subprocess.CalledProcessError as e:
         print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
         # BASE_REF never appears as its own arg — every call site embeds it in a
@@ -267,19 +288,64 @@ def paired_threshold_drops(diff):
     return drops
 
 
+def file_status(diff_text):
+    """Derive a name-status-style letter (A/D/R/M) from one file's own diff
+    block instead of a second `git diff --name-status` subprocess call over
+    the exact same {BASE_REF}...HEAD range — the block's own header lines
+    (new file mode / deleted file mode / rename from) already say this."""
+    for line in diff_text.splitlines()[:8]:
+        if line.startswith("new file mode"):
+            return "A"
+        if line.startswith("deleted file mode"):
+            return "D"
+        if line.startswith("rename from "):
+            return "R"
+    return "M"
+
+
 violations = []
 branch = current_branch()
 
-name_status = run("git", "diff", f"{BASE_REF}...HEAD", "--name-status")
-status_by_path = {}
-for line in name_status.splitlines():
-    if not line.strip():
-        continue
-    parts = line.split("\t")
-    status_by_path[parts[-1]] = parts[0][0]  # first letter: A/M/D/R...
-
-full_diff = run("git", "diff", f"{BASE_REF}...HEAD")
+full_diff = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD")
 diff_by_file = parse_diff_by_file(full_diff)
+status_by_path = {path: file_status(diff) for path, diff in diff_by_file.items()}
+
+# Extensions git's own binary-content heuristic correctly calls binary —
+# real assets, never worth a forced-text re-fetch.
+KNOWN_BINARY_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".icns", ".ico",
+    ".mov", ".mp4", ".woff", ".woff2", ".ttf", ".otf",
+)
+
+
+def is_binary_diff(diff_text):
+    return diff_text.startswith("Binary files ") or "\nBinary files " in diff_text
+
+
+def text_diff_for(*paths):
+    # --text: a PR's own .gitattributes (`-diff`) must not blank a file's
+    # diff from the checks that read it. --src-prefix/--dst-prefix already
+    # come from GIT_DIFF_BASE_ARGS.
+    if not paths:
+        return {}
+    raw = run(*GIT_DIFF_BASE_ARGS, "--text", f"{BASE_REF}...HEAD", "--", *paths)
+    return parse_diff_by_file(raw)
+
+
+# Re-fetch, forced to text, any changed file that (a) isn't a genuine binary
+# asset by extension and (b) git nonetheless rendered as "Binary files ...
+# differ" — either git's own content-sniffing heuristic mis-fired, or the
+# PR's own .gitattributes marks it -diff. One consolidated call for however
+# many files that turns out to be (typically zero), not one call per file —
+# left as diff_by_file's normal binary placeholder otherwise, checks #3-5
+# below would silently see no added-line content for such a file, exactly
+# the evasion this closes.
+masked_paths = [
+    p for p, d in diff_by_file.items()
+    if is_binary_diff(d) and not p.lower().endswith(KNOWN_BINARY_EXTENSIONS)
+]
+if masked_paths:
+    diff_by_file.update(text_diff_for(*masked_paths))
 
 # 1. Gate-definition files touched on a feature/* branch (any status — an
 # outright deletion is at least as suspicious as an edit)

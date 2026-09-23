@@ -28,11 +28,25 @@ TEST_ROOT = "Tests/"
 
 
 def run(*args):
-    return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    # errors="replace": non-UTF-8 bytes in a commit message or path must not
+    # crash this script outright — decode what's decodable, substitute the
+    # rest. core.quotepath=false: without it, git wraps any path containing a
+    # non-ASCII byte in literal quotes and octal-escapes it (e.g.
+    # "café.swift" -> "\"caf\\303\\251.swift\""), corrupting every basename
+    # comparison below for that file — verified empirically, not assumed.
+    return subprocess.run(
+        ("git", "-c", "core.quotepath=false") + args[1:],
+        capture_output=True, text=True, errors="replace", check=True,
+    ).stdout
 
 
 def commit_list():
-    out = run("git", "log", f"{BASE_REF}...HEAD", "--reverse", "--pretty=format:%H")
+    # Double-dot, not triple-dot: git log's triple-dot is symmetric difference
+    # (commits on either side, not just HEAD's), unlike git diff's triple-dot
+    # (merge-base diff). Triple-dot here would pull in develop-only commits
+    # whenever develop advances after this branch was cut, corrupting the
+    # commit ordering this script's violation detection depends on.
+    out = run("git", "log", f"{BASE_REF}..HEAD", "--reverse", "--pretty=format:%H")
     return [line for line in out.splitlines() if line]
 
 

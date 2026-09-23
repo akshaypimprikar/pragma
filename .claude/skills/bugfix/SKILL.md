@@ -15,7 +15,7 @@ Invoked with a bug report: description + reproduction steps (e.g. `/bugfix "CSV 
 
 ### 1. Create the branch
 **Regular bug:** Branch `fix/<bug-name>` off `develop`.
-**Hotfix (production bug on main):** Branch `hotfix/<bug-name>` off `main`.
+**Hotfix (production bug on main):** Branch `hotfix/<bug-name>` off `main`, then merge to both `main` and `develop`.
 
 Read `AGENTS.md/CLAUDE.md` before touching any file.
 
@@ -77,7 +77,7 @@ git commit -m "fix: <short description of what was wrong>"
 ```
 
 **Regular bug:** Open PR to `develop`. The Review Agent (`/review`) runs on the PR.
-**Hotfix:** Open PR to `main`. After merge, immediately back-merge `main` into `develop`.
+**Hotfix:** Open PR to `main` — also open a second PR to `develop`. Both go through `/review`/`/test`/`code-review:code-review` before merging. Unlike `release/SKILL.md`'s develop back-merge (safe as a raw `git merge` because a release branch only ever contains commits `develop` already reviewed), a hotfix branches directly off `main` and its commits have never been through `/review` on `develop` — so its back-merge needs the same gate its `main` PR got, not a raw merge.
 
 ## Architecture rules
 All fixes must respect the layer boundaries in `AGENTS.md/CLAUDE.md`:

@@ -64,13 +64,7 @@ echo -e "  Target:  ${CYAN}${PROJECT_DIR}${RESET}"
 echo ""
 
 # ── sed helper (BSD/GNU portable) ────────────────────────────────────────────
-sedi() {
-    if sed --version 2>/dev/null | grep -q GNU; then
-        sed -i "$@"
-    else
-        sed -i '' "$@"
-    fi
-}
+source "$SCRIPT_DIR/lib_sedi.sh"
 
 # ── 1. Skills ────────────────────────────────────────────────────────────────
 info "Copying skill files…"
@@ -80,65 +74,10 @@ mkdir -p "$PROJECT_DIR/.claude/skills"
 # can point at pragma's own skills even when PROJECT_DIR itself does not.
 [[ "$PROJECT_DIR/.claude/skills" -ef "$REPO_ROOT/.claude/skills" ]] && die "$PROJECT_DIR/.claude/skills resolves to pragma's own .claude/skills — refusing to copy onto or delete from it."
 
-# Back up before overwriting: an existing skill that differs from what we're
-# about to write (after <AppName> substitution) is a customization, and cp -r
-# below would silently replace it.
-PRAGMA_SKILLS="$(cd "$REPO_ROOT/.claude/skills" && find . -name 'SKILL.md' | sed 's|^\./||')"
-CUSTOMIZED=""
-while IFS= read -r rel; do
-    dest="$PROJECT_DIR/.claude/skills/$rel"
-    [[ -f "$dest" ]] || continue
-    sed "s|<AppName>|${APP_NAME}|g" "$REPO_ROOT/.claude/skills/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
-done <<< "$PRAGMA_SKILLS"
-if [[ -n "$CUSTOMIZED" ]]; then
-    BACKUP_DIR="$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)"
-    # Same-second re-run must not nest inside the earlier backup.
-    while [[ -e "$BACKUP_DIR" ]]; do BACKUP_DIR="${BACKUP_DIR}-x"; done
-    # -L: a symlinked .claude/skills must be backed up as files, not as another symlink.
-    cp -RL "$PROJECT_DIR/.claude/skills" "$BACKUP_DIR"
-    warn "Existing skill file(s) differ from pragma's:${CUSTOMIZED}"
-    warn "Backed up .claude/skills/ to ${BACKUP_DIR#"$PROJECT_DIR"/} — re-apply your edits from there; delete it when done"
-fi
-
-cp -r "$REPO_ROOT/.claude/skills/." "$PROJECT_DIR/.claude/skills/"
-
-info "Substituting <AppName> in skills…"
-while IFS= read -r rel; do
-    dest="$PROJECT_DIR/.claude/skills/$rel"
-    if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
-done <<< "$PRAGMA_SKILLS"
-success "Skills ready ($(find "$PROJECT_DIR/.claude/skills" -name "SKILL.md" | wc -l | tr -d ' ') files)"
-
-# ── 1b. Migrate an older command-based install ────────────────────────────────
-# A project set up before this version has .claude/commands/<name>.md for the
-# same names now shipped as .claude/skills/<name>/SKILL.md. Left in place, the
-# old command would shadow or collide with the new skill. We can't diff it
-# against pragma's old content (that content no longer exists in this repo to
-# compare against), so every match is backed up unconditionally rather than
-# guessed at — safe by construction, never a silent delete.
-if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
-    # One backup dir for the whole migration, computed before the loop — not
-    # per file inside it. date's 1-second resolution means recomputing this
-    # per iteration collides across most/all of a multi-file migration, so
-    # each file would land in its own separate -x-suffixed directory instead
-    # of one consolidated backup.
-    MIGRATE_BACKUP_DIR="$PROJECT_DIR/.claude/commands.bak-$(date +%Y%m%d-%H%M%S)"
-    while [[ -e "$MIGRATE_BACKUP_DIR" ]]; do MIGRATE_BACKUP_DIR="${MIGRATE_BACKUP_DIR}-x"; done
-    MIGRATED=""
-    while IFS= read -r rel; do
-        name="$(dirname "$rel")"
-        old="$PROJECT_DIR/.claude/commands/$name.md"
-        [[ -f "$old" ]] || continue
-        mkdir -p "$MIGRATE_BACKUP_DIR"
-        cp -L "$old" "$MIGRATE_BACKUP_DIR/"
-        rm -f "$old"
-        MIGRATED="$MIGRATED $name"
-    done <<< "$PRAGMA_SKILLS"
-    if [[ -n "$MIGRATED" ]]; then
-        warn "Superseded old .claude/commands/ file(s) by the new skill of the same name:${MIGRATED}"
-        warn "Each was backed up before removal — check ${MIGRATE_BACKUP_DIR#"$PROJECT_DIR"/} if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
-    fi
-fi
+# Shared with .claude/commands/init.md (the Claude Code plugin path into the
+# same install) so the two installers can't drift on what counts as
+# "customized" or how the old-command migration backs things up.
+"$SCRIPT_DIR/sync_skills.sh" "$REPO_ROOT/.claude/skills" "$PROJECT_DIR" "$APP_NAME"
 
 # ── 2. Context ────────────────────────────────────────────────────────────────
 info "Copying context files…"

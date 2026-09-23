@@ -1,0 +1,84 @@
+# =============================================================================
+# SETUP: Replace the following placeholders before using this workflow:
+#   YOUR_PROJECT   — your Xcode project name, e.g. MyApp
+#                    (used for .xcodeproj, path filters, and scheme)
+#   YOUR_SCHEME    — your Xcode scheme name (often the same as YOUR_PROJECT)
+#
+# Advisory only (continue-on-error): if your project's SWIFT_VERSION is below
+# 6 in every target, Sendable/isolation diagnostics are warnings, not errors,
+# so nothing else in your pipeline surfaces a data race — this job is what
+# catches it, without blocking the PR on a warning. If your project has
+# already adopted the Swift 6 language mode, these same diagnostics are
+# compiler errors on every build already, and this workflow adds little;
+# keep it anyway as ThreadSanitizer coverage, which strict-concurrency
+# checking alone doesn't give you.
+#
+# Also ensure scripts/select_simulator.py and scripts/slim_simulator.sh exist
+# (both included in this scaffold under scripts/).
+# =============================================================================
+
+name: Concurrency Advisory
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop, main]
+    paths:
+      - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECTTests/**'
+      - 'scripts/**'
+      - '.github/**'
+
+concurrency:
+  group: concurrency-advisory-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  concurrency-advisory:
+    name: Concurrency Advisory (non-blocking)
+    runs-on: macos-26
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '~26.4'
+
+      - name: Unit tests under ThreadSanitizer
+        run: |
+          set -o pipefail
+          SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
+          echo "Selected simulator: $SIM_ID"
+          bash scripts/slim_simulator.sh "$SIM_ID" || true
+          xcodebuild test \
+            -project YOUR_PROJECT.xcodeproj \
+            -scheme YOUR_SCHEME \
+            -destination "id=$SIM_ID" \
+            -skip-testing:YOUR_PROJECTUITests \
+            -enableThreadSanitizer YES \
+            2>&1 | tee tsan.log
+
+      - name: Summarize ThreadSanitizer result
+        if: always()
+        run: |
+          reports=$(grep -c "WARNING: ThreadSanitizer" tsan.log || true)
+          echo "ThreadSanitizer unit-test run: $reports report(s) (the previous step's exit status decides pass/fail)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Build with strict concurrency
+        if: always()
+        run: |
+          set -o pipefail
+          SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
+          xcodebuild build \
+            -project YOUR_PROJECT.xcodeproj \
+            -scheme YOUR_SCHEME \
+            -destination "id=$SIM_ID" \
+            SWIFT_STRICT_CONCURRENCY=complete \
+            2>&1 | tee strict.log
+          # Anchor on file:line:col so wrapped/duplicate diagnostic renderings count once.
+          total=$({ grep -E '^/.*:[0-9]+:[0-9]+: warning:' strict.log || true; } | sort -u | wc -l | tr -d ' ')
+          conc=$({ grep -E '^/.*:[0-9]+:[0-9]+: warning:' strict.log | grep -iE "sendable|isolat|actor|concurren|data race" || true; } | sort -u | wc -l | tr -d ' ')
+          echo "Strict-concurrency build: $total unique warnings ($conc concurrency-related)"
+          echo "Strict-concurrency build: $total unique warnings ($conc concurrency-related)" >> "$GITHUB_STEP_SUMMARY"

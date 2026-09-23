@@ -5,4 +5,4 @@ max_turns: 8
 allowed_tools: [Read, Glob, Grep, Skill]
 ---
 
-My branch only changes README.md and CHANGELOG.md, no source files. Do I need to run the full xcodebuild build and test suite before I open the PR?
+My branch only changes README.md and CHANGELOG.md, no source files. Do I need to run the full xcodebuild build and test suite before I open the PR? If I skip any checks, how should I report that?

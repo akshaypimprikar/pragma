@@ -6,7 +6,9 @@ or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
 Flags, via a single git diff against the base branch:
-  1. A gate-definition file (gates.md, CONSTRAINTS.md, a scripts/check_*.py)
+  1. A gate-definition file (see GATE_DEFINITION_FILES/GATE_SCRIPT_PREFIX
+     below for the exact list — not repeated here so this docstring can't
+     drift out of sync with it the way an inline copy already had)
      touched on a feature/* branch — a real feature never needs to change
      what counts as passing. Only reliably checkable when the actual branch
      name is known (see current_branch()); does not currently track a
@@ -281,19 +283,27 @@ def paired_threshold_drops(diff):
     return drops
 
 
+def file_status(diff_text):
+    """Derive a name-status-style letter (A/D/R/M) from one file's own diff
+    block instead of a second `git diff --name-status` subprocess call over
+    the exact same {BASE_REF}...HEAD range — the block's own header lines
+    (new file mode / deleted file mode / rename from) already say this."""
+    for line in diff_text.splitlines()[:8]:
+        if line.startswith("new file mode"):
+            return "A"
+        if line.startswith("deleted file mode"):
+            return "D"
+        if line.startswith("rename from "):
+            return "R"
+    return "M"
+
+
 violations = []
 branch = current_branch()
 
-name_status = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD", "--name-status")
-status_by_path = {}
-for line in name_status.splitlines():
-    if not line.strip():
-        continue
-    parts = line.split("\t")
-    status_by_path[parts[-1]] = parts[0][0]  # first letter: A/M/D/R...
-
 full_diff = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD")
 diff_by_file = parse_diff_by_file(full_diff)
+status_by_path = {path: file_status(diff) for path, diff in diff_by_file.items()}
 
 # Extensions git's own binary-content heuristic correctly calls binary —
 # real assets, never worth a forced-text re-fetch.

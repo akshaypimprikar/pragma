@@ -15,7 +15,7 @@ Invoked with a bug report: description + reproduction steps (e.g. `/bugfix "CSV 
 
 ### 1. Create the branch
 **Regular bug:** Branch `fix/<bug-name>` off `develop`.
-**Hotfix (production bug on main):** Branch `hotfix/<bug-name>` off `main`.
+**Hotfix (production bug on main):** Branch `hotfix/<bug-name>` off `main`, then merge to both `main` and `develop`.
 
 Read `AGENTS.md/CLAUDE.md` before touching any file.
 
@@ -77,7 +77,7 @@ git commit -m "fix: <short description of what was wrong>"
 ```
 
 **Regular bug:** Open PR to `develop`. The Review Agent (`/review`) runs on the PR.
-**Hotfix:** Open PR to `main`. After merge, immediately back-merge `main` into `develop`.
+**Hotfix:** Open PR to `main` — also open a second PR to `develop`. Both go through `/review`/`/test`/`code-review:code-review` before merging: the Merge Rule's gate on anything landing in `develop` has no hotfix exception, so the back-merge is a reviewed PR, not a raw `git merge`.
 
 ## Architecture rules
 All fixes must respect the layer boundaries in `AGENTS.md/CLAUDE.md`:

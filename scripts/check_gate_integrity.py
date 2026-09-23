@@ -295,20 +295,47 @@ for line in name_status.splitlines():
 full_diff = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD")
 diff_by_file = parse_diff_by_file(full_diff)
 
+# Extensions git's own binary-content heuristic correctly calls binary —
+# real assets, never worth a forced-text re-fetch.
+KNOWN_BINARY_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".icns", ".ico",
+    ".mov", ".mp4", ".woff", ".woff2", ".ttf", ".otf",
+)
 
-def text_diff_for(path):
-    # --text: a PR's own .gitattributes (`-diff`) must not blank a
-    # gate-definition file's diff for check #5 below. Scoped to one path at
-    # a time, not applied to the shared full_diff above — forcing --text
-    # repo-wide would turn every binary asset changed in the same PR (app
-    # icons, xcassets) into raw bytes rendered as pseudo-text lines, bloating
-    # and potentially corrupting the suppression/stub scan those other
-    # checks run over every changed file. Explicit prefixes: parse_diff_by_file
-    # needs a/ b/ headers.
-    return run(
+
+def is_binary_diff(diff_text):
+    return diff_text.startswith("Binary files ") or "\nBinary files " in diff_text
+
+
+def text_diff_for(*paths):
+    # --text: a PR's own .gitattributes (`-diff`) must not blank a file's
+    # diff from the checks that read it. Explicit --src-prefix/--dst-prefix
+    # guards parse_diff_by_file's a/ b/ header parsing against a
+    # contributor's global diff.noprefix/diff.mnemonicPrefix git config
+    # changing the default header format for this one call.
+    if not paths:
+        return {}
+    raw = run(
         *GIT_DIFF_BASE_ARGS, "--text",
-        "--src-prefix=a/", "--dst-prefix=b/", f"{BASE_REF}...HEAD", "--", path,
+        "--src-prefix=a/", "--dst-prefix=b/", f"{BASE_REF}...HEAD", "--", *paths,
     )
+    return parse_diff_by_file(raw)
+
+
+# Re-fetch, forced to text, any changed file that (a) isn't a genuine binary
+# asset by extension and (b) git nonetheless rendered as "Binary files ...
+# differ" — either git's own content-sniffing heuristic mis-fired, or the
+# PR's own .gitattributes marks it -diff. One consolidated call for however
+# many files that turns out to be (typically zero), not one call per file —
+# left as diff_by_file's normal binary placeholder otherwise, checks #3-5
+# below would silently see no added-line content for such a file, exactly
+# the evasion this closes.
+masked_paths = [
+    p for p, d in diff_by_file.items()
+    if is_binary_diff(d) and not p.lower().endswith(KNOWN_BINARY_EXTENSIONS)
+]
+if masked_paths:
+    diff_by_file.update(text_diff_for(*masked_paths))
 
 # 1. Gate-definition files touched on a feature/* branch (any status — an
 # outright deletion is at least as suspicious as an edit)
@@ -351,7 +378,7 @@ for path, diff in diff_by_file.items():
 
 # 5. Lowered numeric thresholds in gate-definition files
 for path in [p for p, s in status_by_path.items() if s == "M" and p in GATE_DEFINITION_FILES]:
-    for before, after in paired_threshold_drops(text_diff_for(path)):
+    for before, after in paired_threshold_drops(diff_by_file.get(path, "")):
         violations.append(
             f"{path}: a percentage/threshold value dropped from {before}% to "
             f"{after}% — confirm this is an intentional target change, not a "

@@ -28,7 +28,16 @@ TEST_ROOT = "Tests/"
 
 
 def run(*args):
-    return subprocess.run(args, capture_output=True, text=True, check=True).stdout
+    # errors="replace": non-UTF-8 bytes in a commit message or path must not
+    # crash this script outright — decode what's decodable, substitute the
+    # rest. core.quotepath=false: without it, git wraps any path containing a
+    # non-ASCII byte in literal quotes and octal-escapes it (e.g.
+    # "café.swift" -> "\"caf\\303\\251.swift\""), corrupting every basename
+    # comparison below for that file — verified empirically, not assumed.
+    return subprocess.run(
+        ("git", "-c", "core.quotepath=false") + args[1:],
+        capture_output=True, text=True, errors="replace", check=True,
+    ).stdout
 
 
 def commit_list():

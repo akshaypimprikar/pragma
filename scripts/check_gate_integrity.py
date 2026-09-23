@@ -48,6 +48,12 @@ import sys
 BASE_REF = sys.argv[1] if len(sys.argv) > 1 else "develop"
 BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 
+# core.quotepath=false: without it, git octal-escapes any non-ASCII byte in a
+# path (e.g. "café.swift" -> "caf\303\251.swift") in diff/--name-status
+# output, which would never match a plain-ASCII GATE_DEFINITION_FILES entry
+# or a suppression-scan path check. Shared by every git-diff call below.
+GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff")
+
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
     "CONSTRAINTS.md",
@@ -278,11 +284,7 @@ def paired_threshold_drops(diff):
 violations = []
 branch = current_branch()
 
-# core.quotepath=false: without it, git octal-escapes any non-ASCII byte in a
-# path (e.g. "café.swift" -> "caf\303\251.swift") in --name-status output,
-# which would never match a plain-ASCII GATE_DEFINITION_FILES entry or a
-# suppression-scan path check.
-name_status = run("git", "-c", "core.quotepath=false", "diff", f"{BASE_REF}...HEAD", "--name-status")
+name_status = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD", "--name-status")
 status_by_path = {}
 for line in name_status.splitlines():
     if not line.strip():
@@ -290,13 +292,23 @@ for line in name_status.splitlines():
     parts = line.split("\t")
     status_by_path[parts[-1]] = parts[0][0]  # first letter: A/M/D/R...
 
-# --text: a PR's own .gitattributes (`-diff`) must not blank the diff these checks
-# read. Explicit prefixes and unquoted paths: parse_diff_by_file needs a/ b/ headers.
-full_diff = run(
-    "git", "-c", "core.quotepath=false", "diff", "--text",
-    "--src-prefix=a/", "--dst-prefix=b/", f"{BASE_REF}...HEAD",
-)
+full_diff = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD")
 diff_by_file = parse_diff_by_file(full_diff)
+
+
+def text_diff_for(path):
+    # --text: a PR's own .gitattributes (`-diff`) must not blank a
+    # gate-definition file's diff for check #5 below. Scoped to one path at
+    # a time, not applied to the shared full_diff above — forcing --text
+    # repo-wide would turn every binary asset changed in the same PR (app
+    # icons, xcassets) into raw bytes rendered as pseudo-text lines, bloating
+    # and potentially corrupting the suppression/stub scan those other
+    # checks run over every changed file. Explicit prefixes: parse_diff_by_file
+    # needs a/ b/ headers.
+    return run(
+        *GIT_DIFF_BASE_ARGS, "--text",
+        "--src-prefix=a/", "--dst-prefix=b/", f"{BASE_REF}...HEAD", "--", path,
+    )
 
 # 1. Gate-definition files touched on a feature/* branch (any status — an
 # outright deletion is at least as suspicious as an edit)
@@ -339,7 +351,7 @@ for path, diff in diff_by_file.items():
 
 # 5. Lowered numeric thresholds in gate-definition files
 for path in [p for p, s in status_by_path.items() if s == "M" and p in GATE_DEFINITION_FILES]:
-    for before, after in paired_threshold_drops(diff_by_file.get(path, "")):
+    for before, after in paired_threshold_drops(text_diff_for(path)):
         violations.append(
             f"{path}: a percentage/threshold value dropped from {before}% to "
             f"{after}% — confirm this is an intentional target change, not a "

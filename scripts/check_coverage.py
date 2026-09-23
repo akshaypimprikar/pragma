@@ -14,10 +14,12 @@ WARN_THRESHOLD = 0.80
 # Files that genuinely can't be covered by a CI simulator run — e.g. code that
 # requires live hardware-eligible capability (Apple Intelligence, ARKit, a
 # real device sensor) and is verified by manual/on-device testing instead.
-# Leave empty by default; add a file name only with a comment naming the real
-# constraint and how it's verified instead — this is an escape hatch for a
-# genuine coverage-tooling gap, not a way to silence a file that's just
-# under-tested.
+# Leave empty by default; add a full file *path* (not bare name) with a
+# comment naming the real constraint and how it's verified instead — this is
+# an escape hatch for a genuine coverage-tooling gap, not a way to silence a
+# file that's just under-tested. Matched by path, not name: two files with
+# the same basename in different targets/directories must not both silently
+# skip enforcement because one of them legitimately needed the exception.
 HARDWARE_DEPENDENT_EXCEPTIONS = set()
 
 with open(sys.argv[1]) as f:
@@ -37,7 +39,7 @@ for target in report.get("targets", []):
         if (name.endswith("View.swift") or name.endswith("Sheet.swift") or
                 name.endswith("Row.swift") or name.startswith("Color+")):
             continue
-        if name in HARDWARE_DEPENDENT_EXCEPTIONS:
+        if path in HARDWARE_DEPENDENT_EXCEPTIONS:
             continue
         if "lineCoverage" not in file:
             schema_drift_files.append(name)

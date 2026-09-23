@@ -53,8 +53,13 @@ BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 # core.quotepath=false: without it, git octal-escapes any non-ASCII byte in a
 # path (e.g. "café.swift" -> "caf\303\251.swift") in diff/--name-status
 # output, which would never match a plain-ASCII GATE_DEFINITION_FILES entry
-# or a suppression-scan path check. Shared by every git-diff call below.
-GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff")
+# or a suppression-scan path check. --src-prefix/--dst-prefix: parse_diff_by_file's
+# a/ b/ header parsing must not silently break under a contributor's global
+# diff.noprefix/diff.mnemonicPrefix git config — applied here, to every
+# git-diff call, not just the narrower text_diff_for() re-fetch below, so a
+# config-dependent header format can't mis-parse (or drop) the main diff
+# every other check reads.
+GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff", "--src-prefix=a/", "--dst-prefix=b/")
 
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
@@ -319,16 +324,11 @@ def is_binary_diff(diff_text):
 
 def text_diff_for(*paths):
     # --text: a PR's own .gitattributes (`-diff`) must not blank a file's
-    # diff from the checks that read it. Explicit --src-prefix/--dst-prefix
-    # guards parse_diff_by_file's a/ b/ header parsing against a
-    # contributor's global diff.noprefix/diff.mnemonicPrefix git config
-    # changing the default header format for this one call.
+    # diff from the checks that read it. --src-prefix/--dst-prefix already
+    # come from GIT_DIFF_BASE_ARGS.
     if not paths:
         return {}
-    raw = run(
-        *GIT_DIFF_BASE_ARGS, "--text",
-        "--src-prefix=a/", "--dst-prefix=b/", f"{BASE_REF}...HEAD", "--", *paths,
-    )
+    raw = run(*GIT_DIFF_BASE_ARGS, "--text", f"{BASE_REF}...HEAD", "--", *paths)
     return parse_diff_by_file(raw)
 
 

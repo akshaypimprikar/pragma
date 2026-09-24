@@ -28,7 +28,7 @@ file at all.
    pressure to make a stuck gate pass from editing the gate definition
    instead of fixing the underlying violation. This dimension catches the
    diff-detectable half of that problem: a gate-definition file (the exact
-   list is `GATE_DEFINITION_FILES` in `scripts/check_gate_integrity.py` —
+   list is `GATE_DEFINITION_FILES` and `GUARDED_PATH_GLOBS` in `scripts/check_gate_integrity.py` —
    named here rather than enumerated, so this paragraph can't drift out of
    sync with that list the way an inline copy would; a sibling
    `scripts/check_*.py`'s real code is scanned like any other source file,
@@ -53,9 +53,11 @@ file at all.
    push-triggered run or any non-GitHub-Actions CI still needs the explicit
    argument to detect a `feature/*` branch correctly.
 
-   It cannot block the edit from happening mid-session — that needs a native
-   `PreToolUse` hook, a separate architecture piece not built here — only
-   catch it once `/gates` runs. It also can't catch an agent that renames its
+   It cannot block the edit from happening mid-session; the guard hook
+   (`.claude/hooks/guard_protected_paths.py`, installed by `setup.sh`) does
+   that, and this script is the CI-side backstop for a plain commit that
+   never went through Claude Code. This script only catches it once `/gates`
+   or CI runs. It also can't catch an agent that renames its
    branch away from `feature/*` specifically to dodge check #1, or a
    gate-definition file/test renamed away rather than deleted outright —
    known, documented gaps, not silent ones.

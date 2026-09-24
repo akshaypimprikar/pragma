@@ -23,7 +23,7 @@ Limits (deliberate):
     similar), `eval`, subshells, `$( )` and backticks (also inside double
     quotes), `if`/`while`/`for` bodies, wrappers (sudo, env, xargs, nice,
     timeout ...), partly quoted words, backslash-newline continuations, and
-    `cd dir && ...` (scoped to its subshell; `cd -` and bare `cd` work).
+    `cd dir && ...` (scoped to its subshell; `cd -`, bare `cd`, `pushd` and `popd` work).
     Protected files are matched at the repo root and under any subdirectory
     (`ios/CLAUDE.md`), and a protected name that is a symlink is caught.
     Not detected: `python -c`, interpreter heredocs, variable/glob expansion
@@ -74,12 +74,14 @@ REDIRECT_OPS = ("<", "<<", "<<<", "<&", "<>", ">", ">>", ">&", ">|", "&>", "&>>"
 # argument and never reach the real command at all. A wrapper with no
 # entry here (command/time/nohup) has no argument-taking flags.
 WRAPPER_ARG_FLAGS = {
-    "sudo": {"-u", "-g", "-p", "-h", "-r", "-t", "-C", "-a"},
-    "env": {"-u", "-C", "-S"},
+    "sudo": {"-u", "-g", "-p", "-h", "-r", "-t", "-C", "-a", "--user", "--group", "--prompt", "--host",
+             "--role", "--type", "--chdir", "--close-from"},
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
     "exec": {"-a"},
-    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"},
-    "nice": {"-n"},
-    "ionice": {"-c", "-n", "-p", "-P", "-u"},
+    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--delimiter",
+              "--arg-file", "--eof", "--max-chars", "--max-lines"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
 }
 # Wrappers whose first non-flag argument is not the command (`timeout 5 rm x`: 5 is a duration).
@@ -276,6 +278,9 @@ def strip_heredocs_and_newlines(command):
 
 
 OPERATOR_CHARS = "();<>|&"
+# One operator per match, longest first. A run such as `;>`, `&&>`, `|>` or `(>` is a
+# separator followed by a redirect; treating the whole run as one token hid the redirect.
+OPERATOR = re.compile(r"&>>|&>|<<<|<<|<&|<>|>>|>&|>\||>|<|&&|\|\||\|&|;;|;|\||&|\(|\)")
 
 
 def tokenize(command):
@@ -315,7 +320,7 @@ def tokenize(command):
             j = i
             while j + 1 < len(command) and command[j + 1] in OPERATOR_CHARS:
                 j += 1
-            tokens.append(command[i : j + 1])
+            tokens += OPERATOR.findall(command[i : j + 1])
             i = j
         else:
             word.append(c)
@@ -338,6 +343,12 @@ def real_command_index(words):
     i, n = 0, len(words)
     while i < n:
         w = words[i]
+        if w in REDIRECT_OPS:
+            i += 2  # a leading redirection: `>/dev/null rm x`, `</dev/null sed -i ...`
+            continue
+        if re.fullmatch(r"\d+", w) and i + 1 < n and words[i + 1] in REDIRECT_OPS:
+            i += 1  # its fd number: `2>/dev/null rm x`
+            continue
         if "=" in w:
             i += 1  # a VAR=val prefix (env-style or a literal assignment)
             continue
@@ -427,21 +438,29 @@ def git_subcommand(operands):
 
 
 def command_substitutions(word):
-    """Bodies of `$( ... )` inside a word that is not single-quoted (a double-quoted
-    string keeps its `$(...)` inside one token; bare ones are split by the tokenizer)."""
-    if word.startswith("'") or "$(" not in word:
+    """Bodies of `$( ... )` in a word, wherever they sit: bare, inside double quotes, or
+    in a later part of a partly quoted word (`'x'"$(rm f)"`). One inside single quotes
+    is data, not a command. (Bare `$(` is normally split off by the tokenizer.)"""
+    if "$(" not in word:
         return []
-    bodies, i = [], 0
-    while True:
-        i = word.find("$(", i)
-        if i < 0:
-            return bodies
-        depth, j = 1, i + 2
-        while j < len(word) and depth:
-            depth += {"(": 1, ")": -1}.get(word[j], 0)
-            j += 1
-        bodies.append(word[i + 2 : j - 1] if depth == 0 else word[i + 2 :])
-        i = j
+    bodies, i, quote = [], 0, None
+    while i < len(word):
+        c = word[i]
+        if c == "\\" and quote != "'" and i + 1 < len(word):
+            i += 2
+            continue
+        if c in "'\"" and quote in (None, c):
+            quote = None if quote else c
+        elif quote != "'" and word.startswith("$(", i):
+            depth, j = 1, i + 2
+            while j < len(word) and depth:
+                depth += {"(": 1, ")": -1}.get(word[j], 0)
+                j += 1
+            bodies.append(word[i + 2 : j - 1] if depth == 0 else word[i + 2 :])
+            i = j
+            continue
+        i += 1
+    return bodies
 
 
 # What a candidate path is subject to (the second element of a target tuple).
@@ -473,7 +492,7 @@ def bash_write_targets(command, cwd, _depth=0):
     tokens = tokenize(command)
     if tokens is None:
         return []
-    results, cur, prev, stack = [], cwd, None, []  # `cd dir && ...` moves cur for later segments
+    results, cur, prev, stack, dirstack = [], cwd, None, [], []  # `cd dir && ...` moves cur for later segments
     for item in split_segments(tokens):
         if item[0] == "push":
             stack.append((cur, prev))
@@ -499,6 +518,14 @@ def bash_write_targets(command, cwd, _depth=0):
             operands = command_operands(words[cmd_idx + 1 :])
             args = [w for w in operands if not w.startswith("-")]
             flags = [w for w in operands if w.startswith("-")]
+            if cmd == "pushd" and args and "$" not in args[0]:
+                dirstack.append(cur)
+                prev, cur = cur, resolve(args[0], cur)
+                continue
+            if cmd == "popd":
+                if dirstack:
+                    prev, cur = cur, dirstack.pop()
+                continue
             if cmd == "cd":
                 target = None
                 if "-" in operands:  # `cd -` (a lone "-" is an operand, not a flag)
@@ -818,6 +845,35 @@ def self_test():
             ("feature: Bash rm -rf ios/.claude/skills", bash("feat", "rm -rf ios/.claude/skills"), True),
             ("feature: Bash rm -rf ios/.claude", bash("feat", "rm -rf ios/.claude"), True),
             ("feature: Write ios/Sources/A.swift is ordinary", write("Write", "feat", "ios/Sources/A.swift"), False),
+        ]
+        cases += [
+            # 1. Redirections before the command word.
+            ("feature: Bash leading > redirect", bash("feat", ">/dev/null rm CLAUDE.md"), True),
+            ("feature: Bash leading 2> redirect", bash("feat", "2>/dev/null rm CLAUDE.md"), True),
+            ("feature: Bash leading < redirect", bash("feat", "</dev/null sed -i s/a/b/ CLAUDE.md"), True),
+            ("feature: Bash leading redirect then VAR=val", bash("feat", ">/dev/null FOO=1 rm CLAUDE.md"), True),
+            ("feature: Bash leading redirect, ordinary target", bash("feat", ">/dev/null rm App/A.swift"), False),
+            # 2. A redirect glued to a separator.
+            ("feature: Bash ;> glued", bash("feat", "true;>CLAUDE.md"), True),
+            ("feature: Bash &&> glued", bash("feat", "echo a&&>CLAUDE.md"), True),
+            ("feature: Bash |> glued", bash("feat", "ls|>CLAUDE.md"), True),
+            ("feature: Bash (> glued", bash("feat", "(>CLAUDE.md)"), True),
+            ("feature: Bash ;>> glued", bash("feat", "true;>>CLAUDE.md"), True),
+            ("feature: Bash &>> glued", bash("feat", "true&>>CLAUDE.md"), True),
+            ("feature: Bash glued redirect, ordinary target", bash("feat", "true;>App/A.swift"), False),
+            ("feature: Bash 2>&1 still not a redirect target", bash("feat", "ls CLAUDE.md 2>&1;ls"), False),
+            # 3. $( ) after a single-quoted part of the same word.
+            ("feature: Bash 'x'\"$( )\" word", bash("feat", "echo 'x'\"$(rm CLAUDE.md)\""), True),
+            ("feature: Bash \"a\"'b'$( ) word", bash("feat", "echo \"a\"'b'\"$(rm CLAUDE.md)\""), True),
+            ("feature: Bash $( ) only inside single quotes is data", bash("feat", "echo 'x $(rm CLAUDE.md) y'"), False),
+            # 9. Long options with a separate argument; pushd and popd.
+            ("feature: Bash sudo --user foo", bash("feat", "sudo --user foo rm CLAUDE.md"), True),
+            ("feature: Bash env --unset FOO", bash("feat", "env --unset FOO rm CLAUDE.md"), True),
+            ("feature: Bash sudo --user=foo", bash("feat", "sudo --user=foo rm CLAUDE.md"), True),
+            ("feature: Bash xargs --max-args 1", bash("feat", "xargs --max-args 1 rm CLAUDE.md"), True),
+            ("feature: Bash pushd then write", bash("feat", "pushd App && echo x > ../CLAUDE.md"), True),
+            ("feature: Bash pushd then popd", bash("feat", "pushd App; popd; echo x > CLAUDE.md"), True),
+            ("feature: Bash pushd into a subdir, ordinary file", bash("feat", "pushd App && echo x > README.md"), False),
         ]
         cases.append(("feature: Bash rm -rf of the directory holding the repo", bash("feat", f"rm -rf {tmp}"), True))
         cases.append(("feature: Bash `a#b` word keeps the redirect", bash("feat", "echo a#b > CLAUDE.md"), True))

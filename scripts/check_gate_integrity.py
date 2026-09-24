@@ -11,8 +11,8 @@ Flags, via a single git diff against the base branch:
      drift out of sync with it the way an inline copy already had)
      touched on a feature/* branch — a real feature never needs to change
      what counts as passing. Only reliably checkable when the actual branch
-     name is known (see current_branch()). A guarded file renamed or copied
-     away is caught through its rename/copy source.
+     name is known (see current_branch()). A guarded file renamed away is
+     caught through its rename source.
   2. A previously-existing test file deleted rather than fixed. Same
      rename caveat as #1 — a test renamed away rather than deleted outright
      isn't caught.
@@ -68,8 +68,8 @@ GATE_DEFINITION_FILES = (
     ".claude/skills/deterministic-pr-gates/SKILL.md",
 )
 # Wider than GATE_DEFINITION_FILES, and used by check #1 only: every file the
-# PreToolUse hook (scaffold/.claude/hooks/guard_protected_paths.py) blocks on a
-# feature/* branch. The hook stops the edit live but only inside a Claude Code
+# PreToolUse hook (.claude/hooks/guard_protected_paths.py; scaffold/.claude/hooks/
+# in the pragma repo) blocks on a feature/* branch. The hook stops the edit live but only inside a Claude Code
 # session; a plain commit + push bypasses it, so this list is the CI-side
 # backstop for the same set. Keep it in step with the hook's PROTECTED_GLOBS.
 # `*` crosses `/` (fnmatch), so nested paths match, and each glob is also
@@ -334,6 +334,15 @@ def file_status(diff_text):
     return "M"
 
 
+def rename_source(diff_text):
+    """The old path if this file's diff block is a rename, else None. Reads only the
+    header lines, like file_status."""
+    for line in diff_text.split("\n", 8)[:8]:
+        if line.startswith("rename from "):
+            return line[len("rename from "):]
+    return None
+
+
 violations = []
 branch = current_branch()
 
@@ -390,12 +399,12 @@ if branch == "HEAD":
 elif branch.startswith("feature/"):
     touched_defs = [p for p in status_by_path if is_guarded_path(p)]
     # A guarded file moved off its protected path shows up only under its new name,
-    # so check the rename/copy source too.
+    # so check the rename source too (unless the new name is itself guarded and
+    # already listed).
     for path, diff in diff_by_file.items():
-        for line in diff.splitlines()[:8]:
-            for marker in ("rename from ", "copy from "):
-                if line.startswith(marker) and is_guarded_path(line[len(marker):]):
-                    touched_defs.append(f"{line[len(marker):]} (renamed or copied to {path})")
+        source = rename_source(diff)
+        if source and is_guarded_path(source) and not is_guarded_path(path):
+            touched_defs.append(f"{source} (renamed to {path})")
     if touched_defs:
         violations.append(
             "Gate-definition file(s) modified on a feature/* branch: "

@@ -26,7 +26,8 @@ on:
       - 'scripts/**'
       # Gate-definition files that scripts/check_gate_integrity.py guards; without
       # these a PR that only edits them would never trigger this workflow.
-      # Keep in step with GUARDED_PATH_GLOBS in that script.
+      # Keep in step with GUARDED_PATH_GLOBS in that script. Each is listed twice:
+      # `**/x` needs a `/`, so it does not match the repo root; the script matches both.
       - '.claude/skills/**'
       - '.claude/settings.json'
       - '.claude/hooks/**'
@@ -34,6 +35,14 @@ on:
       - 'AGENTS.md'
       - 'CLAUDE.md'
       - 'CONSTRAINTS.md'
+      - '**/.claude/skills/**'
+      - '**/.claude/settings.json'
+      - '**/.claude/hooks/**'
+      - '**/.claude/context/invariants.md'
+      - '**/AGENTS.md'
+      - '**/CLAUDE.md'
+      - '**/CONSTRAINTS.md'
+      - '**/scripts/check_*'
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
@@ -142,3 +151,11 @@ jobs:
             echo "::endgroup::"
           done
           exit $status
+
+      - name: Guard hook self-test and glob-list check
+        # Runs the PR head's own hook and script, so it only catches an honest slip: the
+        # hook's PROTECTED_GLOBS drifting from GUARDED_PATH_GLOBS, or a broken parser case.
+        # The enforcement is the base-branch script run above, not this step.
+        if: hashFiles('head/.claude/hooks/guard_protected_paths.py') != ''
+        working-directory: head
+        run: python3 .claude/hooks/guard_protected_paths.py --self-test

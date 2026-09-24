@@ -21,15 +21,15 @@ Invoked with a version number (e.g. `/release 1.0.0`).
     -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
     > "$LOG" 2>&1; RC=$?
   xcsift < "$LOG"
-  PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
+  PASSED=$(grep -E "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG" | grep -vc "Test run with"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
   [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
     && echo "TESTS PASS ($PASSED tests executed)" || echo "TESTS FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
   ```
   Same check as `/gates` Gate 2: a `| xcsift` pipe hides `xcodebuild`'s exit status, and a run that executes zero tests still prints `TEST SUCCEEDED`.
 - [ ] No TODO/FIXME in any file added since last release: `git diff <last-tag>..develop -- '*.swift' | grep -E "TODO|FIXME"`
-- [ ] No force-unwraps in production code added since last release:
+- [ ] No force-unwraps in production code added since last release (heuristic: an identifier or closing bracket followed by `!`, so `try!`/`as!` match and `!flag`/`!=` don't; a `!` inside a string literal is a false positive, so check each hit):
   ```bash
-  git diff <last-tag>..develop -- '<AppName>/*.swift' | grep -E '^\+.*[^!]![^=]'
+  git diff <last-tag>..develop -- '<AppName>/*.swift' | grep -E '^\+.*[A-Za-z0-9_)\]]!([^=]|$)'
   ```
 
 If any check fails, stop and report what must be fixed.

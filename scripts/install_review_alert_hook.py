@@ -11,7 +11,9 @@ What it does:
   Merges one UserPromptSubmit entry into PROJECT_DIR/.claude/settings.json without
   touching anything else in it. On every prompt, the hook reads the frontmatter of
   each docs/pipeline-review/*.md report and, if any has `addressed: false`, shows a
-  one-line alert naming the count and the latest report. It reads the frontmatter
+  one-line alert naming the count and the latest report, both to the user
+  (`systemMessage`) and to the agent (`additionalContext`; a `systemMessage` alone
+  is shown only to the user, so the agent would never act on it). It reads the frontmatter
   only, so a report that mentions the phrase in its body is not counted, and it
   accepts `addressed: "false"` and a trailing comment. It is an inline shell command
   (no file to copy) that needs only awk and resolves the project through
@@ -45,9 +47,11 @@ COMMAND = (
     '[ -n "$U" ] || exit 0; '
     "N=$(printf '%s\\n' \"$U\" | wc -l | tr -d ' '); "
     "L=$(printf '%s\\n' \"$U\" | sort | tail -1 | xargs basename | tr -d '\"\\\\'); "
-    "printf '{\"systemMessage\": \"PIPELINE REVIEW ALERT: %s unaddressed pipeline review report(s) "
-    "in docs/pipeline-review/. Latest: %s. Before starting any planned work, ask the user whether "
-    "they want to address these findings first.\"}\\n' \"$N\" \"$L\""
+    "M=\"PIPELINE REVIEW ALERT: $N unaddressed pipeline review report(s) in docs/pipeline-review/. "
+    "Latest: $L. Before starting any planned work, ask the user whether they want to address these "
+    "findings first.\"; "
+    "printf '{\"systemMessage\": \"%s\", \"hookSpecificOutput\": {\"hookEventName\": "
+    "\"UserPromptSubmit\", \"additionalContext\": \"%s\"}}\\n' \"$M\" \"$M\""
 )
 
 

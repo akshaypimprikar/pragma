@@ -70,7 +70,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
+PASSED=$(grep -E "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG" | grep -vc "Test run with"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "GATE 2 PASS ($PASSED tests executed)" || echo "GATE 2 FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
@@ -79,7 +79,7 @@ Pass: `GATE 2 PASS` with an executed-test count above zero. The count is require
 matches nothing. The count is read from per-test-case result lines: `Test Case '…' passed` / `Test case '…' passed`,
 and `✔ Test "…" passed …` for Swift Testing's own console format. On Xcode 27, `xcodebuild test` prints
 Swift Testing results in the `Test case '…' passed` form too (verified 2026-09-24 on a Swift Testing
-suite: 191 `Test case` lines, 0 `✔` lines); the `✔` alternative covers other versions and runners. Both
+suite: 191 `Test case` lines, 0 `✔` lines); the `✔` alternative covers other versions and runners, and the Swift Testing run summary (`✔ Test run with N tests … passed`) is excluded so a run that executes nothing can't count as one test. Both
 symbol variants (`✔`/`✓`, `✘`/`✗`) are matched since different Xcode/terminal versions render this
 differently — this has not been confirmed against every Xcode version's exact output, so **run it once
 against a real green suite before trusting it**, and adjust the pattern if your version words or
@@ -302,7 +302,7 @@ Fix any failures before continuing.
 ## Autonomous gate-fixing loop
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/loop Fix failing gates and re-check. Stop when all blocking gates pass (11 total; Gate 8 abstraction bloat is advisory, `[i]` only, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
+/loop Fix failing gates and re-check. Stop when all blocking gates pass (Gates 1–11, 10 blocking; Gate 8 abstraction bloat is advisory, `[i]` only, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated, coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 
@@ -352,7 +352,7 @@ EOF
 If `/gates` is re-run after the PR is open (a fix cycle changes HEAD), update the PR body's gate section with the new summary — `gh pr edit <PR> --body-file <file>` — so its `Gates run at <sha>` matches the new HEAD; `/review` rejects a stale one.
 
 **Always pass `--base develop`** — `gh pr create` defaults to `main` (repo default), which bypasses gitflow.
-Exceptions: `release/*` and `hotfix/*` branches use `--base main`.
+Exceptions: `release/*` and `hotfix/*` branches use `--base main`, except a hotfix's second PR back to `develop`, which uses `--base develop` (see `/bugfix`).
 
 ## Guard against self-modifying guardrail files
 
@@ -364,7 +364,7 @@ Gates 0–11 are agent-instruction checks, so an agent under pressure to make a 
 What is not covered: the hook's Bash detection is a best-effort parse, so `python -c`, interpreter heredocs, variable or glob expansion (including `cd $VAR`), `find -exec` or `-delete`, `xargs rm` fed from stdin, `git checkout <ref> -- file`, `git restore` and `rm -rf <dir that only contains a nested project>` are not detected. A symlink that already exists is followed; one created and written through in the same command is not. The hook only runs in sessions that load the project's own `.claude/settings.json`: verified 2026-09-23 that a session started from a parent directory did not fire it, so start Claude Code from the project root. The CI backstop applies either way. The hook fails open on bad input, no git repo or a detached HEAD, and it allows every edit off `feature/*`. Neither layer catches an agent that renames its branch away from `feature/*`. `.claude/settings.local.json` is not on the list. Pattern sourced from `karanb192/claude-code-hooks`'s "config-guard" hook, surfaced in the 2026-09-08 Agentic AI Intelligence Report.
 
 ## Done when
-All 11 gates report (10 blocking gates pass; Gate 8 is advisory), PR is open, and the PR URL is returned to the user.
+All 11 gates (Gates 1–11; Gate 0 only decides whether Gates 1–2 run) report: the 10 blocking gates pass and Gate 8, advisory, is listed, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into review + test + code-review
 Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review`, `/test`,

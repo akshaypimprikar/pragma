@@ -55,7 +55,7 @@ grep -c "^-" <(grep -A 20 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -B
 
 ### 6. Unaddressed pipeline reviews
 ```bash
-for f in docs/pipeline-review/*.md; do [ -f "$f" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^addressed:[[:space:]]*false[[:space:]]*$/{print FILENAME; exit}' "$f"; done 2>/dev/null | wc -l | tr -d ' '
+for f in docs/pipeline-review/*.md; do [ -f "$f" ] && awk 'NR==1 && !/^---/{exit} NR>1 && /^---/{exit} /^addressed:[[:space:]]*"?false"?[[:space:]]*(#.*)?$/{print FILENAME; exit}' "$f"; done 2>/dev/null | wc -l | tr -d ' '
 ```
 
 ### 7. Last activity

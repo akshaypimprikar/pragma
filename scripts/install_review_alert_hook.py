@@ -46,7 +46,7 @@ COMMAND = (
     '/^addressed:[[:space:]]*"?false"?[[:space:]]*(#.*)?$/{print FILENAME; exit}\' "$f"; done); '
     '[ -n "$U" ] || exit 0; '
     "N=$(printf '%s\\n' \"$U\" | wc -l | tr -d ' '); "
-    "L=$(printf '%s\\n' \"$U\" | sort | tail -1 | xargs basename | tr -d '\"\\\\'); "
+    "L=$(printf '%s\\n' \"$U\" | sort | tail -1); L=${L##*/}; L=$(printf '%s' \"$L\" | tr -d '\"\\\\'); "
     "M=\"PIPELINE REVIEW ALERT: $N unaddressed pipeline review report(s) in docs/pipeline-review/. "
     "Latest: $L. Before starting any planned work, ask the user whether they want to address these "
     "findings first.\"; "
@@ -66,6 +66,11 @@ def load_settings(path):
         raise ValueError(f"{path} is not valid JSON ({e}); fix it and re-run") from e
     if not isinstance(data, dict):
         raise ValueError(f"{path} must contain a JSON object")
+    # null is treated as absent, so register() can add the entry instead of crashing
+    if data.get("hooks") is None:
+        data.pop("hooks", None)
+    elif isinstance(data["hooks"], dict) and data["hooks"].get(EVENT, 0) is None:
+        del data["hooks"][EVENT]
     hooks = data.get("hooks")
     if hooks is not None and not isinstance(hooks, dict):
         raise ValueError(f'{path}: "hooks" must be an object')

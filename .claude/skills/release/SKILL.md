@@ -27,7 +27,10 @@ Invoked with a version number (e.g. `/release 1.0.0`).
   ```
   Same check as `/gates` Gate 2: a `| xcsift` pipe hides `xcodebuild`'s exit status, and a run that executes zero tests still prints `TEST SUCCEEDED`.
 - [ ] No TODO/FIXME in any file added since last release: `git diff <last-tag>..develop -- '*.swift' | grep -E "TODO|FIXME"`
-- [ ] No force-unwraps in production code added since last release
+- [ ] No force-unwraps in production code added since last release:
+  ```bash
+  git diff <last-tag>..develop -- '<AppName>/*.swift' | grep -E '^\+.*[^!]![^=]'
+  ```
 
 If any check fails, stop and report what must be fixed.
 

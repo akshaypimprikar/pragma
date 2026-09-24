@@ -88,7 +88,7 @@ If the feature idea implies multiple independent subsystems, say so and suggest 
 ## Architecture Rules (from AGENTS.md/CLAUDE.md — enforce in every spec)
 - Views contain no business logic
 - Domain Services have **zero** SwiftData imports — 100% unit testable without a simulator
-- All money values use `Decimal`, never `Double`
+- <type-safety rule from AGENTS.md, e.g. all money values use `Decimal`, never `Double`>
 - ViewModels depend on repository protocols, never concrete implementations
 - New models go in `<AppName>/Models/`, services in `<AppName>/Services/`
 - New repository protocols go in `<AppName>/Repositories/Protocols/`, implementations in `<AppName>/Repositories/SwiftData/`

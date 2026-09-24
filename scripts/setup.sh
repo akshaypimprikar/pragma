@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
 # --no-guard-hook — skip installing the PreToolUse guard hook (see below)
+# --no-review-alert — skip installing the pipeline-review alert hook (see below)
 #
 # What it does:
 #   - Copies .claude/skills/, .claude/context/, scripts/, and
@@ -24,6 +25,9 @@
 #     entry into .claude/settings.json (other settings are kept; the original
 #     is backed up). The hook blocks edits to gate-definition files on
 #     feature/* branches during a Claude Code session. Skip with --no-guard-hook
+#   - Merges a UserPromptSubmit entry into .claude/settings.json that alerts on
+#     every prompt while a docs/pipeline-review/ report has `addressed: false`
+#     in its frontmatter. Skip with --no-review-alert
 #   - Generates a starter AGENTS.md if one doesn't exist, plus a CLAUDE.md
 #     that imports it (@AGENTS.md), so any AGENTS.md-reading agent and
 #     Claude Code both pick up the same content
@@ -41,10 +45,12 @@ die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 INSTALL_GUARD_HOOK=1
+INSTALL_REVIEW_ALERT=1
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
         --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
+        --no-review-alert) INSTALL_REVIEW_ALERT=0 ;;
         *) POSITIONAL+=("$arg") ;;
     esac
 done
@@ -54,7 +60,7 @@ APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
 # pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
@@ -142,6 +148,20 @@ else
     info "Skipping the guard hook (--no-guard-hook)"
 fi
 
+# ── 3d. Pipeline-review alert hook ────────────────────────────────────────────
+if [[ "$INSTALL_REVIEW_ALERT" -eq 1 ]]; then
+    info "Installing the pipeline-review alert hook…"
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "python3 not found — skipping the pipeline-review alert (install python3 and re-run, or pass --no-review-alert)"
+    elif python3 "$SCRIPT_DIR/install_review_alert_hook.py" "$PROJECT_DIR"; then
+        success "Pipeline-review alert ready"
+    else
+        warn "Pipeline-review alert not installed (see the error above) — fix .claude/settings.json and re-run, or pass --no-review-alert"
+    fi
+else
+    info "Skipping the pipeline-review alert (--no-review-alert)"
+fi
+
 # ── 4. CI workflows ───────────────────────────────────────────────────────────
 info "Copying CI workflows…"
 mkdir -p "$PROJECT_DIR/.github/workflows"
@@ -214,9 +234,13 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 - Tests use \`import Testing\` with \`@Suite\` / \`@Test\` / \`#expect()\`
 -->
 
+## Pipeline
+
+Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/gates\` → PR to \`develop\` → \`/pr-followup\`, which runs \`/review\` → \`/test\` → \`code-review:code-review\` in that order, not in parallel → \`/release\` → \`main\`.
+
 ## Merge rule
 
-No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\`/\`hotfix/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. Agents report their verdict and stop.
+No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. \`hotfix/*\` PRs are not exempt: they branch off \`main\`, so their commits never passed review on \`develop\` — both the \`main\` PR and the \`develop\` PR need \`/review\`, \`/test\` and \`code-review:code-review\`. Agents report their verdict and stop.
 CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"

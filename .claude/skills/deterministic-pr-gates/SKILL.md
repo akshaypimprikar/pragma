@@ -13,9 +13,13 @@ This skill does the opposite. Nearly every gate is a real command with a checkab
 
 Use an LLM-judgment skill *in addition* to this one for things that are genuinely subjective (does this variable name communicate intent, is this abstraction premature). Use this skill for everything that has a yes/no answer, so the two never overlap and neither goes soft on the other's job.
 
-## When gates apply
+## Trigger
 
-Not every gate applies to every project or every diff. Each gate below states its own condition — most are conditional on specific files having changed. Skip a gate outright if its condition isn't met; report it as skipped, not as passed.
+Run before a PR is opened or before a human reviewer looks at the diff: when the user asks whether a branch is ready for a PR, wants a pre-PR checklist automated, or wants CI-equivalent checks run locally.
+
+## Process
+
+Run Gate 0 through Gate 10 below in order, then report the Gate summary. Not every gate applies to every project or every diff. Each gate below states its own condition — most are conditional on specific files having changed. Skip a gate outright if its condition isn't met; report it as skipped, not as passed.
 
 ## Gate 0 — Change scope check (runs first)
 
@@ -158,6 +162,10 @@ Gates:
 ```
 
 Use `[✓]` pass, `[✗]` fail, `[–]` skipped with the reason, `[i]` informational/advisory. Fix every `[✗]` before opening the PR — this skill's entire value is that "ready for PR" means something verifiable, not a vibe.
+
+## Done when
+
+Every gate is reported as `[✓]`, `[✗]`, `[–]` with its reason, or `[i]`, each from a command that actually ran, and no `[✗]` remains before the PR is opened.
 
 ## Instantiating this for a new project
 

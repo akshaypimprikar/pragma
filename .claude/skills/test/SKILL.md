@@ -29,7 +29,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - **Domain Services** — unit test every public method; no simulator needed, no SwiftData
 - **Repository implementations** — integration test against an in-memory `ModelContainer`
 - **ViewModels** — unit test with mock repository implementations injected via protocol
-- **UI flows** — cover critical happy paths: add transaction, import CSV, budget alert
+- **UI flows** — cover critical happy paths: <your app's 2–3 core user flows>
 - **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
 

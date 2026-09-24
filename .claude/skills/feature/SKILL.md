@@ -50,18 +50,18 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 ## Architecture rules (from AGENTS.md/CLAUDE.md)
 - Domain Services: zero SwiftData imports
 - Repository Protocols: Foundation-only imports  
-- Money values: `Decimal`, never `Double`
+- <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - ViewModels depend on protocols, never concrete implementations
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green, and all 11 `/gates` criteria pass. Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` both run automatically via `/pr-followup` — no manual trigger needed (see that command for the `disable-model-invocation` fallback).
+All tasks complete, full test suite green, and all blocking `/gates` criteria pass (Gate 8 is advisory). Then open a PR to `develop`. `/review` runs first on the PR; after it passes, `/test` and `code-review:code-review` both run automatically via `/pr-followup` — no manual trigger needed (see that command for the `disable-model-invocation` fallback).
 
 To drive the entire feature-to-gates cycle autonomously:
 ```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all 11 gates pass.
+/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all blocking gates pass.
 ```
 Or target only gate-fixing after tasks are done:
 ```
-/loop Fix failing gates. Stop when all 11 gates pass: tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated, coverage ≥80% on new files, security review clean, no abstraction bloat/duplication, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
+/loop Fix failing gates. Stop when all blocking gates pass (Gate 8 abstraction bloat is advisory, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK, branch name valid, CHANGELOG updated, coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
 ```

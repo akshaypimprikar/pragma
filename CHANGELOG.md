@@ -4,7 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-## [2.0.0] — 2026-09-24
+### Added
+- **Pipeline-review alert hook (`scripts/install_review_alert_hook.py`).** `setup.sh` and `/pragma:init` now merge a `UserPromptSubmit` entry into `.claude/settings.json`. On every prompt it reads only the frontmatter of each `docs/pipeline-review/*.md` report and, while any has `addressed: false` (quoted or with a trailing comment), tells the agent to ask whether to address the findings first. It is an inline shell command that needs only awk and uses `$CLAUDE_PROJECT_DIR`. The installer backs up `settings.json`, is a no-op on re-run, replaces an older alert registration and leaves an invalid file untouched. `setup.sh --no-review-alert` skips it.
+- **Generated AGENTS.md states the pipeline order**: `/review` → `/test` → `code-review:code-review` in that order, not in parallel. The file is 44 lines.
+
+### Changed
+- **Template no longer carries FinanceTracker's domain.** `/test`'s UI-flow coverage target is a `<your app's 2–3 core user flows>` placeholder, and `/spec`, `/plan` and `/feature` state the type-safety rule as a placeholder from AGENTS.md with money-as-`Decimal` as the example. `/review` says `<domain> thresholds` instead of `monetary thresholds`.
+- **Back-ported from FinanceTracker:** `/gates` writes candidate invariants to the PR body on `feature/*` instead of `invariants.md`, which the guard hook blocks there. Gate 11 fails when its script is missing. Gate 8's protocol scan matches access modifiers, `nonisolated` and attributes. Gate 5 summarizes GREEN commits only. `/release` has a runnable force-unwrap check. `/benchmark` lists a `model:` frontmatter change as a trigger. `/trim-context` notes that sessions launched from a parent directory need that directory's transcript path.
+- **`/gates` and `/feature` loop stop conditions and Done when say "all blocking gates"**, because Gate 8 is advisory, and no longer ask the loop to remove abstraction-bloat candidates.
+- **The scaffold's `gates` CI job runs on `develop` PRs and `hotfix/*` PRs**, not on `release/*` PRs to `main`, which re-check the whole release delta.
+- **`deterministic-pr-gates` has Trigger, Process and Done when sections**, like the other skills. Its description is unchanged.
+- `/status` maps `hotfix/*` and `chore/*` branches. `/pipeline-review` says "skill file" after the migration. `/sync-workflow` names a gate that needs a project-installed MCP server as app-specific.
+
+### Fixed
+- **Generated AGENTS.md exempted `hotfix/*` PRs from `/review` and `code-review:code-review`** because "every commit already passed both when it merged into `develop`". That is false for hotfixes, which branch off `main`, and it contradicted `/bugfix`. Only `release/*` PRs are exempt now.
+- **Gate 2's note said `xcodebuild test` does not print `Test case '…' passed` for Swift Testing suites.** On Xcode 27 it does: a Swift Testing suite run on 2026-09-24 printed 191 `Test case` lines and 0 `✔` lines. The regex already matched both forms, so no count changes.
+- `/review` names `gates/SKILL.md` instead of the pre-migration `gates.md`.
+ — 2026-09-24
 
 ### Added
 - **Guard hook for gate-definition files (`scaffold/.claude/hooks/guard_protected_paths.py`)**, ported from FinanceTracker's tested version and made generic. A `PreToolUse` hook that blocks `Write`, `Edit`, `MultiEdit` and best-effort `Bash` writes to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/context/invariants.md`, `.claude/settings.json`, `.claude/hooks/*` and `scripts/check_*` on `feature/*` branches, at the repo root or under any subdirectory. `setup.sh` and `/pragma:init` install it through the new `scripts/install_guard_hook.py`, which merges one entry into an existing `.claude/settings.json` without touching its other hooks or permissions (it backs the file up first, is a no-op on re-run, replaces an older or narrower guard registration with the current one, and leaves an invalid or oddly shaped file untouched). The hook's self-test also checks that its glob list matches the CI script's, and a new `gates` job step in `pr-checks.yml` runs it. The `paths:` filter now also lists each guarded file as `**/…` so a PR touching only a nested one still triggers the job. Installed by default; `setup.sh --no-guard-hook` skips it. Closes the "no native guard" limitation in `/gates`.

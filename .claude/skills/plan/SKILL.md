@@ -46,7 +46,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 ## Architecture Rules to enforce in every task
 - Domain Services: no SwiftData imports
 - Repository Protocols: Foundation-only imports
-- Money values: `Decimal` never `Double`
+- <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - Simulator: see AGENTS.md/CLAUDE.md — use your project's target device and OS version
 - File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests

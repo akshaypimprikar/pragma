@@ -105,6 +105,12 @@ jobs:
   # PR can edit this job.
   gates:
     name: gates
+    # develop PRs, plus hotfix/* PRs to main. A release/* PR to main is skipped:
+    # it diffs the whole release delta and has no waiver path, and every commit
+    # in it already passed this job on its own develop PR. A hotfix branches off
+    # main, so its commits never passed here; against origin/main its diff is
+    # just the hotfix.
+    if: github.base_ref == 'develop' || startsWith(github.head_ref, 'hotfix/')
     runs-on: ubuntu-latest
     permissions:
       contents: read

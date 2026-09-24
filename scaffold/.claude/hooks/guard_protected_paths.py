@@ -17,10 +17,15 @@ catches the same files on a plain commit that never went through Claude Code.
 
 Limits (deliberate):
   - Bash detection is a best-effort parse: redirects (> >> &> >| >&), tee,
-    sed/perl -i, cp/install/ln (destination), mv/rm (incl. a directory holding
-    protected files), truncate, dd of=, `bash -c '...'` and `cd dir && ...`.
-    `python -c`, interpreter heredocs, variable/glob expansion, git plumbing
-    (`git checkout <ref> -- file`) and the like are not detected.
+    sed/perl -i, cp/install/ln (destination, or a destination directory), mv/rm
+    (incl. a directory holding protected files, or the repo root and its
+    ancestors), git rm/mv, truncate, dd of=, `bash -c '...'` (also -lc and
+    similar), subshells, `if`/`while`/`for` bodies, `xargs CMD args` and
+    `cd dir && ...`. Not detected: `python -c`, interpreter heredocs,
+    variable/glob expansion, `find -exec/-delete`, `xargs rm` fed from stdin,
+    git plumbing (`git checkout <ref> -- file`, `git restore`), and state that
+    spans commands (`ln -s CLAUDE.md n && echo x > n`; a link that already
+    exists is followed, one created in the same command is not).
   - This file and its settings.json entry are protected only on feature/*:
     editable on any other branch, and a chore/* edit is not blocked at all.
     `.claude/settings.local.json` is not on the protected list.
@@ -51,7 +56,11 @@ PROTECTED_GLOBS = (
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
-WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec")
+WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs")
+# Shell keywords that precede a command in the same segment (`then rm x`,
+# `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
+SHELL_KEYWORDS = ("if", "then", "elif", "else", "while", "until", "do", "!", "{")
+REDIRECT_OPS = ("<", "<<", "<<<", "<&", "<>", ">", ">>", ">&", ">|", "&>", "&>>")
 # Per-wrapper flags that consume a following argument token (not just the
 # flag itself) — e.g. `-u` in `sudo -u foo` or `exec -a name`. Keyed by
 # wrapper word, not a single flat set: `-p` takes an argument for sudo
@@ -63,7 +72,10 @@ WRAPPER_ARG_FLAGS = {
     "sudo": {"-u", "-g", "-p", "-h", "-r", "-t", "-C", "-a"},
     "env": {"-u", "-C", "-S"},
     "exec": {"-a"},
+    "xargs": {"-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a"},
 }
+# Global `git` options that take a separate argument token.
+GIT_ARG_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
 
 def git(cwd, *args):
@@ -134,8 +146,10 @@ _PROTECTED_FRAGMENTS = tuple(
 
 
 def could_be_protected(abs_path):
-    low = abs_path.lower()
-    return any(frag in low for frag in _PROTECTED_FRAGMENTS)
+    # Also test the symlink-resolved path: a link named `notes.txt` that points
+    # at CLAUDE.md contains no fragment itself but writes through to it.
+    lows = (abs_path.lower(), os.path.realpath(abs_path).lower())
+    return any(frag in low for low in lows for frag in _PROTECTED_FRAGMENTS)
 
 
 def protected_relpath(abs_path, destructive=False):
@@ -150,6 +164,8 @@ def protected_relpath(abs_path, destructive=False):
     if not root:
         return None
     rel = os.path.relpath(os.path.realpath(abs_path), os.path.realpath(root))
+    if destructive and rel == ".":
+        return root, rel  # removing the repo root removes every protected file with it
     # macOS volumes are case-insensitive by default: claude.md is CLAUDE.md there.
     for glob in PROTECTED_GLOBS:
         if fnmatch.fnmatchcase(rel.lower(), glob.lower()):
@@ -157,6 +173,19 @@ def protected_relpath(abs_path, destructive=False):
     if destructive and is_protected_dir_prefix(rel):
         return root, rel
     return None
+
+
+def covers_repo_root(abs_path, cwd):
+    """(root, ".") if abs_path is the git root of cwd or one of its ancestors
+    (`rm -rf ..`, `rm -rf ~`, `rm -rf /`), else None."""
+    root = git(cwd, "rev-parse", "--show-toplevel")
+    if not root:
+        return None
+    real_root, real_path = os.path.realpath(root), os.path.realpath(abs_path)
+    try:
+        return (root, ".") if os.path.commonpath([real_root, real_path]) == real_path else None
+    except ValueError:  # different drives
+        return None
 
 
 def resolve(path, cwd):
@@ -188,7 +217,11 @@ def tokenize(command):
     # Non-posix keeps quotes on tokens, so a quoted '>' stays distinguishable from a redirect.
     try:
         lex = shlex.shlex(strip_heredocs_and_newlines(command), posix=False, punctuation_chars=True)
-        lex.whitespace_split = False
+        # whitespace_split=True with punctuation_chars splits on whitespace AND on
+        # ( ) ; < > | &, and keeps every other character (+ @ : , % $ non-ASCII)
+        # inside the word; False cut `a+b/CLAUDE.md` into three tokens.
+        lex.whitespace_split = True
+        lex.commenters = ""  # `a#b` is one word; a `#` comment can't swallow a later redirect
         return list(lex)
     except ValueError:
         return None
@@ -209,6 +242,9 @@ def real_command_index(words):
         if "=" in w:
             i += 1  # a VAR=val prefix (env-style or a literal assignment)
             continue
+        if w in SHELL_KEYWORDS:
+            i += 1
+            continue
         if w in WRAPPER_WORDS:
             arg_flags = WRAPPER_ARG_FLAGS.get(w, set())
             i += 1
@@ -221,6 +257,68 @@ def real_command_index(words):
     return None
 
 
+def command_operands(words):
+    """The words of one command with redirections removed: each operator, its
+    target word and a leading fd number (`2>/dev/null`, `2>&1`, `> /dev/null`).
+    Without this a trailing redirect target looks like the last operand and
+    hides the real destination of `cp x CLAUDE.md 2>/dev/null`."""
+    out, i = [], 0
+    while i < len(words):
+        w = words[i]
+        if w in REDIRECT_OPS:
+            i += 2
+        elif re.fullmatch(r"\d+", w) and i + 1 < len(words) and words[i + 1] in REDIRECT_OPS:
+            i += 1
+        else:
+            out.append(unquote(w))
+            i += 1
+    return out
+
+
+def copy_destinations(operands, cur):
+    """Paths a cp/install/ln operand list writes: the destination, plus
+    <dest>/<name> per source when the destination is a directory (a trailing
+    slash, an existing directory, or -t DIR), since a bare directory path
+    matches no protected glob but the file created inside it might."""
+    target_dir, positional, i = None, [], 0
+    while i < len(operands):
+        w = operands[i]
+        if (w == "--target-directory" or re.fullmatch(r"-[A-Za-z]*t", w)) and i + 1 < len(operands):
+            target_dir = operands[i + 1]
+            i += 2
+            continue
+        if w.startswith("--target-directory="):
+            target_dir = w.split("=", 1)[1]
+        elif not w.startswith("-"):
+            positional.append(w)
+        i += 1
+    if target_dir is not None:
+        return [target_dir] + [os.path.join(target_dir, os.path.basename(s)) for s in positional]
+    if not positional:
+        return []
+    dest, sources = positional[-1], positional[:-1]
+    found = [dest]
+    if dest.endswith("/") or os.path.isdir(resolve(dest, cur)):
+        found += [os.path.join(dest, os.path.basename(s)) for s in sources]
+    return found
+
+
+def git_subcommand(operands):
+    """(subcommand, [operands after it], -C dir or None) for a `git ...` command."""
+    i, git_dir = 0, None
+    while i < len(operands):
+        w = operands[i]
+        if w.startswith("-"):
+            if w in GIT_ARG_FLAGS and i + 1 < len(operands):
+                if w == "-C":
+                    git_dir = operands[i + 1]
+                i += 1
+            i += 1
+            continue
+        return w, operands[i + 1 :], git_dir
+    return None, [], git_dir
+
+
 def bash_write_targets(command, cwd, _depth=0):
     """Best-effort [(absolute path, is_delete_or_move)] a shell command writes to or removes."""
     tokens = tokenize(command)
@@ -228,7 +326,9 @@ def bash_write_targets(command, cwd, _depth=0):
         return []
     segments, segment = [], []
     for t in tokens + [";"]:
-        if t in (";", "&&", "||", "|", "&", "|&"):
+        # ( ) ; && || | & |& are separators, so a subshell or `$( ... )` body is its own segment.
+        # Redirect operators (which contain < or >) are not.
+        if re.fullmatch(r"[();|&]+", t):
             segments.append(segment)
             segment = []
         else:
@@ -244,32 +344,41 @@ def bash_write_targets(command, cwd, _depth=0):
         cmd_idx = real_command_index(words)
         if cmd_idx is not None:
             cmd = os.path.basename(unquote(words[cmd_idx]))
-            rest = [unquote(w) for w in words[cmd_idx + 1 :]]
-            args = [w for w in rest if not w.startswith("-") and not re.match(r"^[<>&|]", w)]
-            flags = [w for w in rest if w.startswith("-")]
+            operands = command_operands(words[cmd_idx + 1 :])
+            args = [w for w in operands if not w.startswith("-")]
+            flags = [w for w in operands if w.startswith("-")]
             if cmd == "cd":
                 if args:
                     cur = resolve(args[0], cur)
                 continue
-            if cmd in ("bash", "sh", "zsh") and "-c" in rest and _depth < 3:
-                idx = rest.index("-c")
-                if idx + 1 < len(rest):
-                    results += bash_write_targets(rest[idx + 1], cur, _depth + 1)
+            if cmd in ("bash", "sh", "zsh", "dash", "ksh") and _depth < 3:
+                # -c, or a combined short-flag cluster containing c (-lc, -ic, -xc)
+                for j, w in enumerate(operands):
+                    if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w):
+                        if j + 1 < len(operands):
+                            results += bash_write_targets(operands[j + 1], cur, _depth + 1)
+                        break
             elif cmd == "tee":
                 found += args
             elif cmd in ("sed", "gsed", "perl") and any(
                 f.startswith("--in-place") or re.match(r"^-[A-Za-z]*i", f) for f in flags
             ):
                 found += args
-            elif cmd in ("cp", "install", "ln") and args:
-                found.append(args[-1])
+            elif cmd in ("cp", "install", "ln"):
+                found += copy_destinations(operands, cur)
             elif cmd in ("mv", "rm"):
                 found += args
                 destructive = True
+            elif cmd == "git":
+                sub, sub_operands, git_dir = git_subcommand(operands)
+                if sub in ("rm", "mv"):
+                    paths = [w for w in sub_operands if not w.startswith("-")]
+                    found += [os.path.join(git_dir, w) if git_dir else w for w in paths]
+                    destructive = True
             elif cmd == "truncate":
                 found += args
             elif cmd == "dd":
-                found += [w[3:] for w in rest if w.startswith("of=")]
+                found += [w[3:] for w in operands if w.startswith("of=")]
         results += [(resolve(t, cur), destructive) for t in found]
     return results
 
@@ -289,6 +398,8 @@ def evaluate(payload):
 
     for abs_path, destructive in candidates:
         hit = protected_relpath(abs_path, destructive)
+        if not hit and destructive:
+            hit = covers_repo_root(abs_path, cwd)
         if not hit:
             continue
         root, rel = hit
@@ -296,7 +407,7 @@ def evaluate(payload):
         if not branch or not GUARDED_BRANCH.match(branch):
             continue  # detached HEAD or a non-feature branch: allow
         return (
-            f"BLOCKED: `{rel}` is a gate-definition/guardrail file and the current branch is "
+            f"BLOCKED: `{rel}` is, or holds, a gate-definition/guardrail file and the current branch is "
             f"`{branch}` (feature/*). A feature branch must not change what counts as passing. "
             "Remedy: make this change on a chore/* or fix/* branch in its own PR, then rebase "
             "this feature branch onto it. If the edit really belongs to this feature, stop and "
@@ -317,19 +428,48 @@ def main():
     return 0
 
 
+def check_ci_list_in_step():
+    """PROTECTED_GLOBS must equal the CI-side list in scripts/check_gate_integrity.py
+    (GUARDED_PATH_GLOBS plus its scripts/check_*.py entry). Skipped, not failed, where
+    that script isn't reachable from this file's location."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for up in ("..", "../..", "../../.."):
+        script = os.path.normpath(os.path.join(here, up, "scripts", "check_gate_integrity.py"))
+        if os.path.isfile(script):
+            break
+    else:
+        print("SKIP  scripts/check_gate_integrity.py not found: cannot compare glob lists")
+        return 0
+    m = re.search(r"GUARDED_PATH_GLOBS = \((.*?)\n\)", open(script, encoding="utf8").read(), re.S)
+    ci = set(re.findall(r'"([^"]+)"', m.group(1))) if m else set()
+    hook = set(PROTECTED_GLOBS)
+    ok = bool(ci) and ci == hook
+    print(f"{'PASS' if ok else 'FAIL'}  hook PROTECTED_GLOBS == check_gate_integrity.py GUARDED_PATH_GLOBS")
+    if not ok:
+        print(f"      only in hook: {sorted(hook - ci)}   only in CI script: {sorted(ci - hook)}")
+    return 0 if ok else 1
+
+
 def self_test():
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
         tmp = os.path.realpath(tmp)
         repos = {}
-        for name, branch in (("feat", "feature/demo"), ("chore", "chore/demo"), ("detached", None)):
-            d = os.path.join(tmp, name)
+        # The last three live in directories whose names contain characters shlex
+        # used to split words on (+ @ and non-ASCII).
+        for name, branch, dirname in (
+            ("feat", "feature/demo", "feat"), ("chore", "chore/demo", "chore"), ("detached", None, "detached"),
+            ("plus", "feature/demo", "a+b"), ("at", "feature/demo", "x@2"), ("accent", "feature/demo", "caf\u00e9"),
+        ):
+            d = os.path.join(tmp, dirname)
             os.makedirs(os.path.join(d, ".claude", "skills", "gates"))
+            os.makedirs(os.path.join(d, ".claude", "hooks"))
             os.makedirs(os.path.join(d, "scripts"))
             os.makedirs(os.path.join(d, "App"))
             subprocess.run(["git", "-C", d, "init", "-q"], check=True)
-            for f in (".claude/skills/gates/SKILL.md", "scripts/check_x.py", "AGENTS.md", "CLAUDE.md", "CONSTRAINTS.md", "App/A.swift"):
+            for f in (".claude/skills/gates/SKILL.md", ".claude/hooks/h.py", "scripts/check_x.py", "AGENTS.md", "CLAUDE.md", "CONSTRAINTS.md", "App/A.swift"):
                 open(os.path.join(d, f), "w").close()
+            os.symlink("CLAUDE.md", os.path.join(d, "notes.txt"))  # an innocent-looking name for a protected file
             subprocess.run(["git", "-C", d, "add", "-A"], check=True)
             subprocess.run(
                 ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i"],
@@ -399,7 +539,61 @@ def self_test():
             ("feature: Bash heredoc body mentioning rm CLAUDE.md", bash("feat", "cat > /tmp/n.md <<'EOF'\nrm CLAUDE.md\nEOF"), False),
             ("feature: Bash cd elsewhere then redirect to same-named ordinary file", bash("feat", "cd App && echo x > CLAUDE.md"), False),
             ("feature: Bash rm of an ordinary dir", bash("feat", "rm -rf App/build"), False),
+            # A trailing redirect must not hide the destination operand.
+            ("feature: Bash cp then 2>/dev/null", bash("feat", "cp evil.md CLAUDE.md 2>/dev/null"), True),
+            ("feature: Bash cp then 2>&1", bash("feat", "cp x CLAUDE.md 2>&1"), True),
+            ("feature: Bash cp then > /dev/null", bash("feat", "cp x CLAUDE.md > /dev/null"), True),
+            ("feature: Bash cp then &>/dev/null", bash("feat", "cp x CLAUDE.md &>/dev/null"), True),
+            ("feature: Bash install -m644 then 2>/dev/null", bash("feat", "install -m644 x scripts/check_x.py 2>/dev/null"), True),
+            ("feature: Bash cp to an ordinary file, 2>/dev/null", bash("feat", "cp x App/B.swift 2>/dev/null"), False),
+            # git rm / git mv, subshells, shell keywords, xargs, -lc.
+            ("feature: Bash git rm", bash("feat", "git rm CLAUDE.md"), True),
+            ("feature: Bash git rm -f --cached", bash("feat", "git rm -f --cached CLAUDE.md"), True),
+            ("feature: Bash git mv", bash("feat", "git mv CLAUDE.md old.md"), True),
+            ("feature: Bash git -C . rm", bash("feat", "git -C . rm CLAUDE.md"), True),
+            ("feature: Bash git -c opt=v rm", bash("feat", "git -c core.x=1 rm CLAUDE.md"), True),
+            ("feature: Bash git rm of an ordinary file", bash("feat", "git rm App/A.swift"), False),
+            ("feature: Bash git status is read-only", bash("feat", "git status CLAUDE.md"), False),
+            ("feature: Bash subshell", bash("feat", "(rm CLAUDE.md)"), True),
+            ("feature: Bash $( ) body", bash("feat", "echo $(rm CLAUDE.md)"), True),
+            ("feature: Bash { } group", bash("feat", "{ rm CLAUDE.md; }"), True),
+            ("feature: Bash if/then", bash("feat", "if true; then rm CLAUDE.md; fi"), True),
+            ("feature: Bash for/do", bash("feat", "for f in a; do rm CLAUDE.md; done"), True),
+            ("feature: Bash while/do sed -i", bash("feat", "while true; do sed -i '' s/a/b/ CLAUDE.md; done"), True),
+            ("feature: Bash ! negation", bash("feat", "! rm CLAUDE.md"), True),
+            ("feature: Bash bash -lc", bash("feat", "bash -lc 'rm CLAUDE.md'"), True),
+            ("feature: Bash sh -ec", bash("feat", "sh -ec 'echo x > CLAUDE.md'"), True),
+            ("feature: Bash xargs rm with operand", bash("feat", "xargs rm CLAUDE.md"), True),
+            ("feature: Bash xargs -I{} rm on ordinary path", bash("feat", "xargs -I{} rm App/A.swift"), False),
+            ("feature: Bash subshell on ordinary path", bash("feat", "(rm App/A.swift)"), False),
+            # Symlinks: the write goes through the link to a protected file.
+            ("feature: Write through a symlink", write("Write", "feat", "notes.txt"), True),
+            ("feature: Bash redirect through a symlink", bash("feat", "echo x > notes.txt"), True),
+            # A destination directory: the file lands inside it.
+            ("feature: Bash cp into .claude/hooks/", bash("feat", "cp evil.py .claude/hooks/"), True),
+            ("feature: Bash cp into existing dir, no slash", bash("feat", "cp evil.py .claude/hooks"), True),
+            ("feature: Bash cp into scripts/ (check_ file)", bash("feat", "cp check_x.py scripts/"), True),
+            ("feature: Bash cp -t DIR", bash("feat", "cp -t .claude/hooks evil.py"), True),
+            ("feature: Bash install -t DIR", bash("feat", "install -t .claude/hooks evil.py"), True),
+            ("feature: Bash ln -s into .claude/hooks/", bash("feat", "ln -s /tmp/x .claude/hooks/"), True),
+            ("feature: Bash cp into scripts/ (non-check name)", bash("feat", "cp notes.py scripts/"), False),
+            ("feature: Bash cp into an ordinary dir", bash("feat", "cp x App/"), False),
+            # Removing the repo root or an ancestor removes every protected file with it.
+            ("feature: Bash rm -rf .", bash("feat", "rm -rf ."), True),
+            ("feature: Bash rm -rf ./", bash("feat", "rm -rf ./"), True),
+            ("feature: Bash rm -rf ..", bash("feat", "rm -rf .."), True),
+            ("feature: Bash rm -rf /", bash("feat", "rm -rf /"), True),
+            ("chore: Bash rm -rf .", bash("chore", "rm -rf ."), False),
+            ("feature: Bash rm -rf outside the repo", bash("feat", "rm -rf /tmp/pragma-guard-test-nothing"), False),
         ]
+        # Paths whose directory names the tokenizer used to cut apart.
+        for repo in ("plus", "at", "accent"):
+            cases.append((f"feature[{repo}]: Bash redirect to absolute path", bash(repo, f"echo x > {repos[repo]}/CLAUDE.md"), True))
+            cases.append((f"feature[{repo}]: Bash cp to absolute path", bash(repo, f"cp x {repos[repo]}/CLAUDE.md 2>/dev/null"), True))
+            cases.append((f"feature[{repo}]: Write to absolute path", write("Write", repo, "CLAUDE.md"), True))
+            cases.append((f"feature[{repo}]: Bash ordinary file", bash(repo, f"echo x > {repos[repo]}/App/A.swift"), False))
+        cases.append(("feature: Bash rm -rf of the directory holding the repo", bash("feat", f"rm -rf {tmp}"), True))
+        cases.append(("feature: Bash `a#b` word keeps the redirect", bash("feat", "echo a#b > CLAUDE.md"), True))
         for label, payload, expect_block in cases:
             proc = subprocess.run(
                 [sys.executable, os.path.abspath(__file__)],
@@ -418,6 +612,7 @@ def self_test():
             failures += 0 if ok else 1
             print(f"{'PASS' if ok else 'FAIL'}  exit={proc.returncode}  {label}")
 
+    failures += check_ci_list_in_step()
     print(f"\n{failures} failure(s)")
     return 1 if failures else 0
 

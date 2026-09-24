@@ -28,8 +28,7 @@ file at all.
    pressure to make a stuck gate pass from editing the gate definition
    instead of fixing the underlying violation. This dimension catches the
    diff-detectable half of that problem: a gate-definition file (the exact
-   list is `GATE_DEFINITION_FILES`, `GATE_SCRIPT_PREFIX` and
-   `GUARDED_PATH_GLOBS` in `scripts/check_gate_integrity.py` —
+   list is `GATE_DEFINITION_FILES` and `GUARDED_PATH_GLOBS` in `scripts/check_gate_integrity.py` —
    named here rather than enumerated, so this paragraph can't drift out of
    sync with that list the way an inline copy would; a sibling
    `scripts/check_*.py`'s real code is scanned like any other source file,

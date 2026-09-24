@@ -6,8 +6,8 @@ or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
 Flags, via a single git diff against the base branch:
-  1. A gate-definition file (see GATE_DEFINITION_FILES/GATE_SCRIPT_PREFIX/
-     GUARDED_PATH_GLOBS below for the exact list — not repeated here so this docstring can't
+  1. A gate-definition file (see GATE_DEFINITION_FILES/GUARDED_PATH_GLOBS
+     below for the exact list — not repeated here so this docstring can't
      drift out of sync with it the way an inline copy already had)
      touched on a feature/* branch — a real feature never needs to change
      what counts as passing. Only reliably checkable when the actual branch
@@ -67,7 +67,6 @@ GATE_DEFINITION_FILES = (
     "CONSTRAINTS.md",
     ".claude/skills/deterministic-pr-gates/SKILL.md",
 )
-GATE_SCRIPT_PREFIX = "scripts/check_"
 # Wider than GATE_DEFINITION_FILES, and used by check #1 only: every file the
 # PreToolUse hook (scaffold/.claude/hooks/guard_protected_paths.py) blocks on a
 # feature/* branch. The hook stops the edit live but only inside a Claude Code
@@ -76,6 +75,7 @@ GATE_SCRIPT_PREFIX = "scripts/check_"
 # `*` crosses `/` (fnmatch), so nested paths match; the match is
 # case-insensitive because macOS volumes are.
 GUARDED_PATH_GLOBS = (
+    "scripts/check_*.py",
     ".claude/skills/*/SKILL.md",
     "AGENTS.md",
     "CLAUDE.md",
@@ -88,8 +88,8 @@ GUARDED_PATH_GLOBS = (
 # code — a doc file describing these exact patterns in prose (this script's
 # own docstring, a CHANGELOG entry writing up a past bug) isn't code and a
 # substring match can't tell the two apart, so doc extensions are excluded
-# outright rather than relying only on the narrower GATE_DEFINITION_FILES/
-# GATE_SCRIPT_PREFIX exclusion below. Only *this* file is excluded from
+# outright rather than relying only on the narrower GATE_DEFINITION_FILES
+# exclusion below. Only *this* file is excluded from
 # checks 3 & 4 by path, not every scripts/check_*.py — check #1 already
 # permits editing gate scripts on a chore/*/fix/* branch, and excluding a
 # sibling script's real code (not just prose) from stub/suppression
@@ -99,8 +99,8 @@ SELF_PATH = "scripts/check_gate_integrity.py"
 
 
 def is_guarded_path(path):
-    """True for a gate-definition file, a gate script, or anything the guard hook protects."""
-    if path in GATE_DEFINITION_FILES or path.startswith(GATE_SCRIPT_PREFIX):
+    """True for a gate-definition file or anything the guard hook protects."""
+    if path in GATE_DEFINITION_FILES:
         return True
     low = path.lower()
     return any(fnmatch.fnmatchcase(low, g.lower()) for g in GUARDED_PATH_GLOBS)

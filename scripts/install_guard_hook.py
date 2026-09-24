@@ -14,7 +14,10 @@ What it does:
   2. Merges one PreToolUse entry into PROJECT_DIR/.claude/settings.json without
      touching anything else in it: other hooks, permissions and env keep their
      place. The original is backed up to .claude/settings.json.bak-<timestamp>.
-     Re-running is a no-op once an entry naming guard_protected_paths.py exists.
+     Re-running is a no-op once the canonical entry exists. An older or hand-edited
+     guard registration (a different matcher or command) is replaced by the
+     canonical one, so a later version that guards more tools reaches existing
+     installs; other hooks that shared an entry with it are kept.
 
 Validation happens before any write: a settings.json that is not valid JSON, or
 whose hooks/PreToolUse has an unexpected shape, is reported and left exactly as
@@ -71,14 +74,37 @@ def load_settings(path):
     return data, raw
 
 
-def already_registered(data):
+def guard_hooks(data):
+    """[(entry, hook)] for every registered hook whose command names the guard script."""
+    found = []
     for entry in (data.get("hooks") or {}).get("PreToolUse") or []:
         if not isinstance(entry, dict):
             continue
         for h in entry.get("hooks") or []:
             if isinstance(h, dict) and HOOK_NAME in str(h.get("command", "")):
-                return True
-    return False
+                found.append((entry, h))
+    return found
+
+
+def is_canonical(entry, hook):
+    return entry.get("matcher") == MATCHER and hook.get("command") == COMMAND
+
+
+def register(data):
+    """Make the canonical guard entry the only guard registration. Returns True if `data` changed."""
+    existing = guard_hooks(data)
+    if len(existing) == 1 and is_canonical(*existing[0]):
+        return False
+    pre = data["hooks"]["PreToolUse"] if existing else None
+    for entry, hook in existing:  # drop stale registrations, keep whatever shared their entry
+        entry["hooks"].remove(hook)
+    if pre is not None:
+        pre[:] = [e for e in pre if not (isinstance(e, dict) and e.get("hooks") == [])]
+    hooks = data.setdefault("hooks", {})
+    hooks.setdefault("PreToolUse", []).append(
+        {"matcher": MATCHER, "hooks": [{"type": "command", "command": COMMAND}]}
+    )
+    return True
 
 
 def main(argv):
@@ -111,7 +137,8 @@ def main(argv):
     os.chmod(dest, 0o755)
     print(f"  installed .claude/hooks/{HOOK_NAME}")
 
-    if already_registered(data):
+    existing = bool(guard_hooks(data))
+    if not register(data):
         print("  settings.json already registers the guard hook — left unchanged")
         return 0
 
@@ -119,15 +146,11 @@ def main(argv):
         backup = unique(f"{settings_path}.bak-{stamp}")
         shutil.copy2(settings_path, backup)
         print(f"  backed up settings.json to {os.path.relpath(backup, project)}")
-    hooks = data.setdefault("hooks", {})
-    hooks.setdefault("PreToolUse", []).append(
-        {"matcher": MATCHER, "hooks": [{"type": "command", "command": COMMAND}]}
-    )
     os.makedirs(os.path.dirname(settings_path), exist_ok=True)
     with open(settings_path, "w", encoding="utf8") as f:
         json.dump(data, f, indent=detect_indent(raw), ensure_ascii=False)
         f.write("\n")
-    print("  registered the PreToolUse guard in .claude/settings.json")
+    print(f"  {'updated the' if existing else 'registered the'} PreToolUse guard in .claude/settings.json")
     return 0
 
 

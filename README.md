@@ -7,9 +7,9 @@
 [![Platform](https://img.shields.io/badge/platform-iOS-black?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
 [![Swift](https://img.shields.io/badge/Swift-6.0%2B-FA7343?logo=swift&logoColor=white)](https://swift.org)
 
-The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale.
+The complete iOS development scaffold for the agentic era — agent commands, CI checks, and setup automation wired together so one engineer ships at team scale.
 
-Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where enforcement runs in CI (independent of any one agent run) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
+Not a spec-mode plugin bolted onto your IDE, and not a loose skill collection — a full spec-to-release pipeline where CI re-runs the TDD-order and gate-integrity scripts plus the test suite (scope and limits under [CI Layer](#ci-layer)) and memory survives every session boundary. See [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) for the full comparison.
 
 Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios) — a production SwiftUI + SwiftData app built entirely on this pipeline from day one, with specs, plans, and PRs going back to the first commit.
 
@@ -22,7 +22,7 @@ Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature �
 
 ---
 
-**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Commands](#commands) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
+**[Quick Start](#quick-start) · [At a Glance](#at-a-glance--what-needs-you-what-doesnt) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)**
 
 ---
 
@@ -38,7 +38,7 @@ Inside Claude Code, in your iOS project's repo root:
 /pragma:init MyApp
 ```
 
-`/pragma:init` does what `scripts/setup.sh` does — copies commands, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `CLAUDE.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
+`/pragma:init` does what `scripts/setup.sh` does — copies skills, context files, CI workflows, and support scripts, substitutes your app name throughout — but interviews you for `AGENTS.md`'s architecture and key-constraints content and seeds `.claude/context/invariants.md` from the same answers, instead of leaving both as templates to fill in later.
 
 **Alternative — clone and run the setup script directly:**
 
@@ -48,7 +48,11 @@ cd pragma
 ./scripts/setup.sh MyApp /path/to/your-ios-project
 ```
 
-This copies the same files and substitutes your app name, but leaves `CLAUDE.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
+This copies the same files and substitutes your app name, but leaves `AGENTS.md` and `invariants.md` as templates — fill them in yourself before running `/feature`.
+
+Both installers write `.claude/skills/<name>/SKILL.md` — the [SKILL.md format](https://github.com/agentskills/agentskills), an open standard also read by Cursor, GitHub Copilot, Windsurf, Zed, and others directly from that same path, alongside `AGENTS.md` for the instructions layer (with a one-line `CLAUDE.md` importing it for Claude Code). Pragma's own pipeline is developed and tested in Claude Code; cross-tool compatibility for the skill/instruction *files* rests on those tools' own documented support for the shared formats, not on pragma having been run against each one.
+
+Safety behavior of both installers (`setup.sh` enforces it in the script; `/pragma:init` is written instructions the agent carries out, so it is not a hard guarantee): they stop if the target is pragma's own checkout (symlinks resolved), and if your `.claude/skills/` already has files that differ from pragma's (including files from an earlier pragma version or a different app name), they copy the whole directory to `.claude/skills.bak-<timestamp>/` before overwriting — diff it against the new files to re-apply your edits, then delete it. If your project still has a `.claude/commands/<name>.md` from a pragma version that shipped commands instead of skills, it's backed up to `.claude/commands.bak-<timestamp>/` and removed, so it can't shadow the new skill of the same name. Existing context files, `CONSTRAINTS.md`, `AGENTS.md`, `CLAUDE.md`, and workflow files are skipped, not overwritten; files in `scripts/` are overwritten, so re-apply any edit you made to `SCOPED_LAYER_DIRS`.
 
 Then, either way, kick off your first feature:
 
@@ -80,11 +84,11 @@ Three layers installed into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| **Agent commands** | `.claude/commands/` | 16 Claude Code slash commands covering the full SDLC |
+| **Agent skills** | `.claude/skills/` | 16 Agent Skills (SKILL.md) covering the full SDLC, invoked the same way Claude Code's commands always were |
 | **CI pipeline** | `scaffold/.github/workflows/` | 3 GitHub Actions workflows — PR checks, UI tests, and release |
-| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, and optional simulator memory slimming for CI |
+| **Support scripts** | `scripts/` | Simulator selection, coverage enforcement, TDD-order and gate-integrity checks, and optional simulator memory slimming for CI |
 
-Each layer is independent — adopt all three or just the commands.
+Each layer is independent — adopt all three or just the skills.
 
 ---
 
@@ -137,15 +141,15 @@ Every major AI coding tool has shipped some flavor of spec-driven development �
 
 Three things pragma does that a spec mode alone doesn't:
 
-1. **CI-enforced, not just agent-enforced.** `/gates` runs locally before a PR opens; the same checks re-run independently in GitHub Actions (`pr-checks.yml`, `ui-tests.yml`) as enforcement that can't be skipped by rerunning the agent with a different prompt. Spec modes generate a plan; they don't wire in an enforcement layer the agent itself can't talk its way around.
-2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge.
+1. **Script gates re-run in CI, not just by the agent.** `/gates` runs locally before a PR opens; projects that install pragma also get a `gates` job in `pr-checks.yml` that re-runs the RED-before-GREEN commit-order check and the gate-integrity check using the base branch's copy of those scripts, so a PR can't edit the scripts that judge it. The agent-judged gates are not re-run, and the job only blocks a merge if you mark it a required status check — see [CI Layer](#ci-layer) for the exact scope and limits.
+2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, `feature-log.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, what shipped, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge. Even [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (93K+ stars, one of the largest skill frameworks for coding agents) names this as unsolved industry-wide in its own [comparison doc](https://github.com/addyosmani/agent-skills/blob/main/docs/comparison.md): "None of these has solved durable cross-session memory well yet: what an agent learned in one session rarely carries cleanly into the next... If that is your bottleneck, know that you are at the edge of what any of them ships today, and expect to stitch some of it yourself for now." This pipeline is that stitching, already built and running on a real codebase, not a future roadmap item.
 3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
 
-None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the enforcement and the memory to survive independently of any one session, IDE, or agent run.
+None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the memory to survive independently of any one session, IDE, or agent run, and the script-checkable gates to re-run in CI rather than only in the agent's session.
 
 ---
 
-## Commands
+## Skills
 
 ### Core pipeline
 
@@ -173,27 +177,43 @@ None of this makes the built-in spec modes bad — they're a reasonable default 
 | `/sync-workflow` | Syncs this scaffold with your project's latest conventions |
 | `/benchmark <label>` | Runs a fixed canary feature through the pipeline and logs objective metrics (commits, timing, gate results) — for comparing pipeline changes against a baseline, not for feature work |
 
-### Standalone skills
+### Works without the rest of the pipeline
 
-Unlike the commands above, these work in any project without adopting the rest of the pipeline.
+Unlike the skills above, this one works in any project without adopting the rest of the pipeline.
 
 | Skill | What it does |
 |---|---|
-| [`deterministic-pr-gates`](skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — every gate is a real command with a pass/fail outcome, none of it asks an LLM to judge the diff |
+| [`deterministic-pr-gates`](.claude/skills/deterministic-pr-gates/SKILL.md) | Scriptable, checkable pre-PR verification (build, tests, coverage, branch naming, layer rules) — nearly every gate is a real command with a pass/fail outcome; the exceptions are Gate 7 (security), where a grep decides whether a security review runs but the review itself is an LLM or manual judgment, and Gate 8 (abstraction bloat), which is advisory |
 
 ---
 
 ## CI Layer
 
-Three GitHub Actions workflows install into your project alongside the commands:
+Three GitHub Actions workflows install into your project alongside the skills:
 
 | Workflow | Trigger | What it enforces |
 |---|---|---|
-| `pr-checks.yml` | PR to `develop` or `main` | Unit + integration tests, coverage ≥ 60% (warn < 80%) |
+| `pr-checks.yml` | PR to `develop` or `main` | `unit-tests` job: unit + integration tests, coverage ≥ 60% (warn < 80%). `gates` job: RED-before-GREEN commit order and gate integrity |
 | `ui-tests.yml` | PR to `develop` or `main`, push to either | UI tests |
 | `release.yml` | Tag push matching `v*.*.*` | Full test suite in Release configuration, GitHub Release creation |
 
-The agent layer (`/gates`, `/review`, `/test`) runs locally for fast feedback before a PR is opened. CI then re-runs the same checks independently as enforcement that can't be bypassed.
+The agent layer (`/gates`, `/review`, `/test`) runs locally for fast feedback before a PR is opened. CI re-runs only the script-checkable part of it:
+
+- **`gates` job** (`pr-checks.yml`) — runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the **base branch** and run against the PR head, so a PR can't edit the scripts that judge it. If the base branch has no copy of a script (expected only for the PR that first installs pragma, but it applies to any PR while the base lacks the file), the PR's own copy runs and the job emits a warning — that run is not protected against a PR that edits the script. Any non-zero exit fails the job, including exit 2 (`SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the template's layer names). Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma: once the scripts are on the base branch, a PR that changes them (to configure or to fix a bug) is judged by the base branch's existing copy.
+- **`unit-tests` job** — the test suite and `scripts/check_coverage.py`. This job runs the PR's own copy of `check_coverage.py`, not a base-branch copy.
+
+CI does **not** re-run the agent-judged parts: Gate 7's `security-review`, `/gates` Gate 10's UI-selector cross-check, or `/review`'s design-compliance checklist. It also does not re-run the other `/gates` checks (TODO/FIXME scan, branch naming, CHANGELOG entry, per-file new-code coverage, Gate 8 heuristics, the Gate 10 architecture greps).
+
+Limits worth knowing before you rely on it:
+
+- **It is a hard block only if you make it one.** Branch protection is opt-in; in a repo without it, a PR can merge with a red `gates` job. To enforce it: GitHub repo **Settings → Branches** (or **Rules → Rulesets**) → add a rule for `develop` and `main` → **Require status checks to pass before merging** → add `gates` (and `Unit Tests` / `UI Tests` if you want those to block too). `pr-checks.yml` only triggers on the paths in its `paths:` filter, and a required check that never triggers stays pending, so remove that filter if you make `gates` required (which also makes the macOS `unit-tests` job run on every PR).
+- **The workflow file comes from the PR ref**, so a PR can still edit or delete the `gates` job itself; only the scripts are protected. Review changes under `.github/workflows/` like gate-definition changes (for example, a `CODEOWNERS` entry for that path plus required code-owner review).
+- **Gate integrity only checks for edited gate-definition files on `feature/*` branches**, and the branch name is chosen by the PR author. The same edit on a `chore/*` or `fix/*` branch is allowed by design; its other checks (deleted tests, new suppressions, stubs, lowered thresholds) apply on any branch.
+- **The guard hook and the CI check cover the same files.** `.claude/hooks/guard_protected_paths.py` blocks edits to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json` and `.claude/hooks/*` on `feature/*` branches during a Claude Code session; `check_gate_integrity.py` flags the same files on a `feature/*` PR. An existing project gets the hook by re-running `setup.sh` or `/pragma:init`, but has to copy the wider `paths:` filter from `scaffold/.github/workflows/pr-checks.yml` by hand, because existing workflow files are skipped. Neither layer sees an agent that renames its branch away from `feature/*`.
+- On PRs into `main`, the TDD-order check reads everything since `main`; a repo that squash-merges into `develop` can see squashed commits (test and implementation in one commit) flagged on a release PR.
+- `setup.sh` and `/pragma:init` skip workflow files that already exist, so an existing project has to copy the `gates` job from `scaffold/.github/workflows/pr-checks.yml` by hand.
+
+`/review` runs in the same Claude Code session as `/feature` and `/gates` by default, so the reviewer is not independent of the implementer's context. It does not take the pasted gate summary on trust: it checks the summary's SHA against the PR head, re-runs the scripted gates (gate integrity, TDD order) and the grep-only gates from the base branch, and treats any disagreement as CHANGES REQUESTED. Gates 1, 2, 6, 7 and 8 (build, tests, coverage, security, advisory heuristics) are not re-run there. Run `/review` in a fresh Claude Code session for context isolation.
 
 **Phase 2 — TestFlight upload** is documented but commented out in `release.yml`. It requires an Apple Developer Program membership, distribution certificate, and App Store Connect API key. When you're ready, the commented block shows exactly what to add.
 
@@ -232,7 +252,7 @@ The agent never proceeds to the next task if tests are red.
 
 ## Customising for Your Project
 
-**Architecture assumptions (defaults — override in `CLAUDE.md`):**
+**Architecture assumptions (defaults — override in `AGENTS.md`):**
 
 - **MVVM + Repository** — views contain no business logic, ViewModels depend on protocols never concrete implementations
 - **SwiftData** for persistence — Domain Services have zero SwiftData imports
@@ -245,14 +265,14 @@ The agent never proceeds to the next task if tests are red.
 ./scripts/setup.sh MyApp /path/to/your-project
 ```
 
-Copies everything and substitutes all placeholders. Then fill in `CLAUDE.md` and seed `invariants.md`.
+Copies everything and substitutes all placeholders. Then fill in `AGENTS.md` and seed `invariants.md`.
 
 **Or manually:**
 
-1. Copy `.claude/commands/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
-2. Replace `<AppName>` with your module name in each command file
+1. Copy `.claude/skills/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project (place the workflows at `.github/workflows/`)
+2. Replace `<AppName>` with your module name in each skill file
 3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
-4. Update `CLAUDE.md` with your build commands, simulator target, and architecture rules
+4. Update `AGENTS.md` with your build commands, simulator target, and architecture rules (and add a one-line `CLAUDE.md` importing it — `@AGENTS.md` — if you use Claude Code)
 5. Populate `.claude/context/invariants.md` with your non-negotiable rules
 6. Update the Architecture Rules checklist in `/review` to match your stack
 

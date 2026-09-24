@@ -1,18 +1,32 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
+# --no-guard-hook — skip installing the PreToolUse guard hook (see below)
 #
 # What it does:
-#   - Copies .claude/commands/, .claude/context/, scripts/, and
-#     scaffold/.github/workflows/ into your project, excluding pragma-only
-#     meta-commands (init.md, pragma-review.md) that only make sense inside
-#     the pragma repo itself
-#   - Replaces <AppName> in all command files with APP_NAME
+#   - Copies .claude/skills/, .claude/context/, scripts/, and
+#     scaffold/.github/workflows/ into your project. .claude/skills/ is the
+#     SKILL.md format (an open standard also read by Cursor, Codex, GitHub
+#     Copilot, Windsurf, and others), replacing the old .claude/commands/
+#     directory (Claude Code-only) as pragma's pipeline layer
+#   - Replaces <AppName> in the copied skill files with APP_NAME
+#   - Before overwriting, backs up .claude/skills/ to
+#     .claude/skills.bak-<timestamp>/ if any existing skill file differs
+#     from what pragma is about to write (i.e. you customized it)
+#   - Migrates an older install: any .claude/commands/<name>.md that shares
+#     a name with a skill being installed is backed up alongside it and
+#     removed, so the old command can't shadow or collide with the new skill
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
-#   - Generates a starter CLAUDE.md if one doesn't exist
+#   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
+#     entry into .claude/settings.json (other settings are kept; the original
+#     is backed up). The hook blocks edits to gate-definition files on
+#     feature/* branches during a Claude Code session. Skip with --no-guard-hook
+#   - Generates a starter AGENTS.md if one doesn't exist, plus a CLAUDE.md
+#     that imports it (@AGENTS.md), so any AGENTS.md-reading agent and
+#     Claude Code both pick up the same content
 
 set -euo pipefail
 
@@ -26,18 +40,36 @@ warn()    { echo -e "${YELLOW}  !${RESET} $*"; }
 die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 
 # ── Args ─────────────────────────────────────────────────────────────────────
+INSTALL_GUARD_HOOK=1
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
+        *) POSITIONAL+=("$arg") ;;
+    esac
+done
+# ${arr[@]+...}: an empty array under `set -u` is an unbound variable in bash 3.2 (macOS default)
+set -- ${POSITIONAL[@]+"${POSITIONAL[@]}"}
 APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+# pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
+# string comparison; -ef (same device+inode) covers anything pwd -P doesn't.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd -P)"
 
-[[ "$PROJECT_DIR" == "$REPO_ROOT" ]] && die "PROJECT_DIR resolves to pragma's own repo root ($REPO_ROOT) — this would delete pragma's own init.md/pragma-review.md. Pass an explicit path to your iOS project as the second argument."
+if [[ "$PROJECT_DIR" == "$REPO_ROOT" || "$PROJECT_DIR" -ef "$REPO_ROOT" ]]; then
+    die "PROJECT_DIR resolves to pragma's own repo root ($REPO_ROOT) — this would delete pragma's own init.md/pragma-review.md. Pass an explicit path to your iOS project as the second argument."
+fi
+# Same guard for a different clone/worktree of pragma: not the same path, same damage.
+if grep -qs '"name": *"pragma"' "$PROJECT_DIR/.claude-plugin/plugin.json"; then
+    die "PROJECT_DIR ($PROJECT_DIR) is a pragma checkout (.claude-plugin/plugin.json names it) — this would delete its init.md/pragma-review.md. Pass the path to your iOS project as the second argument."
+fi
 
 echo ""
 echo -e "${BOLD}Pragma setup${RESET}"
@@ -47,27 +79,20 @@ echo -e "  Target:  ${CYAN}${PROJECT_DIR}${RESET}"
 echo ""
 
 # ── sed helper (BSD/GNU portable) ────────────────────────────────────────────
-sedi() {
-    if sed --version 2>/dev/null | grep -q GNU; then
-        sed -i "$@"
-    else
-        sed -i '' "$@"
-    fi
-}
+source "$SCRIPT_DIR/lib_sedi.sh"
 
-# ── 1. Commands ───────────────────────────────────────────────────────────────
-info "Copying command files…"
-mkdir -p "$PROJECT_DIR/.claude/commands"
-cp -r "$REPO_ROOT/.claude/commands/." "$PROJECT_DIR/.claude/commands/"
+# ── 1. Skills ────────────────────────────────────────────────────────────────
+info "Copying skill files…"
+mkdir -p "$PROJECT_DIR/.claude/skills"
 
-# Pragma-only meta-commands — operate on this repo itself, not a consumer project
-rm -f "$PROJECT_DIR/.claude/commands/init.md" "$PROJECT_DIR/.claude/commands/pragma-review.md"
+# Belt-and-braces for the rm below: a symlinked .claude/ or .claude/skills/
+# can point at pragma's own skills even when PROJECT_DIR itself does not.
+[[ "$PROJECT_DIR/.claude/skills" -ef "$REPO_ROOT/.claude/skills" ]] && die "$PROJECT_DIR/.claude/skills resolves to pragma's own .claude/skills — refusing to copy onto or delete from it."
 
-info "Substituting <AppName> in commands…"
-find "$PROJECT_DIR/.claude/commands" -name "*.md" | while read -r f; do
-    sedi "s|<AppName>|${APP_NAME}|g" "$f"
-done
-success "Commands ready ($(find "$PROJECT_DIR/.claude/commands" -name "*.md" | wc -l | tr -d ' ') files)"
+# Shared with .claude/commands/init.md (the Claude Code plugin path into the
+# same install) so the two installers can't drift on what counts as
+# "customized" or how the old-command migration backs things up.
+"$SCRIPT_DIR/sync_skills.sh" "$REPO_ROOT/.claude/skills" "$PROJECT_DIR" "$APP_NAME"
 
 # ── 2. Context ────────────────────────────────────────────────────────────────
 info "Copying context files…"
@@ -88,9 +113,34 @@ mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 success "Scripts ready"
+
+# ── 3b. CONSTRAINTS.md ────────────────────────────────────────────────────────
+CONSTRAINTS_MD="$PROJECT_DIR/CONSTRAINTS.md"
+if [[ -f "$CONSTRAINTS_MD" ]]; then
+    warn "CONSTRAINTS.md already exists — skipping"
+else
+    info "Copying starter CONSTRAINTS.md…"
+    cp "$REPO_ROOT/CONSTRAINTS.md" "$CONSTRAINTS_MD"
+    success "CONSTRAINTS.md ready"
+fi
+
+# ── 3c. Guard hook ────────────────────────────────────────────────────────────
+if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
+    info "Installing the PreToolUse guard hook…"
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "python3 not found — skipping the guard hook (install python3 and re-run, or pass --no-guard-hook)"
+    elif python3 "$SCRIPT_DIR/install_guard_hook.py" "$REPO_ROOT" "$PROJECT_DIR"; then
+        success "Guard hook ready"
+    else
+        warn "Guard hook not installed (see the error above) — fix .claude/settings.json and re-run, or pass --no-guard-hook"
+    fi
+else
+    info "Skipping the guard hook (--no-guard-hook)"
+fi
 
 # ── 4. CI workflows ───────────────────────────────────────────────────────────
 info "Copying CI workflows…"
@@ -110,14 +160,24 @@ for f in "$REPO_ROOT/scaffold/.github/workflows/"*.yml; do
 done
 success "CI workflows ready"
 
-# ── 5. CLAUDE.md ──────────────────────────────────────────────────────────────
+# ── 5. AGENTS.md / CLAUDE.md ──────────────────────────────────────────────────
+# AGENTS.md carries the real content so any AGENTS.md-reading agent picks it
+# up; CLAUDE.md becomes a one-line import so Claude Code's own behavior is
+# unchanged. If CLAUDE.md already exists with real content (pre-dating this
+# split), leave both alone rather than silently overwriting it with a stub —
+# that would delete whatever the user already wrote.
+AGENTS_MD="$PROJECT_DIR/AGENTS.md"
 CLAUDE_MD="$PROJECT_DIR/CLAUDE.md"
 if [[ -f "$CLAUDE_MD" ]]; then
-    warn "CLAUDE.md already exists — skipping"
+    warn "CLAUDE.md already exists — skipping AGENTS.md/CLAUDE.md generation (reconcile manually if you want AGENTS.md too)"
+elif [[ -f "$AGENTS_MD" ]]; then
+    info "AGENTS.md already exists — writing CLAUDE.md as an import stub…"
+    echo '@AGENTS.md' > "$CLAUDE_MD"
+    success "CLAUDE.md generated (imports AGENTS.md)"
 else
-    info "Generating starter CLAUDE.md…"
-    cat > "$CLAUDE_MD" <<CLAUDEMD
-# CLAUDE.md
+    info "Generating starter AGENTS.md…"
+    cat > "$AGENTS_MD" <<CLAUDEMD
+# AGENTS.md
 
 ${APP_NAME} — iOS app (SwiftUI + SwiftData).
 
@@ -158,17 +218,23 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\`/\`hotfix/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. Agents report their verdict and stop.
 CLAUDEMD
-    success "CLAUDE.md generated"
+    success "AGENTS.md generated"
+    echo '@AGENTS.md' > "$CLAUDE_MD"
+    success "CLAUDE.md generated (imports AGENTS.md)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${GREEN}Setup complete.${RESET} Next steps:"
 echo ""
-echo -e "  1. Fill in ${CYAN}CLAUDE.md${RESET} — architecture rules + build commands"
+echo -e "  1. Fill in ${CYAN}AGENTS.md${RESET} — architecture rules + build commands (CLAUDE.md imports it)"
 echo -e "  2. Seed ${CYAN}.claude/context/invariants.md${RESET} with your non-negotiable rules"
-echo -e "  3. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
-echo -e "  4. Run your first feature:"
+echo -e "  3. Review ${CYAN}CONSTRAINTS.md${RESET} — Gate 11 (gate integrity) is on by default and will flag any in-flight feature/* branch already editing gates.md/CONSTRAINTS.md/a check_*.py script; uncomment opt-in dimensions as you adopt them"
+echo -e "  4. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
+if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
+    echo -e "  5. The guard hook blocks edits to skills, AGENTS.md/CLAUDE.md, CONSTRAINTS.md, .claude/settings.json and .claude/hooks/ on feature/* branches — make those changes on a chore/* or fix/* branch"
+fi
+echo -e "  Then run your first feature:"
 echo ""
 echo -e "     ${BOLD}/spec \"describe your feature idea\"${RESET}"
 echo ""

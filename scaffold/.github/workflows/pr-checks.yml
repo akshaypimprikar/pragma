@@ -8,7 +8,9 @@
 #   scripts/select_simulator.py   — selects an available iPhone simulator UDID
 #   scripts/check_coverage.py     — enforces coverage thresholds from xccov JSON
 #   scripts/slim_simulator.sh     — optional simulator memory slimming, no-ops if simslim isn't installed
-# All three scripts are included in this scaffold under scripts/.
+#   scripts/check_tdd_commit_order.py, scripts/check_gate_integrity.py
+#                                 — used by the `gates` job below
+# All of these scripts are included in this scaffold under scripts/.
 # =============================================================================
 
 name: PR Checks
@@ -22,6 +24,25 @@ on:
       - 'YOUR_PROJECTTests/**'
       - 'YOUR_PROJECTUITests/**'
       - 'scripts/**'
+      # Gate-definition files that scripts/check_gate_integrity.py guards; without
+      # these a PR that only edits them would never trigger this workflow.
+      # Keep in step with GUARDED_PATH_GLOBS in that script. Each is listed twice:
+      # `**/x` needs a `/`, so it does not match the repo root; the script matches both.
+      - '.claude/skills/**'
+      - '.claude/settings.json'
+      - '.claude/hooks/**'
+      - '.claude/context/invariants.md'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'CONSTRAINTS.md'
+      - '**/.claude/skills/**'
+      - '**/.claude/settings.json'
+      - '**/.claude/hooks/**'
+      - '**/.claude/context/invariants.md'
+      - '**/AGENTS.md'
+      - '**/CLAUDE.md'
+      - '**/CONSTRAINTS.md'
+      - '**/scripts/check_*'
 
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
@@ -69,3 +90,72 @@ jobs:
         run: |
           xcrun xccov view --report --json result.xcresult > coverage.json
           python3 scripts/check_coverage.py coverage.json
+
+  # Re-runs pragma's deterministic script gates (RED-before-GREEN commit order,
+  # gate integrity) in CI. It does NOT re-run agent-judged checks (Gate 7
+  # security-review, the UI-selector cross-check) — those stay local to /gates.
+  #
+  # The scripts are taken from the BASE branch checkout, not the PR head, so a PR
+  # cannot edit the scripts that judge it. Bootstrap exception: if the base branch
+  # has no copy of a script (expected only for the PR that first installs pragma,
+  # but it applies to any PR while the base lacks the file), the PR head's copy
+  # runs instead, with a ::warning:: — that run is judged by the PR's own script.
+  # This job only blocks merges if you mark `gates` a required status check in
+  # branch protection. The workflow file itself still comes from the PR ref, so a
+  # PR can edit this job.
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR head (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: head
+          persist-credentials: false
+
+      - name: Checkout base branch (trusted scripts)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+
+      - name: Run deterministic gates
+        working-directory: head
+        env:
+          # Branch names are attacker-controlled: pass via env, never inline in run.
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -o pipefail
+          status=0
+          for script in check_tdd_commit_order.py check_gate_integrity.py; do
+            trusted="$GITHUB_WORKSPACE/base/scripts/$script"
+            if [ ! -f "$trusted" ]; then
+              # Bootstrap exception: only the PR that first introduces a script
+              # has no base copy to run; once merged, the base copy always wins.
+              echo "::warning::scripts/$script does not exist on origin/$BASE_REF; falling back to the PR head copy, which the PR itself controls. This is only valid for the PR that first introduces the script."
+              trusted="$GITHUB_WORKSPACE/head/scripts/$script"
+            fi
+            echo "::group::$script"
+            if [ "$script" = "check_gate_integrity.py" ]; then
+              # HEAD is detached in CI, so pass the PR's head branch explicitly.
+              python3 "$trusted" "origin/$BASE_REF" "$HEAD_REF" || status=1
+            else
+              python3 "$trusted" "origin/$BASE_REF" || status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Guard hook self-test and glob-list check
+        # Runs the PR head's own hook and script, so it only catches an honest slip: the
+        # hook's PROTECTED_GLOBS drifting from GUARDED_PATH_GLOBS, or a broken parser case.
+        # The enforcement is the base-branch script run above, not this step.
+        if: hashFiles('head/.claude/hooks/guard_protected_paths.py') != ''
+        working-directory: head
+        run: python3 .claude/hooks/guard_protected_paths.py --self-test

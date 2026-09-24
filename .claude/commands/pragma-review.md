@@ -1,5 +1,5 @@
 ---
-model: claude-haiku-4-5-20251001
+model: claude-sonnet-5
 ---
 
 # Pragma Review Agent
@@ -35,26 +35,26 @@ gh pr diff <PR> --repo akshaypimprikar/pragma
 
 Each check below only applies if its trigger condition is met — report the others as N/A rather than running them against an unrelated diff.
 
-### 1. Template-literal leak (if `.claude/commands/` files changed)
+### 1. Template-literal leak (if `.claude/skills/` files changed)
 ```bash
 gh pr diff <PR> --repo akshaypimprikar/pragma | grep -E '^\+' | grep -iE 'FinanceTracker|/Users/akshaypimprikar|iPhone 17|AccountViewModel|SwiftData[A-Z]\w*Repository'
 ```
 Advisory — eyeball every hit. A worked example in prose is fine (pragma's own files already do this, e.g. `/gates feature/recurring-transactions`). A hardcoded value standing in for what should be a `<placeholder>` is the actual problem.
 
-### 2. `<placeholder>` convention held (if `.claude/commands/` files changed)
-For every newly added or changed section that generalizes a source project's concrete rule (an architecture check, a gate, a build command), confirm it uses `<AppName>`-style placeholder tokens for anything project-specific — a type name, a file path, a field name — matching the style already used throughout `gates.md`'s Gate 9/10 examples. Zero placeholders in a section that's supposed to be generic is the leak.
+### 2. `<placeholder>` convention held (if `.claude/skills/` files changed)
+For every newly added or changed section that generalizes a source project's concrete rule (an architecture check, a gate, a build command), confirm it uses `<AppName>`-style placeholder tokens for anything project-specific — a type name, a file path, a field name — matching the style already used throughout `gates/SKILL.md`'s Gate 9/10 examples. Zero placeholders in a section that's supposed to be generic is the leak.
 
-### 3. Gate numbering/count consistency (if `.claude/commands/gates.md` changed)
-`Gate 0` (the Swift-change pre-check) is intentionally excluded from both the sequence and the count — that's a convention, not an oversight.
+### 3. Gate numbering/count consistency (if `.claude/skills/gates/SKILL.md` changed)
+`Gate 0` (the build-relevant change check) is intentionally excluded from both the sequence and the count — that's a convention, not an oversight. `deterministic-pr-gates/SKILL.md` is excluded from the count-reference grep below: it's a standalone skill with its own independent gate numbering (one fewer than `gates/SKILL.md`, since it has no Gate 9 TDD-commit-order equivalent), not a second copy of the same list — comparing it against `gates/SKILL.md`'s `$MAX` would false-positive on every review.
 ```bash
 awk 'BEGIN{expected=1} {if($1!=expected) print "non-sequential: expected "expected" got "$1; expected=$1+1}' \
-  <(grep -oE '^### Gate [1-9][0-9]*' .claude/commands/gates.md | grep -oE '[0-9]+')
-MAX=$(grep -oE '^### Gate [1-9][0-9]*' .claude/commands/gates.md | grep -oE '[0-9]+' | sort -n | tail -1)
-grep -rniE "all [0-9]+ gates" .claude/commands/*.md | grep -viE "all $MAX gates"
+  <(grep -oE '^### Gate [1-9][0-9]*' .claude/skills/gates/SKILL.md | grep -oE '[0-9]+')
+MAX=$(grep -oE '^### Gate [1-9][0-9]*' .claude/skills/gates/SKILL.md | grep -oE '[0-9]+' | sort -n | tail -1)
+grep -rniE "all [0-9]+ gates" .claude/skills/*/SKILL.md | grep -v "deterministic-pr-gates/SKILL.md" | grep -viE "all $MAX gates"
 ```
 Pass: the sequential check prints nothing, and the count-reference grep returns no lines disagreeing with `$MAX`.
 
-### 4. Doc/content accuracy spot-check (if `README.md`, `CONTRIBUTING.md`, or any `.claude/commands/*.md` changed)
+### 4. Doc/content accuracy spot-check (if `README.md`, `CONTRIBUTING.md`, or any `.claude/skills/*/SKILL.md` changed)
 Spot-check any specific counts or lists the changed file states (command counts, gate counts, file lists) against the actual files in the repo. Flag anything the PR's own diff makes newly inaccurate, or a pre-existing inaccuracy the PR touches without fixing.
 
 ## Output format

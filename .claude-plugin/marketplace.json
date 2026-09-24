@@ -4,12 +4,12 @@
     "name": "Akshay Pimprikar",
     "url": "https://www.linkedin.com/in/akshaypimprikar"
   },
-  "description": "Agent commands, CI enforcement, and setup automation for agentic iOS development",
+  "description": "Agent commands, CI checks, and setup automation for agentic iOS development",
   "plugins": [
     {
       "name": "pragma",
       "source": "./",
-      "description": "The complete iOS development scaffold for the agentic era — agent commands, CI enforcement, and setup automation wired together so one engineer ships at team scale."
+      "description": "The complete iOS development scaffold for the agentic era — agent commands, CI checks, and setup automation wired together so one engineer ships at team scale."
     }
   ]
 }

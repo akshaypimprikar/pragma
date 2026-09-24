@@ -64,7 +64,7 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    as `NOT VERIFIED: <script> not on <base>` and, for a PR that adds it, run from the PR copy
    with that caveat stated — never counted as a clean pass. Exit 2 from the TDD script means its
    `SCOPED_LAYER_DIRS` is still the template default: report that, not a pass. Also re-run the grep-only
-   gates exactly as written in `gates.md`, substituting `$BASE` (the fetched `origin/<base>`) for
+   gates exactly as written in `gates/SKILL.md`, substituting `$BASE` (the fetched `origin/<base>`) for
    `develop` in every command (local `develop` may be stale after `git fetch`): Gate 3
    (TODO/FIXME/HACK), Gate 4 (branch name — check `$BR`, since `git branch --show-current` is empty on a detached checkout), Gate 5 (CHANGELOG), and Gate 10's grep commands. Each grep
    prints nothing on a pass except the UI-selector listing (cross-check by hand) and any hit the
@@ -96,7 +96,7 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
 - [ ] No commented-out code committed
 - [ ] No TODO/FIXME in new code (unless tracked in an issue)
 - [ ] Functions do one thing
-- [ ] No magic numbers for monetary thresholds — use named constants
+- [ ] No magic numbers for <domain> thresholds — use named constants
 
 ## Output format
 
@@ -129,7 +129,7 @@ Skip this step only if there is truly nothing to log — no CHANGES REQUESTED is
 
 ## A known tradeoff: context continuity, not context isolation
 
-By default `/review` runs in the same session as `/feature` and `/gates` — `gates.md` invokes gates "at the end of every `/feature` session," and `/pr-followup` chains `/review` immediately after, with no instruction to start fresh in between. So the reviewer is **not** independent of the implementer's context: it has seen the implementer's reasoning, and a genuinely isolated reviewer role (an architecture some other pipelines use: an orchestrator, an implementer, and a reviewer that structurally cannot see the implementer's transcript, only a diff/plan/config) would not have.
+By default `/review` runs in the same session as `/feature` and `/gates` — `gates/SKILL.md` invokes gates "at the end of every `/feature` session," and `/pr-followup` chains `/review` immediately after, with no instruction to start fresh in between. So the reviewer is **not** independent of the implementer's context: it has seen the implementer's reasoning, and a genuinely isolated reviewer role (an architecture some other pipelines use: an orchestrator, an implementer, and a reviewer that structurally cannot see the implementer's transcript, only a diff/plan/config) would not have.
 
 What this command does about it: it now verifies the deterministic gates by re-running them at the PR HEAD SHA instead of trusting the pasted summary, so a wrong or stale summary is caught by evidence, not by the reviewer's impression. That narrows the gap for the gates that can be re-run cheaply; it does not remove the shared-context influence on the judgment-based checks (design compliance, code quality).
 

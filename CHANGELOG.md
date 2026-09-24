@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Pipeline-review alert hook (`scripts/install_review_alert_hook.py`).** `setup.sh` and `/pragma:init` now merge a `UserPromptSubmit` entry into `.claude/settings.json`. On every prompt it reads only the frontmatter of each `docs/pipeline-review/*.md` report and, while any has `addressed: false` (quoted or with a trailing comment), tells the agent to ask whether to address the findings first. The alert goes to both the user (`systemMessage`) and the agent (`hookSpecificOutput.additionalContext`), because a `systemMessage` alone is shown only to the user. It is an inline shell command that needs only awk and uses `$CLAUDE_PROJECT_DIR`. The installer backs up `settings.json`, is a no-op on re-run, replaces an older alert registration and leaves an invalid file untouched. `setup.sh --no-review-alert` skips it.
+- **Generated AGENTS.md states the pipeline order**: `/review` → `/test` → `code-review:code-review` in that order, not in parallel. The file is 44 lines.
+
+### Changed
+- **Template no longer carries FinanceTracker's domain.** `/test`'s UI-flow coverage target is a `<your app's 2–3 core user flows>` placeholder, and `/spec`, `/plan` and `/feature` state the type-safety rule as a placeholder from AGENTS.md with money-as-`Decimal` as the example. `/review` says `<domain> thresholds` instead of `monetary thresholds`.
+- **Back-ported from FinanceTracker:** `/gates` writes candidate invariants to the PR body on `feature/*` instead of `invariants.md`, which the guard hook blocks there. Gate 11 fails when its script is missing. Gate 8's protocol scan matches access modifiers, `nonisolated` and attributes. Gate 5 summarizes GREEN commits only. `/release` has a runnable force-unwrap check. `/benchmark` lists a `model:` frontmatter change as a trigger. `/trim-context` notes that sessions launched from a parent directory need that directory's transcript path.
+- **`/gates` and `/feature` loop stop conditions and Done when say "all blocking gates"**, because Gate 8 is advisory, and no longer ask the loop to remove abstraction-bloat candidates.
+- **The scaffold's `gates` CI job runs on `develop` PRs and `hotfix/*` PRs**, not on `release/*` PRs to `main`, which re-check the whole release delta.
+- **`deterministic-pr-gates` has Trigger, Process and Done when sections**, like the other skills. Its description is unchanged.
+- `/status` maps `hotfix/*` and `chore/*` branches. `/pipeline-review` says "skill file" after the migration. `/sync-workflow` names a gate that needs a project-installed MCP server as app-specific.
+
+### Fixed
+- **Generated AGENTS.md exempted `hotfix/*` PRs from `/review` and `code-review:code-review`** because "every commit already passed both when it merged into `develop`". That is false for hotfixes, which branch off `main`, and it contradicted `/bugfix`. Only `release/*` PRs are exempt now.
+- **Gate 2's note said `xcodebuild test` does not print `Test case '…' passed` for Swift Testing suites.** On Xcode 27 it does: a Swift Testing suite run on 2026-09-24 printed 191 `Test case` lines and 0 `✔` lines. The regex already matched both forms, so no count changes.
+- `/review` names `gates/SKILL.md` instead of the pre-migration `gates.md`.
+- **Gate 2, `/test` and `/release` counted Swift Testing's run summary (`✔ Test run with N tests … passed`) as a passed test**, so a run that executed nothing counted as 1 and passed the zero-test check. The summary line is now excluded. Found by `code-review:code-review` on this PR.
+- **`install_guard_hook.py` (shipped in 2.0.0) crashed with an `AttributeError` when `.claude/settings.json` had `"hooks": null` or `"PreToolUse": null`**, instead of installing. Both installers now treat `null` as absent; any other bad shape is still reported and left untouched. The alert hook also gets the latest report's name with `${L##*/}` instead of `xargs basename`, which failed on a name containing a quote.
+- **`/release`'s force-unwrap check** (new in this PR) flagged `if !flag` and missed `let x = y!`. It now matches an identifier or closing bracket followed by `!`, and says a `!` in a string literal is a false positive.
+- **The hotfix PR rules disagreed:** `/gates` said `hotfix/*` always uses `--base main`, but `/bugfix` requires a second PR to `develop`. `/gates` now names that exception. Gate count wording says Gates 1–11, with Gate 0 deciding whether Gates 1–2 run.
 ## [2.0.0] — 2026-09-24
 
 ### Added

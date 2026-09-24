@@ -51,7 +51,7 @@ Edit only the lines that differ. Do not copy project-specific paths or app names
 
 For new gates in your project's `/gates`, judge each one individually — do not copy-paste:
 - **Generalizable** (checks a pattern any iOS MVVM+Repository project would want — e.g. a layer-rule compliance gate): port it as a *templated* gate with `<placeholder>` values, matching the style of Gates 1/2/7. Do not hardcode your project's literal grep patterns (field names, concrete paths, etc.) into the template.
-- **App-specific** (checks something only your project's domain has — e.g. a concurrency-shape gate tied to one specific actor/service): leave it out of pragma entirely. It has no equivalent in a template repo.
+- **App-specific** (checks something only your project's domain or toolchain has — e.g. a concurrency-shape gate tied to one specific actor/service, or a visual-verification gate that depends on an MCP server the project installs itself): leave it out of pragma entirely. It has no equivalent in a template repo.
 
 ### 5. Self-review the diff before committing
 Pragma has no `AGENTS.md`/`CLAUDE.md` and no `/review` of its own — this is the

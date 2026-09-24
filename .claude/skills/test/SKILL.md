@@ -29,7 +29,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - **Domain Services** — unit test every public method; no simulator needed, no SwiftData
 - **Repository implementations** — integration test against an in-memory `ModelContainer`
 - **ViewModels** — unit test with mock repository implementations injected via protocol
-- **UI flows** — cover critical happy paths: add transaction, import CSV, budget alert
+- **UI flows** — cover critical happy paths: <your app's 2–3 core user flows>
 - **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
 
@@ -69,7 +69,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
+PASSED=$(grep -E "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG" | grep -vc "Test run with"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "TESTS PASS ($PASSED tests executed)" || echo "TESTS FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```

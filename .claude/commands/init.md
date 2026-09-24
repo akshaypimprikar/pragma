@@ -53,6 +53,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/install_guard_hook.py" "${CLAUDE_PLUGIN_R
 
 This copies `scaffold/.claude/hooks/guard_protected_paths.py` to `.claude/hooks/` and merges one `PreToolUse` entry into the project's `.claude/settings.json` without touching its other settings (the original is backed up; a second run changes nothing). If the script exits non-zero, the project's `settings.json` is invalid or has an unexpected `hooks` shape: it left everything as found. Show the user the error, do not edit `settings.json` yourself, and continue with the rest of setup. Tell the user in the final report that the hook blocks edits to skills, `AGENTS.md`/`CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json` and `.claude/hooks/` on `feature/*` branches, so those changes belong on a `chore/*` or `fix/*` branch.
 
+Then install the pipeline-review alert, also the same step `scripts/setup.sh` runs (default on; skip it only if the user asks not to have it):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/install_review_alert_hook.py" "$PROJECT_DIR"
+```
+
+This merges one `UserPromptSubmit` entry into the project's `.claude/settings.json` (same backup, no-op-on-rerun and leave-invalid-files-alone behavior as the guard hook). On every prompt it checks the frontmatter of each `docs/pipeline-review/*.md` report and, while any has `addressed: false`, tells the agent to ask the user whether to address those findings before starting planned work. Mention it in the final report.
+
 ### 4. Ask for real content, write only where safe
 
 Ask the same three questions regardless of what already exists in the target project:
@@ -77,4 +85,4 @@ Next: run your first feature —
 
 ## Done when
 
-`.claude/skills/`, `.claude/context/`, `scripts/`, `.github/workflows/`, and `CONSTRAINTS.md` are populated in the target project; any superseded `.claude/commands/<name>.md` from an older install has been backed up and removed; `AGENTS.md` has real architecture and constraint content if it didn't already exist, and `CLAUDE.md` imports it; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; no existing file was overwritten except `.claude/hooks/guard_protected_paths.py` (backed up first if it differed) and `.claude/settings.json` (backed up first, and only the guard entry added). The guard hook is installed and registered, or the user was told why not.
+`.claude/skills/`, `.claude/context/`, `scripts/`, `.github/workflows/`, and `CONSTRAINTS.md` are populated in the target project; any superseded `.claude/commands/<name>.md` from an older install has been backed up and removed; `AGENTS.md` has real architecture and constraint content if it didn't already exist, and `CLAUDE.md` imports it; `.claude/context/invariants.md` is seeded from the interview if it didn't already exist; no existing file was overwritten except `.claude/hooks/guard_protected_paths.py` (backed up first if it differed) and `.claude/settings.json` (backed up first, and only the guard and pipeline-review alert entries added). The guard hook and the pipeline-review alert are installed and registered, or the user was told why not.

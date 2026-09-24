@@ -23,7 +23,7 @@ Check every file in `.claude/skills/` for references to skills that are not in t
 Current valid skills:
 `plan`, `spec`, `design`, `review`, `feature`, `test`, `bugfix`, `release`, `gates`, `pipeline-review`, `sync-workflow`, `trim-context`, `simplify`, `security-review`, `code-review:code-review`, `ios-build-verify`, `ios-coverage`, `ios-swiftdata-test-fixture`, `update-config`, `keybindings-help`, `fewer-permission-prompts`, `schedule`, `loop`, `claude-api`, `init`, `claude-code-setup:claude-automation-recommender`, `run`, `verify`, `status`, `benchmark`, `parallel-review`, `pr-followup`, `pragma-review`, `deterministic-pr-gates`
 
-Flag any skill name used in a command file that does not appear on this list. Severity: **Critical**.
+Flag any skill name used in a skill or command file that does not appear on this list. Severity: **Critical**.
 
 ### 2. Template drift
 If this project was derived from a workflow template (e.g. pragma), compare `.claude/skills/` against the template. Flag:
@@ -45,7 +45,7 @@ Flag any memory that:
 Severity: **Medium** per stale entry.
 
 ### 5. Pipeline gate coverage
-Check whether the following gates exist as command files or documented steps in the pipeline:
+Check whether the following gates exist as skill files or documented steps in the pipeline:
 
 | Gate | Required location | Severity if missing |
 |---|---|---|
@@ -57,8 +57,8 @@ Check whether the following gates exist as command files or documented steps in 
 | Security check for sensitive PRs | `security-review` skill reference | Medium |
 | Session recovery command (`/status`) | `.claude/skills/status/SKILL.md` | Low |
 
-### 6. Command file completeness
-Each command file must have: **Trigger**, **Process**, **Done when** sections.
+### 6. Skill file completeness
+Each skill or command file must have: **Trigger**, **Process**, **Done when** sections.
 Flag any file missing a section. Severity: **Medium**.
 
 ### 7. Settings hygiene

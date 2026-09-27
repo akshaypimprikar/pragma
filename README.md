@@ -127,14 +127,14 @@ You approve twice: after `/spec` and after `/plan`. An agent or automated CI doe
 
 ### Harness Design
 
-Birgitta Böckeler's ["Harness engineering for coding agent users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (martinfowler.com, April 2026) uses the framing `Agent = Model + Harness`. It splits the harness into two parts. Feedforward guides steer the agent before it acts. Feedback sensors check what the agent did afterward. They check maintainability, architecture fitness, and behavioral correctness. This pipeline maps onto these categories:
+Birgitta Böckeler's ["Harness engineering for coding agent users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (martinfowler.com, April 2026) uses the framing `Agent = Model + Harness`. The harness has two kinds of control. Guides are feedforward: they steer the agent before it acts. Sensors are feedback: they check what the agent did afterward. The article applies both kinds of control to three regulation categories: maintainability, architecture fitness, and behavior. This pipeline maps its stages onto these controls and categories:
 
-| Harness category | Pragma stage |
+| Control and category | Pragma stage |
 |---|---|
-| Feedforward guides | `/spec`, `/plan`: they set the approach and constraints before the agent writes code |
-| Feedback sensors: maintainability | `/gates`: checks for TODO/FIXME, branch naming, CHANGELOG, coverage, and abstraction bloat |
-| Feedback sensors: architecture fitness | `/review`: checks layer separation, type safety, and established patterns |
-| Feedback sensors: behavioral correctness | `/test`: runs the full suite and requires at least 80% coverage on new code |
+| Guides (feedforward) | `/spec`, `/plan`: they set the approach and constraints before the agent writes code |
+| Sensors: maintainability | `/gates`: checks for TODO/FIXME, branch naming, CHANGELOG, coverage, and abstraction bloat |
+| Sensors: architecture fitness | `/review`: checks layer separation, type safety, and established patterns |
+| Sensors: behavior | `/test`: runs the full suite and requires at least 80% coverage on new code |
 | Recovery loop | `/bugfix`: writes a regression test first, then fixes the bug |
 
 Böckeler calls the "behaviour harness" the elephant in the room. She asks: "how do we guide and sense if the application functionally behaves the way we need it to?" In this pipeline, `/test` and the coverage gate in `/gates` are the concrete attempt at that sensor.

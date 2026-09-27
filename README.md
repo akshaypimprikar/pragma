@@ -1,6 +1,6 @@
 # Pragma
 
-> You approve twice. Claude ships the rest.
+> You approve twice. The agent ships the rest.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-compatible-5A67D8?logo=anthropic&logoColor=white)](https://claude.ai/code)
@@ -18,7 +18,7 @@ Proven on [FinanceTracker](https://github.com/akshaypimprikar/financetracker-ios
   <img src="docs/screenshots/financetracker-accounts.png" width="220" alt="FinanceTracker Accounts — assets and liabilities, net worth calculation" />
 </p>
 
-Not a mockup — this is what 80+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
+Not a mockup — this is what 120+ merged PRs of `/spec → /plan → /feature → /gates → /review` actually produce. Full screenshot set in [FinanceTracker's README](https://github.com/akshaypimprikar/financetracker-ios).
 
 ---
 
@@ -121,9 +121,9 @@ You approve twice — after `/spec` and after `/plan`. Every other step is eithe
 
 ### Harness Design
 
-Martin Fowler's ["Harness Engineering for Coding Agent Users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (April 2026) frames `Agent = Model + Harness`, splitting the harness into **feedforward guides** (steer the agent before it acts) and **feedback sensors** (verify what it did after, across maintainability, architecture fitness, and behavioral correctness). This pipeline maps directly onto that taxonomy:
+Birgitta Böckeler's ["Harness engineering for coding agent users"](https://martinfowler.com/articles/exploring-gen-ai/harness-engineering.html) (martinfowler.com, April 2026) uses the framing `Agent = Model + Harness`, splitting the harness into **feedforward guides** (steer the agent before it acts) and **feedback sensors** (verify what it did after, across maintainability, architecture fitness, and behavioral correctness). This pipeline maps directly onto that taxonomy:
 
-| Fowler category | Pragma stage |
+| Harness category | Pragma stage |
 |---|---|
 | Feedforward guides | `/spec`, `/plan` — establish approach and constraints before code is written |
 | Feedback sensors — maintainability | `/gates` — TODO/FIXME, branch naming, CHANGELOG, coverage, abstraction bloat |
@@ -131,7 +131,7 @@ Martin Fowler's ["Harness Engineering for Coding Agent Users"](https://martinfow
 | Feedback sensors — behavioral correctness | `/test` — full suite, ≥80% coverage on new code |
 | Recovery loop | `/bugfix` — regression test first, then fix |
 
-Fowler calls the behavioral-correctness sensor "the elephant in the room — still unsolved" for most agent harnesses. `/test` plus `/gates`' coverage gate are this pipeline's concrete attempt at that sensor.
+Böckeler calls the behaviour harness "the elephant in the room": "how do we guide and sense if the application functionally behaves the way we need it to?" `/test` plus `/gates`' coverage gate are this pipeline's concrete attempt at that sensor.
 
 ---
 
@@ -143,7 +143,7 @@ Three things pragma does that a spec mode alone doesn't:
 
 1. **Script gates re-run in CI, not just by the agent.** `/gates` runs locally before a PR opens; projects that install pragma also get a `gates` job in `pr-checks.yml` that re-runs the RED-before-GREEN commit-order check and the gate-integrity check using the base branch's copy of those scripts, so a PR can't edit the scripts that judge it. The agent-judged gates are not re-run, and the job only blocks a merge if you mark it a required status check — see [CI Layer](#ci-layer) for the exact scope and limits.
 2. **Cross-session memory, not per-conversation context.** `.claude/context/decisions.md`, `invariants.md`, `feature-log.md`, and `rejections.md` persist across every session boundary — the pipeline carries forward what was decided, what's inviolable, what shipped, and what's been tried and rejected, the way a senior engineer's institutional memory would. Most spec-mode tools reset that context at the conversation edge. Even [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) (93K+ stars, one of the largest skill frameworks for coding agents) names this as unsolved industry-wide in its own [comparison doc](https://github.com/addyosmani/agent-skills/blob/main/docs/comparison.md): "None of these has solved durable cross-session memory well yet: what an agent learned in one session rarely carries cleanly into the next... If that is your bottleneck, know that you are at the edge of what any of them ships today, and expect to stitch some of it yourself for now." This pipeline is that stitching, already built and running on a real codebase, not a future roadmap item.
-3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 70+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
+3. **Proven on a real, actively-developed, gitflow-integrated codebase**, not a demo repo — 120+ merged PRs, specs and plans predating every feature, going back to the first commit. That's a different claim than "generates a plan.md," and it's checkable: read the actual PR history.
 
 None of this makes the built-in spec modes bad — they're a reasonable default for teams already inside that IDE. Pragma is for when you want the memory to survive independently of any one session, IDE, or agent run, and the script-checkable gates to re-run in CI rather than only in the agent's session.
 

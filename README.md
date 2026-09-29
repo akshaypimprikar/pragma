@@ -203,6 +203,7 @@ Pragma installs these GitHub Actions workflows into your project with the skills
 | `gates.yml` | Every PR to `develop` or `main` | `gates` job: decides the PR's lane, then runs RED-before-GREEN commit order, gate integrity, citation checks, the script unit tests and the guard hook self-test. |
 | `review-evidence.yml` | PR to `develop` or `main` (`pull_request_target`) | `review-evidence` job: checks that the PR carries the evidence its lane needs. |
 | `ui-tests.yml` | PR to `develop` or `main`, push to either | UI tests |
+| `concurrency-advisory.yml` | PR to `develop` or `main` that touches app, script or workflow paths | Unit tests under ThreadSanitizer. Advisory only (`continue-on-error`), so it never blocks a PR. |
 | `release.yml` | Tag push that matches `v*.*.*` | Full test suite in the Release configuration, and creation of the GitHub Release |
 
 The agent layer (`/gates`, `/review`, `/test`) runs locally and gives fast feedback before you open a PR. CI re-runs only the part that a script can check:

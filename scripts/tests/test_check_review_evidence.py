@@ -116,6 +116,21 @@ class EvaluateTests(unittest.TestCase):
         self.assertFalse(self.run_eval(["gate_summary"], body=None)["gate_summary"])
 
 
+class CompareFilesTests(unittest.TestCase):
+    def api(self, n_files, status="ahead"):
+        api = ev.Api("o/r", "t")
+        api.get = lambda path: {"status": status, "files": [{"filename": f"f{i}"} for i in range(n_files)]}
+        return api
+
+    def test_returns_files(self):
+        self.assertEqual(len(self.api(299).compare_files("a", "b")), 299)
+
+    def test_truncated_list_is_unknown(self):
+        # GitHub's compare API lists at most 300 files; a full list may be missing some.
+        self.assertIsNone(self.api(300).compare_files("a", "b"))
+        self.assertIsNone(self.api(300, "diverged").compare_files("a", "b", require_ancestor=False))
+
+
 class LaneHeadTests(unittest.TestCase):
     def pr(self, ref, repo):
         return {"head": {"ref": ref, "repo": {"full_name": repo} if repo else None}}

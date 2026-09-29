@@ -847,6 +847,8 @@ def self_test():
             ("feature: Write ios/.claude/skills/x/SKILL.md", write("Write", "feat", "ios/.claude/skills/x/SKILL.md"), True),
             ("feature: Bash rm -rf ios/.claude/skills", bash("feat", "rm -rf ios/.claude/skills"), True),
             ("feature: Bash rm -rf ios/.claude", bash("feat", "rm -rf ios/.claude"), True),
+            ("feature: Bash rm -rf ios/.github/workflows", bash("feat", "rm -rf ios/.github/workflows"), True),
+            ("feature: Bash rm -rf ios/.github", bash("feat", "rm -rf ios/.github"), True),
             ("feature: Write ios/Sources/A.swift is ordinary", write("Write", "feat", "ios/Sources/A.swift"), False),
         ]
         cases += [

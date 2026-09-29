@@ -1,0 +1,46 @@
+name: Review evidence
+
+# Checks that a PR carries the evidence its lane requires (gate summary, review
+# verdict, code-review line, motivating incident), so the Merge rule is enforced
+# by a required check instead of prose.
+#
+# Runs on pull_request_target, so the workflow and scripts come from the BASE
+# branch and a PR cannot edit them to pass itself. It never checks out or runs
+# PR code: the PR is read only through the GitHub API as data. Posting a review
+# does not trigger pull_request_target, so /review and /pr-followup finish by
+# editing the PR body, which does (`edited`).
+# See scripts/check_review_evidence.py for the evidence rules.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+    branches: [develop, main]
+
+concurrency:
+  group: review-evidence-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review-evidence:
+    name: review-evidence
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout base branch only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check lane evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f scripts/check_review_evidence.py ] || [ ! -f scripts/pipeline_lanes.json ]; then
+            echo "::warning::scripts/check_review_evidence.py or scripts/pipeline_lanes.json is not on the base branch yet; skipping. Valid only before rollout."
+            exit 0
+          fi
+          python3 scripts/check_review_evidence.py --repo "$REPO" --pr "$PR" --config scripts/pipeline_lanes.json

@@ -1,0 +1,49 @@
+{
+  "release": {
+    "paths": [
+      ".claude-plugin/plugin.json",
+      "CHANGELOG.md",
+      ".claude/context/feature-log.md"
+    ],
+    "evidence": []
+  },
+  "sync": {
+    "branch_prefix": "sync/",
+    "paths": [
+      ".claude/skills/**",
+      "scaffold/**"
+    ],
+    "evidence": [
+      "synced_from"
+    ]
+  },
+  "lanes": [
+    {
+      "name": "pipeline",
+      "paths": [
+        ".claude/**",
+        ".claude-plugin/**",
+        "scaffold/**",
+        "scripts/**",
+        ".github/**",
+        "evals/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONSTRAINTS.md"
+      ],
+      "evidence": [
+        "review_verdict",
+        "code_review",
+        "motivating_incident"
+      ]
+    }
+  ],
+  "default": {
+    "name": "docs",
+    "evidence": []
+  },
+  "carryover_paths": [
+    ".claude/context/rejections.md",
+    ".claude/context/incidents.md"
+  ]
+}

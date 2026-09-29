@@ -26,6 +26,8 @@ Before writing, read:
 
 When a task depends on the exact behavior of an Apple API, fetch `https://developer.apple.com/documentation/<path>.md` (append `.md` to any doc URL) instead of the HTML page — clean Markdown, lighter to load.
 
+Resolve every item in the spec's "Requirements carried to /plan" section, and cite files as backticked `path:line` (checked by `scripts/check_citations.py` in `gates`), opening each cited line before relying on it.
+
 The plan must be executable by a subagent with no prior context. Every task needs:
 - Exact file paths
 - Complete code (no placeholders, no "implement X")
@@ -46,7 +48,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 ## Architecture Rules to enforce in every task
 - Domain Services: no SwiftData imports
 - Repository Protocols: Foundation-only imports
-- Money values: `Decimal` never `Double`
+- <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - Simulator: see AGENTS.md/CLAUDE.md — use your project's target device and OS version
 - File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
@@ -57,4 +59,4 @@ The plan must be executable by a subagent with no prior context. Every task need
 - UI tests: `<AppName>UITests/`
 
 ## Done when
-The user reviews and approves the plan. Then hand off to `/feature`. After the PR is open, `/pr-followup` chains `/review`, then `/test`, then `code-review:code-review`, in that order, not in parallel.
+The user reviews and approves the plan. Then hand off to `/feature`. `/feature` is followed by `/test` (coverage-gap audit) and `/gates`; after the PR is open, `/pr-followup` runs `code-review:code-review`, then `/review`.

@@ -23,7 +23,7 @@ Check every file in `.claude/skills/` for references to skills that are not in t
 Current valid skills:
 `plan`, `spec`, `design`, `review`, `feature`, `test`, `bugfix`, `release`, `gates`, `pipeline-review`, `sync-workflow`, `trim-context`, `simplify`, `security-review`, `code-review:code-review`, `ios-build-verify`, `ios-coverage`, `ios-swiftdata-test-fixture`, `update-config`, `keybindings-help`, `fewer-permission-prompts`, `schedule`, `loop`, `claude-api`, `init`, `claude-code-setup:claude-automation-recommender`, `run`, `verify`, `status`, `benchmark`, `parallel-review`, `pr-followup`, `pragma-review`, `deterministic-pr-gates`
 
-Flag any skill name used in a command file that does not appear on this list. Severity: **Critical**.
+Flag any skill name used in a skill or command file that does not appear on this list. Severity: **Critical**.
 
 ### 2. Template drift
 If this project was derived from a workflow template (e.g. pragma), compare `.claude/skills/` against the template. Flag:
@@ -45,20 +45,21 @@ Flag any memory that:
 Severity: **Medium** per stale entry.
 
 ### 5. Pipeline gate coverage
-Check whether the following gates exist as command files or documented steps in the pipeline:
+Check whether the following gates exist as skill files or documented steps in the pipeline:
 
 | Gate | Required location | Severity if missing |
 |---|---|---|
 | Pre-PR gate (`/gates`) | `.claude/skills/gates/SKILL.md` | Critical |
 | Build verification (separate from tests) | Gate 1 of `/gates` | High |
 | CHANGELOG incremental update | Step in `/feature` | High |
-| `/review` before `/test` (not parallel) | `feature/SKILL.md` Done-when + `AGENTS.md`/`CLAUDE.md` | High |
+| `/test` before `/gates`; `code-review:code-review` before `/review` | `feature/SKILL.md` Done-when + `pr-followup/SKILL.md` + `AGENTS.md`/`CLAUDE.md` | High |
+| Lane config and required checks (`gates`, `review-evidence`) | `scripts/pipeline_lanes.json`, `.github/workflows/gates.yml`, `.github/workflows/review-evidence.yml` | Critical |
 | Coverage check (`ios-coverage` skill) | `/gates` or post-`/test` step | Medium |
 | Security check for sensitive PRs | `security-review` skill reference | Medium |
 | Session recovery command (`/status`) | `.claude/skills/status/SKILL.md` | Low |
 
-### 6. Command file completeness
-Each command file must have: **Trigger**, **Process**, **Done when** sections.
+### 6. Skill file completeness
+Each skill or command file must have: **Trigger**, **Process**, **Done when** sections.
 Flag any file missing a section. Severity: **Medium**.
 
 ### 7. Settings hygiene

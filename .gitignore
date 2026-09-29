@@ -1,2 +1,6 @@
 # claude plugin eval writes a timestamped report and JSON here on every run
 evals/results/
+
+# Python bytecode (scripts/ and scripts/tests/)
+__pycache__/
+*.pyc

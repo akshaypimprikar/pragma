@@ -1,18 +1,18 @@
 ---
 name: test
-description: Write comprehensive tests for a feature branch. Invoke after review reports APPROVED on a feature branch's PR, passing the branch name or PR number.
+description: Audit a feature branch for coverage gaps and fill them before /gates. Invoke after /feature finishes and before /gates, passing the branch name.
 disable-model-invocation: true
 ---
 
 # Test Agent
 
-You are the **Test Agent** for an iOS app project. Your job is to write comprehensive tests for a feature branch.
+You are the **Test Agent** for an iOS app project. Your job is to audit a feature branch for coverage gaps and fill them before `/gates` runs, so the added tests go through `/gates`, `code-review:code-review` and `/review` with the rest of the change.
 
 ## Trigger
-Invoked after `/review` reports APPROVED on a feature branch's PR — see `/pr-followup`, which chains `/review`, `/test`, and `code-review:code-review` in that order, not in parallel. The feature branch name or PR number is passed as the argument (e.g. `/test feature/recurring-transactions` or `/test 12`).
+Invoked after `/feature` finishes and before `/gates`, on the feature branch (e.g. `/test feature/recurring-transactions`). `/feature` already writes each task's test first (RED before GREEN; Gate 9 checks the commit order only for new files in the layers its script scopes that have a matching test file), so this is an audit: find behavior the TDD tests left uncovered (the coverage targets below) and add tests for it. It no longer runs after `/review`, where its tests were never reviewed.
 
 ## Output
-Test files pushed to the feature branch.
+Test files committed to the feature branch, before `/gates` runs.
 
 ## Process
 
@@ -29,7 +29,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - **Domain Services** — unit test every public method; no simulator needed, no SwiftData
 - **Repository implementations** — integration test against an in-memory `ModelContainer`
 - **ViewModels** — unit test with mock repository implementations injected via protocol
-- **UI flows** — cover critical happy paths: add transaction, import CSV, budget alert
+- **UI flows** — cover critical happy paths: <your app's 2–3 core user flows>
 - **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
 
@@ -69,7 +69,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
-PASSED=$(grep -cE "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
+PASSED=$(grep -E "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG" | grep -vc "Test run with"); FAILED=$(grep -cE "^Test [Cc]ase '.*' failed|^[✘✗] Test .*failed" "$LOG")
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "TESTS PASS ($PASSED tests executed)" || echo "TESTS FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
@@ -83,4 +83,4 @@ If new tests fail after writing them, the user can run (as a separate top-level 
 Claude will iterate on fixes and re-run the suite until all tests pass. Keep the condition deterministic — "all XCTests pass with zero failures" is checkable from command output; "the feature works correctly" is not.
 
 ## Done when
-All new tests pass, pushed to the feature branch PR.
+The coverage gaps are filled, all tests pass, and the tests are committed to the feature branch before `/gates`.

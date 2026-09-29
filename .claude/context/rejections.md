@@ -62,3 +62,15 @@
 **Rule violated:** No CLAUDE.md exists in this repo — no formal rule, caught on correctness grounds. (Repeats the pattern named in the PR#55 Round 2/3/5 entries above; caught and fixed pre-merge this time.)
 **File:** `.claude/commands/parallel-review.md`
 **Caught by:** code-review pass (found by `code-review:code-review` on PR#56 itself — documented in commit `989aaa4`)
+
+## 2026-09-27 — PR#84 — Harness article credited to the wrong author, with a paraphrase shown as a quote
+**What was wrong:** From 2026-06-14 (commit `8f02526`) the README credited "Harness engineering for coding agent users" to Martin Fowler. The article is by Birgitta Böckeler, published on martinfowler.com. The README also put "the elephant in the room — still unsolved" in quotation marks, but "still unsolved" was a paraphrase, not her wording. The FinanceTracker merged-PR count was also inconsistent (80+ in one place, 70+ in the other; 121 in fact).
+**Rule violated:** No formal rule. Caught on correctness grounds: a quote or citation was never checked against its source.
+**File:** `README.md` (Harness Design section)
+**Caught by:** manual verification (fact-checking the /brag launch video script against the article, 2026-09-27). Documented in the PR#84 body.
+
+## 2026-09-27 — PR#84 — Harness section misread the article's model
+**What was wrong:** The first fix still presented maintainability, architecture fitness and behavior as kinds of feedback sensor, under a "Harness category" header that sat over a "Feedforward guides" row. In Böckeler's model, guides (feedforward) and sensors (feedback) are the two kinds of control, and those three are regulation categories that both kinds apply to.
+**Rule violated:** No formal rule, caught pre-merge on correctness grounds.
+**File:** `README.md` (Harness Design section)
+**Caught by:** code-review pass (`code-review:code-review` on PR#84, fixed in `fb020aa`)

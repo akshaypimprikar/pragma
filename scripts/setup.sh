@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
 # --no-guard-hook — skip installing the PreToolUse guard hook (see below)
+# --no-review-alert — skip installing the pipeline-review alert hook (see below)
 #
 # What it does:
 #   - Copies .claude/skills/, .claude/context/, scripts/, and
@@ -20,10 +21,15 @@
 #     a name with a skill being installed is backed up alongside it and
 #     removed, so the old command can't shadow or collide with the new skill
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
+#   - Copies scaffold/pipeline_lanes.json to scripts/pipeline_lanes.json (with
+#     YOUR_PROJECT replaced) unless the project already has one
 #   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
 #     entry into .claude/settings.json (other settings are kept; the original
 #     is backed up). The hook blocks edits to gate-definition files on
 #     feature/* branches during a Claude Code session. Skip with --no-guard-hook
+#   - Merges a UserPromptSubmit entry into .claude/settings.json that alerts on
+#     every prompt while a docs/pipeline-review/ report has `addressed: false`
+#     in its frontmatter. Skip with --no-review-alert
 #   - Generates a starter AGENTS.md if one doesn't exist, plus a CLAUDE.md
 #     that imports it (@AGENTS.md), so any AGENTS.md-reading agent and
 #     Claude Code both pick up the same content
@@ -41,10 +47,12 @@ die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 INSTALL_GUARD_HOOK=1
+INSTALL_REVIEW_ALERT=1
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
         --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
+        --no-review-alert) INSTALL_REVIEW_ALERT=0 ;;
         *) POSITIONAL+=("$arg") ;;
     esac
 done
@@ -54,7 +62,7 @@ APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
 # pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
@@ -116,6 +124,21 @@ cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_pr_lane.py"         "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_review_evidence.py" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_citations.py"       "$PROJECT_DIR/scripts/"
+mkdir -p "$PROJECT_DIR/scripts/tests"
+cp "$REPO_ROOT/scripts/tests/test_check_pr_lane.py" \
+   "$REPO_ROOT/scripts/tests/test_check_review_evidence.py" \
+   "$REPO_ROOT/scripts/tests/test_check_citations.py" "$PROJECT_DIR/scripts/tests/"
+# Lane config: the project's own paths, so never overwrite an existing one.
+LANES="$PROJECT_DIR/scripts/pipeline_lanes.json"
+if [[ -f "$LANES" ]]; then
+    warn "scripts/pipeline_lanes.json already exists — skipping"
+else
+    cp "$REPO_ROOT/scaffold/pipeline_lanes.json" "$LANES"
+    sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$LANES"
+fi
 success "Scripts ready"
 
 # ── 3b. CONSTRAINTS.md ────────────────────────────────────────────────────────
@@ -140,6 +163,20 @@ if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
     fi
 else
     info "Skipping the guard hook (--no-guard-hook)"
+fi
+
+# ── 3d. Pipeline-review alert hook ────────────────────────────────────────────
+if [[ "$INSTALL_REVIEW_ALERT" -eq 1 ]]; then
+    info "Installing the pipeline-review alert hook…"
+    if ! command -v python3 >/dev/null 2>&1; then
+        warn "python3 not found — skipping the pipeline-review alert (install python3 and re-run, or pass --no-review-alert)"
+    elif python3 "$SCRIPT_DIR/install_review_alert_hook.py" "$PROJECT_DIR"; then
+        success "Pipeline-review alert ready"
+    else
+        warn "Pipeline-review alert not installed (see the error above) — fix .claude/settings.json and re-run, or pass --no-review-alert"
+    fi
+else
+    info "Skipping the pipeline-review alert (--no-review-alert)"
 fi
 
 # ── 4. CI workflows ───────────────────────────────────────────────────────────
@@ -214,9 +251,13 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 - Tests use \`import Testing\` with \`@Suite\` / \`@Test\` / \`#expect()\`
 -->
 
+## Pipeline
+
+Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`code-review:code-review\` → \`/review\`, at most 2 rounds) → \`/release\` → \`main\`.
+
 ## Merge rule
 
-No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\`/\`hotfix/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. Agents report their verdict and stop.
+No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: gate summary, \`/review\` APPROVED and \`code-review:\` line at the head SHA, motivating incident. The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
 CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"

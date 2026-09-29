@@ -28,6 +28,15 @@ git remote get-url origin 2>/dev/null | grep -qi 'akshaypimprikar/pragma' || {
 ```
 Stop here if this fails. Do not fall through to the checks below.
 
+### Lane and rounds
+Run `python3 scripts/check_pr_lane.py --git origin/<base> --head-branch <head> --base-branch <base>` (config
+`scripts/pipeline_lanes.json`). The `docs`, `release` and `sync` lanes need no review: say so and stop. A
+`pipeline` PR needs this verdict, a `code-review:` line and a `Motivating incident:` line (the `review-evidence`
+check, `scripts/check_review_evidence.py`). At most two full rounds per PR: round 2 reviews only the diff since
+the round-1 `Reviewed at` SHA plus the round-1 findings, and after it any remaining non-blocking finding becomes
+a GitHub issue. After an APPROVED verdict, a head that moved with more than log-only commits gets a `Round
+confirm` review of just that diff.
+
 Read the PR diff:
 ```bash
 gh pr diff <PR> --repo akshaypimprikar/pragma
@@ -69,7 +78,10 @@ Final verdict:
 
 ```bash
 gh pr review <PR> --repo akshaypimprikar/pragma --comment --body "$(cat <<'EOF'
-## Pragma Review Agent verdict: <APPROVED | CHANGES REQUESTED>
+## Review Agent verdict: <APPROVED | CHANGES REQUESTED>
+
+Reviewed at <full PR HEAD SHA>
+Round <1 | 2 | confirm> · Lane pipeline
 
 <the check-by-check output>
 EOF
@@ -77,5 +89,10 @@ EOF
 ```
 Use `--comment`, not `--approve` — GitHub blocks self-approval on PRs authored under your own account.
 
+The heading must be exactly `## Review Agent verdict:` and the body must carry `Reviewed at <full PR HEAD SHA>`:
+`review-evidence` reads only that form, from an owner, member or collaborator. Posting a review does not trigger
+`review-evidence` (it runs on `pull_request_target`), so finish by replacing or adding one line in the PR body,
+which does: `Review: <review URL> at <full PR HEAD SHA>` (`gh pr edit <PR> --repo akshaypimprikar/pragma --body-file <file>`).
+
 ## Done when
-Verdict posted to GitHub via `gh pr review`, verdict reported to the user. Do not merge — the user merges pragma PRs themselves.
+Verdict posted to GitHub via `gh pr review`, the PR body's `Review:` line updated, verdict reported to the user. Do not merge — the required checks decide mergeability and the user merges pragma PRs themselves.

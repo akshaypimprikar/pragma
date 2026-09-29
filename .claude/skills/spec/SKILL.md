@@ -43,6 +43,11 @@ For each approach: describe it, list tradeoffs, and flag scope creep risk.
 Wait for the user to choose before writing the spec.
 
 ### 5. Write the full spec
+**Cite what you claim.** Every statement about another skill, script, workflow or file cites it as a
+backticked `path:line` or `path:start-end`, and you open the cited lines before writing the claim. The
+`gates` check runs `scripts/check_citations.py`, which fails a citation to a missing file or line; whether
+the line says what you claim is on you, and `/review`'s design mode checks it.
+
 Follow this structure:
 
 ```markdown
@@ -80,6 +85,9 @@ What's explicitly deferred and where it plugs in later.
 
 ## Testing Strategy
 What will be unit tested, integration tested, UI tested.
+
+## Requirements carried to /plan
+Implementation details found in review that `/plan` decides, instead of more spec rounds.
 ```
 
 ### 6. Flag scope creep
@@ -88,7 +96,7 @@ If the feature idea implies multiple independent subsystems, say so and suggest 
 ## Architecture Rules (from AGENTS.md/CLAUDE.md — enforce in every spec)
 - Views contain no business logic
 - Domain Services have **zero** SwiftData imports — 100% unit testable without a simulator
-- All money values use `Decimal`, never `Double`
+- <type-safety rule from AGENTS.md, e.g. all money values use `Decimal`, never `Double`>
 - ViewModels depend on repository protocols, never concrete implementations
 - New models go in `<AppName>/Models/`, services in `<AppName>/Services/`
 - New repository protocols go in `<AppName>/Repositories/Protocols/`, implementations in `<AppName>/Repositories/SwiftData/`

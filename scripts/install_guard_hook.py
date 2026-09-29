@@ -65,6 +65,11 @@ def load_settings(path):
         raise ValueError(f"{path} is not valid JSON ({e}); fix it and re-run") from e
     if not isinstance(data, dict):
         raise ValueError(f"{path} must contain a JSON object")
+    # null is treated as absent, so register() can add the entry instead of crashing
+    if data.get("hooks") is None:
+        data.pop("hooks", None)
+    elif isinstance(data["hooks"], dict) and data["hooks"].get("PreToolUse", 0) is None:
+        del data["hooks"]["PreToolUse"]
     hooks = data.get("hooks")
     if hooks is not None and not isinstance(hooks, dict):
         raise ValueError(f'{path}: "hooks" must be an object')

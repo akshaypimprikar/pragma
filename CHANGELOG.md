@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.1.0] — 2026-09-29
 
 ### Added
 - **Pipeline-review alert hook (`scripts/install_review_alert_hook.py`).** `setup.sh` and `/pragma:init` now merge a `UserPromptSubmit` entry into `.claude/settings.json`. On every prompt it reads only the frontmatter of each `docs/pipeline-review/*.md` report and, while any has `addressed: false` (quoted or with a trailing comment), tells the agent to ask whether to address the findings first. The alert goes to both the user (`systemMessage`) and the agent (`hookSpecificOutput.additionalContext`), because a `systemMessage` alone is shown only to the user. It is an inline shell command that needs only awk and uses `$CLAUDE_PROJECT_DIR`. The installer backs up `settings.json`, is a no-op on re-run, replaces an older alert registration and leaves an invalid file untouched. `setup.sh --no-review-alert` skips it.

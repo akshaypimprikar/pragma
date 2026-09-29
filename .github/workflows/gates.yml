@@ -86,7 +86,7 @@ jobs:
       - name: Guard hook self-test and glob-list check
         # Runs the PR head's own hook and script, so it only catches an honest slip: the
         # hook's PROTECTED_GLOBS drifting from GUARDED_PATH_GLOBS, or a broken parser case.
-        # The enforcement is the base-branch script run above, not this step.
+        # pragma's own CI runs no base-branch gate-integrity script (adopters' scaffold gates.yml does).
         if: steps.lane.outputs.lane != 'release' && hashFiles('head/scaffold/.claude/hooks/guard_protected_paths.py') != ''
         working-directory: head
         run: python3 scaffold/.claude/hooks/guard_protected_paths.py --self-test

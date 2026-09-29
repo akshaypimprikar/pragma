@@ -125,13 +125,14 @@ PROTECTED_DIR_PARTS = [_g.split("/")[:-1] for _g in PROTECTED_GLOBS]
 def is_protected_dir_prefix(rel_dir):
     """True if removing/moving rel_dir (a directory) would necessarily take a
     protected file with it — rel_dir is itself, or an ancestor of, some
-    PROTECTED_GLOBS entry's directory. A `.claude/...` glob also matches when
-    `.claude` sits below the repo root (`ios/.claude/skills`)."""
+    PROTECTED_GLOBS entry's directory. A `.claude/...` or `.github/...` glob
+    also matches when that directory sits below the repo root
+    (`ios/.claude/skills`, `ios/.github/workflows`)."""
     parts = [p.lower() for p in rel_dir.split("/")]
     for glob_parts in PROTECTED_DIR_PARTS:
         if not glob_parts:
             continue
-        starts = [0] + ([i for i, p in enumerate(parts) if i and p == ".claude"] if glob_parts[0] == ".claude" else [])
+        starts = [0] + ([i for i, p in enumerate(parts) if i and p == glob_parts[0]] if glob_parts[0] in (".claude", ".github") else [])
         for s in starts:
             sub = parts[s:]
             if len(sub) <= len(glob_parts) and all(gp == "*" or gp.lower() == rp for gp, rp in zip(glob_parts, sub)):

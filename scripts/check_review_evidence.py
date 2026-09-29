@@ -38,6 +38,7 @@ SHA = r"([0-9a-f]{40})"
 VERDICT_HEADER = "## Review Agent verdict:"
 # Only verdicts posted by accounts with write-level standing count; anyone else's review is ignored.
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+COMPARE_FILE_LIMIT = 300  # GitHub's cap on files in one compare response
 
 
 def _sha_ok(sha, head_sha, carryover, changed_between):
@@ -45,7 +46,7 @@ def _sha_ok(sha, head_sha, carryover, changed_between):
         return True, f"at head {head_sha[:7]}"
     files = changed_between(sha)
     if files is None:
-        return False, f"{sha[:7]} is not an ancestor of head {head_sha[:7]}"
+        return False, f"{sha[:7]} is not an ancestor of head {head_sha[:7]}, or too many files changed since it to check"
     extra = [f for f in files if not any(check_pr_lane.glob_match(p, f) for p in carryover)]
     if extra:
         return False, f"{sha[:7]} is stale: head {head_sha[:7]} also changes {', '.join(extra[:5])}"
@@ -141,6 +142,8 @@ class Api:
 
         With require_ancestor=False a diverged base is fine (base...head is a
         merge-base diff), and None means only that the compare was not found.
+        GitHub lists at most 300 files per compare, so a full list is treated as
+        unknown (None) rather than trusted as complete.
         """
         try:
             data = self.get(f"/compare/{base}...{head}")
@@ -150,7 +153,8 @@ class Api:
             raise
         if require_ancestor and data.get("status") not in ("ahead", "identical"):
             return None
-        return [f["filename"] for f in data.get("files", [])]
+        files = [f["filename"] for f in data.get("files", [])]
+        return None if len(files) >= COMPARE_FILE_LIMIT else files
 
 
 def main(argv=None):

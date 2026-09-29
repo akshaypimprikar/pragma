@@ -266,7 +266,7 @@ Report every gate before opening the PR. The first line is mandatory: the full S
 pre-step. `/review` compares it to the PR HEAD and rejects a summary that is missing or stale.
 ```
 Gates run at <full 40-char SHA from `git rev-parse HEAD`>
-Lane: <output of `python3 scripts/check_pr_lane.py --git origin/develop --head-branch <branch> --base-branch develop`>
+Lane: <output of `python3 scripts/check_pr_lane.py --git origin/<base> --head-branch <branch> --base-branch <base>`, where <base> is `develop`, or `main` for `release/*` and `hotfix/*`>
 Gates:
 [✓] Build
 [✓] Tests — <N> tests executed

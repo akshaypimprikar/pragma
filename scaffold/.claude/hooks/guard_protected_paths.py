@@ -58,6 +58,8 @@ PROTECTED_GLOBS = (
     ".claude/settings.json",
     ".claude/hooks/*",
     "CONSTRAINTS.md",
+    "scripts/pipeline_lanes.json",
+    ".github/workflows/*",
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
@@ -154,6 +156,7 @@ _PROTECTED_FRAGMENTS = tuple(
     frag.lower() for frag in (
         "skill.md", "scripts/check_", "agents.md", "claude.md",
         "invariants.md", "settings.json", ".claude/hooks/", "constraints.md",
+        "pipeline_lanes.json", ".github/workflows/",
     )
 )
 

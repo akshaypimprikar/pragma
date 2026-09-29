@@ -1,0 +1,92 @@
+name: Gates
+
+# pragma's own CI. Runs on every PR (no paths: filter) so the required `gates`
+# check always reports. pragma has no Xcode project, so this runs only the
+# checks that apply to it: check_citations.py (from the base-branch checkout, so
+# a PR cannot edit the script that judges it), the script unit tests and the
+# guard hook self-test (both on the PR head: they test the PR's own copies).
+# A `release`-lane PR prints its lane and passes. Adopters get
+# scaffold/.github/workflows/gates.yml instead, which also runs the TDD-order and
+# gate-integrity scripts.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop, main]
+
+concurrency:
+  group: gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR head (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: head
+          persist-credentials: false
+
+      - name: Checkout base branch (trusted scripts)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+          persist-credentials: false
+
+      - name: Decide lane
+        id: lane
+        working-directory: head
+        env:
+          # Branch names are attacker-controlled: pass via env, never inline in run.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -o pipefail
+          # A fork's branch never gets the release, sync or back-merge lanes (same rule as check_review_evidence.py).
+          [ "$HEAD_REPO" = "$REPO" ] || HEAD_REF="fork:$HEAD_REF"
+          script="$GITHUB_WORKSPACE/base/scripts/check_pr_lane.py"
+          config="$GITHUB_WORKSPACE/base/scripts/pipeline_lanes.json"
+          if [ ! -f "$script" ] || [ ! -f "$config" ]; then
+            echo "::warning::check_pr_lane.py or pipeline_lanes.json is not on origin/$BASE_REF; using the PR head copies. Valid only for the PR that first adds them."
+            script="$GITHUB_WORKSPACE/head/scripts/check_pr_lane.py"
+            config="$GITHUB_WORKSPACE/head/scripts/pipeline_lanes.json"
+          fi
+          lane=$(python3 "$script" --git "origin/$BASE_REF" --head-branch "$HEAD_REF" --base-branch "$BASE_REF" --config "$config")
+          echo "Lane: $lane"
+          echo "lane=$lane" >> "$GITHUB_OUTPUT"
+
+      - name: Citations
+        if: steps.lane.outputs.lane != 'release'
+        working-directory: head
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          trusted="$GITHUB_WORKSPACE/base/scripts/check_citations.py"
+          if [ ! -f "$trusted" ]; then
+            # Bootstrap exception: only the PR that first adds the script has no base copy.
+            echo "::warning::scripts/check_citations.py does not exist on origin/$BASE_REF; falling back to the PR head copy, which the PR itself controls. This is only valid for the PR that first introduces the script."
+            trusted="$GITHUB_WORKSPACE/head/scripts/check_citations.py"
+          fi
+          python3 "$trusted" --base "origin/$BASE_REF"
+
+      - name: Script unit tests
+        if: steps.lane.outputs.lane != 'release' && hashFiles('head/scripts/tests/test_*.py') != ''
+        working-directory: head
+        run: python3 -m unittest discover -s scripts/tests -v
+
+      - name: Guard hook self-test and glob-list check
+        # Runs the PR head's own hook and script, so it only catches an honest slip: the
+        # hook's PROTECTED_GLOBS drifting from GUARDED_PATH_GLOBS, or a broken parser case.
+        # The enforcement is the base-branch script run above, not this step.
+        if: steps.lane.outputs.lane != 'release' && hashFiles('head/scaffold/.claude/hooks/guard_protected_paths.py') != ''
+        working-directory: head
+        run: python3 scaffold/.claude/hooks/guard_protected_paths.py --self-test

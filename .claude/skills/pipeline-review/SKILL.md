@@ -52,7 +52,8 @@ Check whether the following gates exist as skill files or documented steps in th
 | Pre-PR gate (`/gates`) | `.claude/skills/gates/SKILL.md` | Critical |
 | Build verification (separate from tests) | Gate 1 of `/gates` | High |
 | CHANGELOG incremental update | Step in `/feature` | High |
-| `/review` before `/test` (not parallel) | `feature/SKILL.md` Done-when + `AGENTS.md`/`CLAUDE.md` | High |
+| `/test` before `/gates`; `code-review:code-review` before `/review` | `feature/SKILL.md` Done-when + `pr-followup/SKILL.md` + `AGENTS.md`/`CLAUDE.md` | High |
+| Lane config and required checks (`gates`, `review-evidence`) | `scripts/pipeline_lanes.json`, `.github/workflows/gates.yml`, `.github/workflows/review-evidence.yml` | Critical |
 | Coverage check (`ios-coverage` skill) | `/gates` or post-`/test` step | Medium |
 | Security check for sensitive PRs | `security-review` skill reference | Medium |
 | Session recovery command (`/status`) | `.claude/skills/status/SKILL.md` | Low |

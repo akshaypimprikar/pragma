@@ -74,11 +74,11 @@ git push -u origin release/<version>
 ```
 
 ### 5. Verify the release branch only touches release files
-AGENTS.md/CLAUDE.md's Merge rule exempts `release/*` PRs from `/review` and `code-review:code-review` on the assumption that they never carry new logic — only the mechanical version bump/CHANGELOG commit. Confirm that assumption before opening the PR:
+The `release` lane (`scripts/pipeline_lanes.json`) exempts `release/*` PRs from `/review` and `code-review:code-review` on the assumption that they never carry new logic — only the mechanical version bump/CHANGELOG commit. Confirm that assumption before opening the PR:
 ```bash
 git diff develop...HEAD --name-only
 ```
-Every path in the output must be one of `<AppName>.xcodeproj/project.pbxproj`, `CHANGELOG.md`, or `.claude/context/feature-log.md`. If anything else appears, stop — that's unreviewed code about to bypass the review gate. Investigate before continuing.
+Every path in the output must be one of `<AppName>.xcodeproj/project.pbxproj`, `CHANGELOG.md`, or `.claude/context/feature-log.md`. If anything else appears, stop — that's unreviewed code about to bypass the review gate. Investigate before continuing. `check_pr_lane.py` applies the same rule in CI, so such a PR is laned by its paths and needs the full evidence.
 
 ### 6. Open PR to main
 ```bash
@@ -91,7 +91,7 @@ gh pr create \
 - See git log for full changes"
 ```
 
-**Stop here.** Wait for the PR to be reviewed and merged before continuing.
+**Stop here.** Wait for the PR to be merged before continuing. Merge it with a merge commit, not a squash: a squashed release makes the back-merge re-diff the whole release, so it would not be laned `release`.
 
 ### 7. After merge — tag and back-merge to develop
 ```bash
@@ -99,9 +99,10 @@ git checkout main && git pull
 git tag -a v<version> -m "Release <version>"
 git push origin v<version>
 
-git checkout develop
-git merge main --no-ff
-git push origin develop
+# develop is protected (no direct push), so the back-merge goes through a PR.
+# It is laned `release` when it carries only the release commits' paths.
+gh pr create --base develop --head main --title "chore: back-merge release <version> into develop" \
+  --body "Back-merge of v<version> from main. Merge with a merge commit, not squash."
 
 git branch -d release/<version>
 git push origin --delete release/<version>

@@ -85,6 +85,8 @@ GUARDED_PATH_GLOBS = (
     ".claude/context/invariants.md",
     ".claude/settings.json",
     ".claude/hooks/*",
+    "scripts/pipeline_lanes.json",
+    ".github/workflows/*",
 )
 # Suppression/stub detection (checks 3 & 4) is about shipped application
 # code — a doc file describing these exact patterns in prose (this script's

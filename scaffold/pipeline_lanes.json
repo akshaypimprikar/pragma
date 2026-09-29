@@ -1,0 +1,49 @@
+{
+  "release": {
+    "paths": [
+      "YOUR_PROJECT.xcodeproj/project.pbxproj",
+      "CHANGELOG.md",
+      ".claude/context/feature-log.md"
+    ],
+    "evidence": []
+  },
+  "lanes": [
+    {
+      "name": "app",
+      "paths": [
+        "YOUR_PROJECT/**",
+        "YOUR_PROJECTTests/**",
+        "YOUR_PROJECTUITests/**",
+        "*.xcodeproj/**",
+        "**/*.xctestplan"
+      ],
+      "evidence": ["gate_summary", "review_verdict", "code_review"]
+    },
+    {
+      "name": "pipeline",
+      "paths": [
+        ".claude/skills/**",
+        ".claude/hooks/**",
+        ".claude/commands/**",
+        ".claude/settings.json",
+        ".claude/context/invariants.md",
+        "scripts/**",
+        ".github/**",
+        ".githooks/**",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONSTRAINTS.md",
+        "docs/superpowers/**"
+      ],
+      "evidence": ["gate_summary", "review_verdict", "code_review", "motivating_incident"]
+    }
+  ],
+  "default": {
+    "name": "docs",
+    "evidence": ["gate_summary"]
+  },
+  "carryover_paths": [
+    ".claude/context/rejections.md",
+    ".claude/context/incidents.md"
+  ]
+}

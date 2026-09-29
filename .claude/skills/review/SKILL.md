@@ -20,6 +20,27 @@ Also read the following files if they exist — skip silently if absent:
 - `.claude/context/rejections.md` — past violations on this project; flag any repeats as HIGH severity
 - `.claude/context/incidents.md` — past bug root causes; flag any PR that reintroduces a previously-fixed symptom as HIGH severity, same as a rejections.md repeat
 
+### Lane, rounds and design mode
+
+**Lane first.** Run `python3 scripts/check_pr_lane.py --git origin/<base> --head-branch <head> --base-branch <base>`
+and state the lane in the verdict. The `docs`, `release` and `sync` lanes need no `/review`: say so and stop.
+`app` and `pipeline` continue. `scripts/pipeline_lanes.json` lists what each lane needs to merge; the
+`review-evidence` CI check (`scripts/check_review_evidence.py`) enforces it.
+
+**At most two full rounds per PR.** Round 1 reviews the whole PR. Round 2 reviews only the diff since the
+round-1 `Reviewed at` SHA plus the round-1 findings: was each fixed, and did the delta introduce anything
+new? There is no round 3: after round 2, open a GitHub issue for each remaining non-HIGH finding and post
+APPROVED with the issue links; a remaining HIGH goes to the user for a decision.
+
+**`/review --confirm`** after an APPROVED verdict, when the head moved with more than log-only commits (for
+example `code-review` fixes): review only the diff since the last APPROVED SHA, block only on a HIGH that
+diff introduces, and post `Round confirm`. It is not a round.
+
+**Design mode** for a PR whose changes are specs or plans under `docs/superpowers/`: report only
+contradictions, false claims (open every cited `path:line` and every claimed fact about another file) and
+flaws that make the design fail or unbuildable. Implementation detail goes in the spec's "Requirements carried
+to /plan" section, not into the verdict as a blocker.
+
 ### Architecture, type-safety, build/test/coverage compliance — verified against `/gates`, not trusted
 
 `/gates` runs before every PR is opened and is the single authoritative check for
@@ -78,8 +99,8 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    gh pr checks <PR> --json name,bucket
    ```
    Require a check named `gates` with bucket `pass`. `fail` → **CHANGES REQUESTED**. `pending` → not
-   approvable yet; say so. No check named `gates` at all → write `gates CI job: not yet configured` in
-   the verdict as a visible note — never let its absence read as a pass.
+   approvable yet; say so. No check named `gates` at all → **CHANGES REQUESTED**: `gates.yml` runs on
+   every PR, so a missing check means CI did not run.
 
 ### Design compliance checks
 *Only applies to PRs that touch `<AppName>/Views/` or add new UI components. Read `docs/design-system.md` and `<AppName>/Theme/` before running these checks.*
@@ -103,11 +124,13 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
 For each check: ✅ PASS or ❌ FAIL (with file path + line number).
 
 Lead the verdict with a **Gate verification** block: the PR HEAD SHA, whether it matched the summary's
-SHA, each re-run script/grep and its result, the `gates` CI job state (or "not yet configured"), and
-which gates were not re-run.
+SHA, each re-run script/grep and its result, the `gates` CI job state, and which gates were not re-run.
+
+Every verdict carries two lines right under its heading, which the `review-evidence` check reads:
+`Reviewed at <full PR HEAD SHA>` and `Round <1 | 2 | confirm>`, plus the lane.
 
 Final verdict:
-- **APPROVED** — all checks pass, eligible to merge once `/test` and `code-review:code-review` also pass
+- **APPROVED** — all checks pass, eligible to merge once the required checks pass (see AGENTS.md/CLAUDE.md's "Merge rule")
 - **CHANGES REQUESTED** — list issues that must be fixed before merge
 
 ## Logging violations to rejections.md
@@ -145,12 +168,19 @@ Reporting the verdict back in this session is not enough — nothing distinguish
 gh pr review <PR> --comment --body "$(cat <<'EOF'
 ## Review Agent verdict: <APPROVED | CHANGES REQUESTED>
 
+Reviewed at <full PR HEAD SHA>
+Round <1 | 2 | confirm> · Lane <app | pipeline>
+
 <the check-by-check output from Output format above>
 EOF
 )"
 ```
 
 Use `--comment`, not `--approve` — GitHub blocks self-approval on PRs authored under your own account, so `--approve` fails here. `--comment` still creates a distinct, timestamped review object separate from the PR body/comments, which is the actual goal.
+
+Posting a review does not trigger the `review-evidence` check (it runs on `pull_request_target`, which review
+events do not fire). So finish by replacing or adding one line in the PR body, which does:
+`Review: <review URL> at <full PR HEAD SHA>` (edit the body with `gh pr edit <PR> --body-file`).
 
 ## Tip — automate the review-fix loop
 While a PR sits in CHANGES REQUESTED (or waiting on CI), the user can avoid manually re-checking by running, as a separate top-level command:
@@ -160,4 +190,4 @@ While a PR sits in CHANGES REQUESTED (or waiting on CI), the user can avoid manu
 This is the generic `/loop` skill with a literal prompt — there is no dedicated `/babysit` command. `/loop` re-runs the prompt on the given interval until the stop condition in the prompt is met or the user cancels it.
 
 ## Done when
-Any required `rejections.md` entries are appended, the verdict is posted to GitHub via `gh pr review`, and the verdict is reported to the user. Do **not** merge the PR — merging only happens once `/test` and `code-review:code-review` also pass, and the user merges it themselves (see AGENTS.md/CLAUDE.md's "Merge rule" if the project has one). Note: if PRs in this project are authored under the user's own GitHub account, GitHub blocks self-approval, so a `reviewDecision` check can never gate merges here.
+Any required `rejections.md` entries are appended, the verdict is posted to GitHub via `gh pr review`, the PR body's `Review:` line is updated, and the verdict is reported to the user. Do **not** merge the PR — per AGENTS.md/CLAUDE.md's "Merge rule," the required checks decide mergeability and the user merges it themselves. Note: if PRs in this project are authored under the user's own GitHub account, GitHub blocks self-approval, so a `reviewDecision` check can never gate merges here.

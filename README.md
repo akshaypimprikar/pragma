@@ -166,8 +166,8 @@ The built-in spec modes are not bad. They are a reasonable default for teams tha
 | `/feature docs/plans/my-plan.md` | Executes an approved plan with TDD, one commit per task |
 | `/gates` | Makes sure that the build passes, the full test suite passes, and the architecture follows the rules, before you open a PR |
 | `/review` | Reviews a PR for architecture compliance. Posts its verdict as a real GitHub review. |
-| `/test` | Writes tests for a feature branch. Runs after `/review` reports APPROVED. |
-| `/pr-followup` | Runs `/review`, `/test`, and `code-review:code-review` automatically in a chain, right after a PR opens. None of the three needs a human trigger. |
+| `/test` | Audits a feature branch for coverage gaps and adds the missing tests. Runs after `/feature` and before `/gates`. |
+| `/pr-followup` | Runs `code-review:code-review` and then `/review` right after a PR opens, and records both in the PR body for the `review-evidence` check. |
 | `/bugfix "description"` | Writes a regression test first, then the fix. Always test first. |
 | `/release 1.0.0` | Bumps the version, updates the changelog, opens a PR to main, and creates a git tag |
 
@@ -195,17 +195,21 @@ Unlike the skills above, this skill works in any project. You do not need the re
 
 ## CI Layer
 
-Pragma installs three GitHub Actions workflows into your project with the skills:
+Pragma installs these GitHub Actions workflows into your project with the skills:
 
 | Workflow | Trigger | What it enforces |
 |---|---|---|
-| `pr-checks.yml` | PR to `develop` or `main` | `unit-tests` job: unit and integration tests, and coverage of at least 60% (warning below 80%). `gates` job: RED-before-GREEN commit order and gate integrity. |
+| `pr-checks.yml` | PR to `develop` or `main` | `unit-tests` job: unit and integration tests, and coverage of at least 60% (warning below 80%). |
+| `gates.yml` | Every PR to `develop` or `main` | `gates` job: decides the PR's lane, then runs RED-before-GREEN commit order, gate integrity, citation checks, the script unit tests and the guard hook self-test. |
+| `review-evidence.yml` | PR to `develop` or `main` (`pull_request_target`) | `review-evidence` job: checks that the PR carries the evidence its lane needs. |
 | `ui-tests.yml` | PR to `develop` or `main`, push to either | UI tests |
+| `concurrency-advisory.yml` | PR to `develop` or `main` that touches app, script or workflow paths | Unit tests under ThreadSanitizer. Advisory only (`continue-on-error`), so it never blocks a PR. |
 | `release.yml` | Tag push that matches `v*.*.*` | Full test suite in the Release configuration, and creation of the GitHub Release |
 
 The agent layer (`/gates`, `/review`, `/test`) runs locally and gives fast feedback before you open a PR. CI re-runs only the part that a script can check:
 
-- `gates` job (`pr-checks.yml`): runs `scripts/check_tdd_commit_order.py` and `scripts/check_gate_integrity.py`. The scripts come from a checkout of the base branch, and they run against the PR head. A PR cannot edit the scripts that judge it. If the base branch has no copy of a script, the copy in the PR runs and the job emits a warning. A missing base copy is expected only for the PR that first installs pragma. It applies to any PR while the base branch lacks the file. The run of the PR's own copy is not protected against a PR that edits the script. Any non-zero exit fails the job. This includes exit 2, which happens when `SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the layer names of the template. Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma. After the scripts are on the base branch, the existing copy on the base branch judges any PR that changes them, whether to configure them or to fix a bug.
+- `gates` job (`gates.yml`): sorts the PR into a lane with `scripts/check_pr_lane.py` and `scripts/pipeline_lanes.json` (`app`, `pipeline`, `docs` or `release`; edit the config's paths to match your project). Except for the `release` lane, it runs `scripts/check_tdd_commit_order.py`, `scripts/check_gate_integrity.py` and `scripts/check_citations.py`. The scripts come from a checkout of the base branch, and they run against the PR head. A PR cannot edit the scripts that judge it. If the base branch has no copy of a script, the copy in the PR runs and the job emits a warning. A missing base copy is expected only for the PR that first installs pragma. It applies to any PR while the base branch lacks the file. The run of the PR's own copy is not protected against a PR that edits the script. Any non-zero exit fails the job. This includes exit 2, which happens when `SCOPED_LAYER_DIRS` in `check_tdd_commit_order.py` still holds the layer names of the template. Edit `SCOPED_LAYER_DIRS` in the same PR that installs pragma. After the scripts are on the base branch, the existing copy on the base branch judges any PR that changes them, whether to configure them or to fix a bug.
+- `review-evidence` job (`review-evidence.yml`): runs `scripts/check_review_evidence.py` from the base branch, reading the PR only through the GitHub API. Each lane needs its own evidence in the PR body or reviews: a `Gates run at <sha>` gate summary, an APPROVED `/review` verdict at the head SHA from an owner, member or collaborator, a `code-review:` line at the head SHA, and a `Motivating incident:` line for pipeline changes. It runs on `pull_request_target`, so it only takes effect once it is on the base branch.
 - `unit-tests` job: runs the test suite and `scripts/check_coverage.py`. This job runs the copy of `check_coverage.py` from the PR, not a copy from the base branch.
 
 CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7, the UI-selector cross-check in Gate 10 of `/gates`, and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps.
@@ -216,14 +220,14 @@ Know these limits before you rely on CI:
   1. Open Settings → Branches (or Rules → Rulesets).
   2. Add a rule for `develop` and `main`.
   3. Turn on "Require status checks to pass before merging".
-  4. Add `gates`. To make the unit tests and UI tests block too, add `Unit Tests` and `UI Tests`.
+  4. Add `gates` and `review-evidence`. To make the unit tests and UI tests block too, add `Unit Tests` and `UI Tests`.
 
-  `pr-checks.yml` runs only for the paths in its `paths:` filter. A required check that never runs stays pending. If you make `gates` required, remove that filter. This also makes the macOS `unit-tests` job run on every PR.
-- The workflow file comes from the PR ref. A PR can still edit or delete the `gates` job itself. Only the scripts are protected. Review changes under `.github/workflows/` in the same way as changes to gate definitions. For example, add a `CODEOWNERS` entry for that path and require code-owner review.
+  `gates.yml` and `review-evidence.yml` have no `paths:` filter, so both checks report on every PR. `pr-checks.yml` still runs only for the paths in its `paths:` filter, and a required check that never runs stays pending. If you make `Unit Tests` required, remove that filter. This also makes the macOS `unit-tests` job run on every PR.
+- `gates.yml` comes from the PR ref. On a `feature/*` branch, gate integrity flags an edit to `.github/workflows/*`, but on any other branch a PR can still edit or delete the `gates` job. Such a PR is in the `pipeline` lane, so `review-evidence`, which runs from the base branch, still requires an APPROVED review for it. Review changes under `.github/workflows/` in the same way as changes to gate definitions. For example, add a `CODEOWNERS` entry for that path and require code-owner review.
 - Gate integrity checks for edited gate-definition files only on `feature/*` branches. The PR author chooses the branch name. The same edit on a `chore/*` or `fix/*` branch is allowed by design. The other gate-integrity checks apply on any branch. They look for deleted tests, new suppressions, stubs, and lowered thresholds.
-- The guard hook and the CI check cover the same files. During a Claude Code session on a `feature/*` branch, `.claude/hooks/guard_protected_paths.py` blocks edits to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json`, and `.claude/hooks/*`. On a `feature/*` PR, `check_gate_integrity.py` flags the same files. To get the hook in an existing project, run `setup.sh` or `/pragma:init` again. You must copy the wider `paths:` filter from `scaffold/.github/workflows/pr-checks.yml` by hand, because the installers skip existing workflow files. Neither layer detects an agent that renames its branch to a name outside `feature/*`.
+- The guard hook and the CI check cover the same files. During a Claude Code session on a `feature/*` branch, `.claude/hooks/guard_protected_paths.py` blocks edits to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json`, `.claude/hooks/*`, `scripts/pipeline_lanes.json` and `.github/workflows/*`. On a `feature/*` PR, `check_gate_integrity.py` flags the same files. To get the hook in an existing project, run `setup.sh` or `/pragma:init` again. You must add the new workflows by hand, because the installers skip existing workflow files (see the next item). Neither layer detects an agent that renames its branch to a name outside `feature/*`.
 - On PRs into `main`, the TDD-order check reads every commit since `main`. If a repository squash-merges into `develop`, the check can flag squashed commits on a release PR. A squashed commit holds the test and the implementation in one commit.
-- `setup.sh` and `/pragma:init` skip workflow files that already exist. In an existing project, you must copy the `gates` job from `scaffold/.github/workflows/pr-checks.yml` by hand.
+- `setup.sh` and `/pragma:init` skip workflow files that already exist. In an existing project, copy `gates.yml` and `review-evidence.yml` from `scaffold/.github/workflows/` by hand, and delete the old `gates` job and its gate-definition `paths:` entries from your `pr-checks.yml`.
 
 By default, `/review` runs in the same Claude Code session as `/feature` and `/gates`. The reviewer is therefore not independent of the context of the implementer. `/review` does not trust the pasted gate summary. It compares the SHA of the summary with the PR head. It re-runs the scripted gates (gate integrity and TDD order) and the grep-only gates from the base branch. If anything disagrees, the result is CHANGES REQUESTED. `/review` does not re-run Gates 1, 2, 6, 7, and 8 (build, tests, coverage, security, and advisory heuristics). To isolate the context, run `/review` in a fresh Claude Code session.
 

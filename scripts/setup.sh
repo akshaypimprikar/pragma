@@ -21,6 +21,8 @@
 #     a name with a skill being installed is backed up alongside it and
 #     removed, so the old command can't shadow or collide with the new skill
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
+#   - Copies scaffold/pipeline_lanes.json to scripts/pipeline_lanes.json (with
+#     YOUR_PROJECT replaced) unless the project already has one
 #   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
 #     entry into .claude/settings.json (other settings are kept; the original
 #     is backed up). The hook blocks edits to gate-definition files on
@@ -122,6 +124,21 @@ cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_pr_lane.py"         "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_review_evidence.py" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_citations.py"       "$PROJECT_DIR/scripts/"
+mkdir -p "$PROJECT_DIR/scripts/tests"
+cp "$REPO_ROOT/scripts/tests/test_check_pr_lane.py" \
+   "$REPO_ROOT/scripts/tests/test_check_review_evidence.py" \
+   "$REPO_ROOT/scripts/tests/test_check_citations.py" "$PROJECT_DIR/scripts/tests/"
+# Lane config: the project's own paths, so never overwrite an existing one.
+LANES="$PROJECT_DIR/scripts/pipeline_lanes.json"
+if [[ -f "$LANES" ]]; then
+    warn "scripts/pipeline_lanes.json already exists — skipping"
+else
+    cp "$REPO_ROOT/scaffold/pipeline_lanes.json" "$LANES"
+    sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$LANES"
+fi
 success "Scripts ready"
 
 # ── 3b. CONSTRAINTS.md ────────────────────────────────────────────────────────
@@ -236,11 +253,11 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 ## Pipeline
 
-Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/gates\` → PR to \`develop\` → \`/pr-followup\`, which runs \`/review\` → \`/test\` → \`code-review:code-review\` in that order, not in parallel → \`/release\` → \`main\`.
+Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`code-review:code-review\` → \`/review\`, at most 2 rounds) → \`/release\` → \`main\`.
 
 ## Merge rule
 
-No command merges a PR automatically. A PR targeting \`develop\` is mergeable only once \`/review\` returns APPROVED, \`/test\` passes, and \`code-review:code-review\` is clean — then the user merges it themselves. (If PRs here are authored under your own GitHub account, GitHub blocks self-approval, so a GitHub review-approval check can't gate this either.) \`release/*\` PRs targeting \`main\` are exempt from \`/review\` and \`code-review:code-review\` — every commit already passed both when it merged into \`develop\`; \`/release\`'s pre-flight test run is the only gate needed there. \`hotfix/*\` PRs are not exempt: they branch off \`main\`, so their commits never passed review on \`develop\` — both the \`main\` PR and the \`develop\` PR need \`/review\`, \`/test\` and \`code-review:code-review\`. Agents report their verdict and stop.
+No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: gate summary, \`/review\` APPROVED and \`code-review:\` line at the head SHA, motivating incident. The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
 CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"

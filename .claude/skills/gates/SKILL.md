@@ -266,6 +266,7 @@ Report every gate before opening the PR. The first line is mandatory: the full S
 pre-step. `/review` compares it to the PR HEAD and rejects a summary that is missing or stale.
 ```
 Gates run at <full 40-char SHA from `git rev-parse HEAD`>
+Lane: <output of `python3 scripts/check_pr_lane.py --git origin/<base> --head-branch <branch> --base-branch <base>`, where <base> is `develop`, or `main` for `release/*` and `hotfix/*`>
 Gates:
 [✓] Build
 [✓] Tests — <N> tests executed
@@ -283,6 +284,7 @@ Gates:
 When Gates 1 and 2 are skipped:
 ```
 Gates run at <full 40-char SHA>
+Lane: <lane>
 Gates:
 [–] Build — skipped (no build-relevant changes)
 [–] Tests — skipped (no build-relevant changes)
@@ -329,6 +331,11 @@ Include the actual Gate summary output (from above, starting with its `Gates run
 PR body under its own section — `/review` checks that SHA against the PR HEAD and re-runs the
 deterministic gates itself, comparing its results to this block.
 
+If the `Lane:` line says `pipeline` (or the PR touches pipeline paths alongside app code), also add a
+`Motivating incident: <what went wrong, with a link or date>` line to the PR body, or
+`Motivating incident: none (<reason>)`. The `review-evidence` check fails a pipeline-lane PR
+without a non-empty one.
+
 ```bash
 gh pr create \
   --title "<type>(<scope>): <description>" \
@@ -359,17 +366,17 @@ Exceptions: `release/*` and `hotfix/*` branches use `--base main`, except a hotf
 Gates 0–11 are agent-instruction checks, so an agent under pressure to make a stuck gate pass could edit a gate definition instead of fixing the violation, then report a clean summary. This is most likely in an unattended `/loop` run with no human turn in between. Two layers close that:
 
 - **Live block:** `.claude/hooks/guard_protected_paths.py`, a native `PreToolUse` hook installed by `setup.sh` and `/pragma:init` (`--no-guard-hook` opts out). On a `feature/*` branch it blocks `Write`, `Edit` and `MultiEdit`, and, best effort, `Bash` writes, to skills (`.claude/skills/*/SKILL.md`), `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/context/invariants.md`, `.claude/settings.json`, `.claude/hooks/*` and `scripts/check_*`, at the repo root or under any subdirectory (a Claude project inside a monorepo). The fix is to make that change on a `chore/*` or `fix/*` branch.
-- **CI backstop:** Gate 11's check 1 (`scripts/check_gate_integrity.py`) flags the same set of files on a `feature/*` PR, through `GUARDED_PATH_GLOBS`. The `pr-checks.yml` `paths:` filter lists the same files, each also as `**/…` for nested ones, so a PR that only touches them still runs the `gates` job. A step in that job runs the hook's self-test, which fails if the hook's glob list and the script's differ (it runs the PR's own copy, so it catches an honest slip, not a deliberate one). This catches a plain commit and push that never went through Claude Code.
+- **CI backstop:** Gate 11's check 1 (`scripts/check_gate_integrity.py`) flags the same set of files on a `feature/*` PR, through `GUARDED_PATH_GLOBS`. The `gates` job (`.github/workflows/gates.yml`) runs on every PR, so a PR that only touches them still runs it. A step in that job runs the hook's self-test, which fails if the hook's glob list and the script's differ (it runs the PR's own copy, so it catches an honest slip, not a deliberate one). This catches a plain commit and push that never went through Claude Code.
 
 What is not covered: the hook's Bash detection is a best-effort parse, so `python -c`, interpreter heredocs, variable or glob expansion (including `cd $VAR`), `find -exec` or `-delete`, `xargs rm` fed from stdin, `git checkout <ref> -- file`, `git restore` and `rm -rf <dir that only contains a nested project>` are not detected. A symlink that already exists is followed; one created and written through in the same command is not. The hook only runs in sessions that load the project's own `.claude/settings.json`: verified 2026-09-23 that a session started from a parent directory did not fire it, so start Claude Code from the project root. The CI backstop applies either way. The hook fails open on bad input, no git repo or a detached HEAD, and it allows every edit off `feature/*`. Neither layer catches an agent that renames its branch away from `feature/*`. `.claude/settings.local.json` is not on the list. Pattern sourced from `karanb192/claude-code-hooks`'s "config-guard" hook, surfaced in the 2026-09-08 Agentic AI Intelligence Report.
 
 ## Done when
 All 11 gates (Gates 1–11; Gate 0 only decides whether Gates 1–2 run) report: the 10 blocking gates pass and Gate 8, advisory, is listed, PR is open, and the PR URL is returned to the user.
 
-## Tip — chain into review + test + code-review
-Once the PR is open, run `/pr-followup <PR>` to auto-chain `/review`, `/test`,
-and `code-review:code-review` — see that command for the exact fallback
-behavior on a `disable-model-invocation` project.
+## Tip — chain into code-review + review
+Once the PR is open, run `/pr-followup <PR>` to run `code-review:code-review`
+and then `/review`, and record both in the PR body for the `review-evidence`
+check. `/test` runs before `/gates`, not after the PR opens.
 
 ## Standalone version
 The gate logic above also exists as an installable skill independent of this

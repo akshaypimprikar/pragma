@@ -58,6 +58,8 @@ PROTECTED_GLOBS = (
     ".claude/settings.json",
     ".claude/hooks/*",
     "CONSTRAINTS.md",
+    "scripts/pipeline_lanes.json",
+    ".github/workflows/*",
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
@@ -123,13 +125,14 @@ PROTECTED_DIR_PARTS = [_g.split("/")[:-1] for _g in PROTECTED_GLOBS]
 def is_protected_dir_prefix(rel_dir):
     """True if removing/moving rel_dir (a directory) would necessarily take a
     protected file with it — rel_dir is itself, or an ancestor of, some
-    PROTECTED_GLOBS entry's directory. A `.claude/...` glob also matches when
-    `.claude` sits below the repo root (`ios/.claude/skills`)."""
+    PROTECTED_GLOBS entry's directory. A `.claude/...` or `.github/...` glob
+    also matches when that directory sits below the repo root
+    (`ios/.claude/skills`, `ios/.github/workflows`)."""
     parts = [p.lower() for p in rel_dir.split("/")]
     for glob_parts in PROTECTED_DIR_PARTS:
         if not glob_parts:
             continue
-        starts = [0] + ([i for i, p in enumerate(parts) if i and p == ".claude"] if glob_parts[0] == ".claude" else [])
+        starts = [0] + ([i for i, p in enumerate(parts) if i and p == glob_parts[0]] if glob_parts[0] in (".claude", ".github") else [])
         for s in starts:
             sub = parts[s:]
             if len(sub) <= len(glob_parts) and all(gp == "*" or gp.lower() == rp for gp, rp in zip(glob_parts, sub)):
@@ -154,6 +157,7 @@ _PROTECTED_FRAGMENTS = tuple(
     frag.lower() for frag in (
         "skill.md", "scripts/check_", "agents.md", "claude.md",
         "invariants.md", "settings.json", ".claude/hooks/", "constraints.md",
+        "pipeline_lanes.json", ".github/workflows/",
     )
 )
 
@@ -844,6 +848,8 @@ def self_test():
             ("feature: Write ios/.claude/skills/x/SKILL.md", write("Write", "feat", "ios/.claude/skills/x/SKILL.md"), True),
             ("feature: Bash rm -rf ios/.claude/skills", bash("feat", "rm -rf ios/.claude/skills"), True),
             ("feature: Bash rm -rf ios/.claude", bash("feat", "rm -rf ios/.claude"), True),
+            ("feature: Bash rm -rf ios/.github/workflows", bash("feat", "rm -rf ios/.github/workflows"), True),
+            ("feature: Bash rm -rf ios/.github", bash("feat", "rm -rf ios/.github"), True),
             ("feature: Write ios/Sources/A.swift is ordinary", write("Write", "feat", "ios/Sources/A.swift"), False),
         ]
         cases += [

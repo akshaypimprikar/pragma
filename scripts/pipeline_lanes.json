@@ -21,7 +21,11 @@
     {
       "name": "pipeline",
       "paths": [
-        ".claude/**",
+        ".claude/skills/**",
+        ".claude/hooks/**",
+        ".claude/commands/**",
+        ".claude/settings.json",
+        ".claude/context/invariants.md",
         ".claude-plugin/**",
         "scaffold/**",
         "scripts/**",

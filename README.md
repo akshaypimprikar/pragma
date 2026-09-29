@@ -7,6 +7,10 @@
 [![Platform](https://img.shields.io/badge/platform-iOS-black?logo=apple&logoColor=white)](https://developer.apple.com/ios/)
 [![Swift](https://img.shields.io/badge/Swift-6.0%2B-FA7343?logo=swift&logoColor=white)](https://swift.org)
 
+https://github.com/user-attachments/assets/cc7f7ac2-cbfa-4668-bafd-2ea9eda18d70
+
+A 29-second overview: the two approvals, the pipeline stages, the gates, and the guard hook that stops the agent from weakening them.
+
 Pragma is a scaffold for iOS development with coding agents. It gives you agent skills, CI checks, and setup automation that work together. One engineer can use it to ship at team scale.
 
 Pragma is not a spec-mode plugin for your IDE. It is not a loose collection of skills. It is a full pipeline from spec to release. In this pipeline, CI re-runs the TDD-order script (test-driven development: the test comes first), the gate-integrity script, and the test suite. Memory survives every session boundary. For the scope and limits of CI, see [CI Layer](#ci-layer). For a comparison with built-in spec modes, see [why not just a built-in spec mode](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode).

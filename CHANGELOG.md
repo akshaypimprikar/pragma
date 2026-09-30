@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Wording: `review-evidence` runs from the default branch.** The `gates.yml` header comment in the scaffold said `review-evidence.yml` "runs from the base branch". Under `pull_request_target` GitHub runs the workflow file from the default branch; only its scripts come from the base branch.
 - **`review-evidence` used the default branch's scripts and lane config for PRs into `develop`.** On `pull_request_target`, `actions/checkout` without a `ref` checks out the default branch (`main`), so lane or evidence changes merged to `develop` did not apply until the next release. Pragma's own and the scaffold `review-evidence.yml` now check out `github.event.pull_request.base.ref`, as `gates.yml` already did for its trusted scripts. The workflow comments, the scaffold SETUP note and the README now say the workflow file itself runs from the default branch. Adopters: add the `ref:` line to your copy.
 - **pragma's own `pipeline` lane no longer catches `.claude/context/` logs.** `scripts/pipeline_lanes.json` listed `.claude/**`, so a PR that only appends to `feature-log.md`, `decisions.md` or `rejections.md` needed a review verdict, a `code-review:` line and a motivating incident. It now lists the same five `.claude/` entries as the scaffold template (`skills/**`, `hooks/**`, `commands/**`, `settings.json`, `context/invariants.md`); the three logs lane `docs`.
 

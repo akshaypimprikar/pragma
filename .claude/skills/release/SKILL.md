@@ -51,7 +51,7 @@ Update the version and build number in `<AppName>.xcodeproj/project.pbxproj`:
 - `CURRENT_PROJECT_VERSION = <increment by 1>;`
 
 ### 3. Update CHANGELOG.md
-Add a new section at the top:
+Rename `## [Unreleased]` to the version heading, keeping its entries (add the section at the top if there is no `[Unreleased]`):
 
 ```markdown
 ## [<version>] — YYYY-MM-DD
@@ -64,7 +64,7 @@ Add a new section at the top:
 - <bug 1>
 ```
 
-Use `git log <last-tag>..HEAD --oneline` to find what changed.
+Only when there was no `[Unreleased]` section, use `git log <last-tag>..HEAD --oneline` to find what changed. Otherwise keep the renamed entries as they are, and do not add entries from `git log` on top of them.
 
 ### 4. Commit and push the release branch
 ```bash
@@ -74,7 +74,7 @@ git push -u origin release/<version>
 ```
 
 ### 5. Verify the release branch only touches release files
-The `release` lane (`scripts/pipeline_lanes.json`) exempts `release/*` PRs from `/review` and `code-review:code-review` on the assumption that they never carry new logic — only the mechanical version bump/CHANGELOG commit. Confirm that assumption before opening the PR:
+The `release` lane (`scripts/pipeline_lanes.json`) exempts `release/*` PRs from `/review` and `code-review` on the assumption that they never carry new logic — only the mechanical version bump/CHANGELOG commit. Confirm that assumption before opening the PR:
 ```bash
 git diff develop...HEAD --name-only
 ```

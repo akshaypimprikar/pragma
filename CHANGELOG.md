@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **pragma's own `pipeline` lane no longer catches `.claude/context/` logs.** `scripts/pipeline_lanes.json` listed `.claude/**`, so a PR that only appends to `feature-log.md`, `decisions.md` or `rejections.md` needed a review verdict, a `code-review:` line and a motivating incident. It now lists the same five `.claude/` entries as the scaffold template (`skills/**`, `hooks/**`, `commands/**`, `settings.json`, `context/invariants.md`); the three logs lane `docs`.
+
 ## [2.1.0] — 2026-09-29
 
 ### Added

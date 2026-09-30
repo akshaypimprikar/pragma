@@ -4,8 +4,11 @@ name: Review evidence
 # verdict, code-review line, motivating incident), so the Merge rule is enforced
 # by a required check instead of prose.
 #
-# Runs on pull_request_target, so the workflow and scripts come from the BASE
-# branch and a PR cannot edit them to pass itself. It never checks out or runs
+# Runs on pull_request_target, so a PR cannot edit this check to pass itself:
+# the workflow file runs from the repo's DEFAULT branch, and the checkout below
+# pins the scripts and lane config to the PR's BASE branch (without `ref`, it
+# would check out the default branch, so rule changes merged to develop would
+# not apply to PRs into develop until a release). It never checks out or runs
 # PR code: the PR is read only through the GitHub API as data. Posting a review
 # does not trigger pull_request_target, so /review and /pr-followup finish by
 # editing the PR body, which does (`edited`).
@@ -31,6 +34,7 @@ jobs:
       - name: Checkout base branch only
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
 
       - name: Check lane evidence

@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.1.1] — 2026-09-30
+
+### Changed
+- **Skills synced from FinanceTracker (#92).** `/review` runs its judgment checks (design compliance, code quality) in a fresh-context subagent that gets only the diff, the plan's acceptance criteria and the base branch's log copies, never the implementer's session, PR body, commits or gate summary; it adds a severity scale with blocking rules, an append-only check on `rejections.md`/`incidents.md`, a bounded wait for a pending `gates` job, and blocking-only `rejections.md` logging. "A known tradeoff: context continuity" is replaced by "Context isolation". `/release` keeps the back-merge PR's head as `main` and puts the feature-log entry in its own `docs`-lane PR with a real `/gates` summary. `/parallel-review` rates repeats only against earlier PRs' entries. Gate 5's hint and `/status` use `git log develop..HEAD`; Gate 5 is N/A for a feature-log-only PR only if it fails; Gate 9 reports exit 2 as `[✗]`.
+
+### Fixed
+- **Wording: `review-evidence` runs from the default branch.** The `gates.yml` header comment in the scaffold said `review-evidence.yml` "runs from the base branch". Under `pull_request_target` GitHub runs the workflow file from the default branch; only its scripts come from the base branch.
+- **`review-evidence` used the default branch's scripts and lane config for PRs into `develop`.** On `pull_request_target`, `actions/checkout` without a `ref` checks out the default branch (`main`), so lane or evidence changes merged to `develop` did not apply until the next release. Pragma's own and the scaffold `review-evidence.yml` now check out `github.event.pull_request.base.ref`, as `gates.yml` already did for its trusted scripts. The workflow comments, the scaffold SETUP note and the README now say the workflow file itself runs from the default branch. Adopters: add the `ref:` line to your copy.
+- **pragma's own `pipeline` lane no longer catches `.claude/context/` logs.** `scripts/pipeline_lanes.json` listed `.claude/**`, so a PR that only appends to `feature-log.md`, `decisions.md` or `rejections.md` needed a review verdict, a `code-review:` line and a motivating incident. It now lists the same five `.claude/` entries as the scaffold template (`skills/**`, `hooks/**`, `commands/**`, `settings.json`, `context/invariants.md`); the three logs lane `docs`.
+
 ## [2.1.0] — 2026-09-29
 
 ### Added

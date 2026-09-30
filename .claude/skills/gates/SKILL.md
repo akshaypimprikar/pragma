@@ -107,7 +107,7 @@ grep -A 10 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -v "^##" | grep -
 ```
 Pass: at least one non-empty line under `## [Unreleased]`.
 Fail: section missing or empty — create the section and add a one-line summary per task, using `git log develop..HEAD --oneline` to enumerate commits. `/feature`'s two-commit-per-task structure means only the GREEN (implementation) commit carries user-facing content — summarize those, skipping RED (test-only) commits, which have nothing to summarize.
-N/A: a `/release` feature-log PR that changes only `.claude/context/feature-log.md`, and only if this gate fails on it (for example, the release back-merge already moved the entries under the new version). A feature-log entry is not a user-facing change. Report `[–] N/A (feature-log only)`.
+N/A: a `/release` feature-log PR that changes only `.claude/context/feature-log.md`, and only if this gate fails on it. A feature-log entry is not a user-facing change. Report `[–] N/A (feature-log only)`.
 
 ### Gate 6 — Coverage (conditional: new Swift files on branch)
 ```bash

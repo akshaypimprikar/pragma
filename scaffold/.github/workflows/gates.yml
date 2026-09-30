@@ -21,7 +21,8 @@ name: Gates
 #
 # This workflow is a gate definition: a PR editing it lands in the `pipeline`
 # lane and needs an APPROVED review (checked by review-evidence.yml, which runs
-# from the base branch and cannot be edited by the PR).
+# from the default branch and reads its scripts from the base branch, so the PR
+# cannot edit it).
 
 on:
   pull_request:

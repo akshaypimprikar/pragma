@@ -59,4 +59,4 @@ The plan must be executable by a subagent with no prior context. Every task need
 - UI tests: `<AppName>UITests/`
 
 ## Done when
-The user reviews and approves the plan. Then hand off to `/feature`. `/feature` is followed by `/test` (coverage-gap audit) and `/gates`; after the PR is open, `/pr-followup` runs `code-review:code-review`, then `/review`.
+The user reviews and approves the plan. Then hand off to `/feature`. `/feature` is followed by `/test` (coverage-gap audit) and `/gates`; after the PR is open, `/pr-followup` runs `code-review` (medium), then `/review`.

@@ -110,7 +110,8 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
 ### Judgment checks — run by a fresh-context subagent, not this session
 
 The design compliance and code quality checklists below are judgment calls, so this session does not
-make them. Hand them to one fresh-context subagent. Give it these inputs, and nothing that carries the
+make them. Hand them to one fresh-context subagent, spawned with the Agent tool and `model: "sonnet"`
+(the default inherits the session model, which makes each round an expensive top-model run). Give it these inputs, and nothing that carries the
 implementer's account of the change (listed below). This PR's own entries in `rejections.md` and
 `incidents.md` describe the change, so the subagent gets a diff without the two logs and the base branch's
 copies of them. Prepare those in one shell call (`BASE` does not carry over from step 2), with the copies
@@ -261,7 +262,7 @@ just one:
 1. This review's own verdict is CHANGES REQUESTED — log each failed gate-verification check and each
    accepted finding that blocks under the rules in "Merge its output" above. Non-blocking and
    dismissed findings go in the verdict only, not in this file.
-2. This review's own verdict is APPROVED, but the PR body documents bugs that were found and fixed *earlier* in this PR's lifecycle — a "Bugs found and fixed," "code-review round," or similar section from `code-review:code-review` or manual verification. Log each of those too. These are exactly the violation patterns this file exists to prevent recurring; by the time this review runs they're already fixed, so a formal pass finds nothing new and the file stays empty even when real defects happened. Read the full PR body specifically looking for this before concluding there's nothing to log. Log only fixes that would have blocked under the rules in "Merge its output" above (HIGH, or a blocking MEDIUM), rated as the regression check rates PR-body fixes; a fixed LOW or advisory item is not a violation to log.
+2. This review's own verdict is APPROVED, but the PR body documents bugs that were found and fixed *earlier* in this PR's lifecycle — a "Bugs found and fixed," "code-review round," or similar section from `code-review` (or the `code-review:code-review` plugin) or manual verification. Log each of those too. These are exactly the violation patterns this file exists to prevent recurring; by the time this review runs they're already fixed, so a formal pass finds nothing new and the file stays empty even when real defects happened. Read the full PR body specifically looking for this before concluding there's nothing to log. Log only fixes that would have blocked under the rules in "Merge its output" above (HIGH, or a blocking MEDIUM), rated as the regression check rates PR-body fixes; a fixed LOW or advisory item is not a violation to log.
 
 In both cases, check `rejections.md` first. If the item already has an entry for this PR, skip it,
 however it was logged (an earlier `/review` round, a code-review round, or by hand). Logging it again

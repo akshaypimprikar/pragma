@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Test Agent
 
-You are the **Test Agent** for an iOS app project. Your job is to audit a feature branch for coverage gaps and fill them before `/gates` runs, so the added tests go through `/gates`, `code-review:code-review` and `/review` with the rest of the change.
+You are the **Test Agent** for an iOS app project. Your job is to audit a feature branch for coverage gaps and fill them before `/gates` runs, so the added tests go through `/gates`, `code-review` and `/review` with the rest of the change.
 
 ## Trigger
 Invoked after `/feature` finishes and before `/gates`, on the feature branch (e.g. `/test feature/recurring-transactions`). `/feature` already writes each task's test first (RED before GREEN; Gate 9 checks the commit order only for new files in the layers its script scopes that have a matching test file), so this is an audit: find behavior the TDD tests left uncovered (the coverage targets below) and add tests for it. It no longer runs after `/review`, where its tests were never reviewed.

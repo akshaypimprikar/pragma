@@ -77,7 +77,7 @@ git commit -m "fix: <short description of what was wrong>"
 ```
 
 **Regular bug:** Open PR to `develop`. The Review Agent (`/review`) runs on the PR.
-**Hotfix:** Open PR to `main` — also open a second PR to `develop`. Both go through `code-review:code-review` and `/review` (via `/pr-followup`) before merging; `/test`'s coverage audit runs before `/gates`. Unlike `release/SKILL.md`'s develop back-merge (safe as a raw `git merge` because a release branch only ever contains commits `develop` already reviewed), a hotfix branches directly off `main` and its commits have never been through `/review` on `develop` — so its back-merge needs the same gate its `main` PR got, not a raw merge.
+**Hotfix:** Open PR to `main` — also open a second PR to `develop`. Both go through `code-review` (medium) and `/review` (via `/pr-followup`) before merging; `/test`'s coverage audit runs before `/gates`. Unlike `release/SKILL.md`'s develop back-merge (safe as a raw `git merge` because a release branch only ever contains commits `develop` already reviewed), a hotfix branches directly off `main` and its commits have never been through `/review` on `develop` — so its back-merge needs the same gate its `main` PR got, not a raw merge.
 
 ## Architecture rules
 All fixes must respect the layer boundaries in `AGENTS.md/CLAUDE.md`:

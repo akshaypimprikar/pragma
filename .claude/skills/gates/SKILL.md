@@ -33,12 +33,12 @@ the SHA, because the gate summary must describe the commit that actually opens t
 
 ### Gate 0 — Build-relevant change check (runs first; determines if Gates 1–2 apply)
 ```bash
-git diff develop...HEAD --name-only -- '*.swift' '*.pbxproj' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xcscheme' '*.xctestplan'
+git diff develop...HEAD --name-only -- '*.swift' '*.pbxproj' '*.xcproj' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xcscheme' '*.xctestplan'
 ```
 If this returns **no output**, skip Gates 1 and 2 — nothing that affects the build or test suite changed. Continue from Gate 3.
 If any file is listed, run Gates 1 and 2 as normal. Project, config, plist, entitlement and
 package-manifest, scheme and test-plan changes are included on purpose (a test-plan edit changes which tests run; add any other build input your project has — asset or string catalogs, data models): a build-setting change (e.g. a default actor-isolation
-or language-mode setting in the `.pbxproj`) can break the build or change runtime behavior without
+or language-mode setting in the `.pbxproj`, or in the `.xcproj` that the Xcode 27.2 beta can convert a project to) can break the build or change runtime behavior without
 touching a `.swift` file. Gates 3–11 still scope their own greps to `*.swift` where they say so.
 
 ### Gate 1 — Build (conditional: Gate 0 listed files)

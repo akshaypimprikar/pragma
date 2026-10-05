@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Gate 0 missed build-setting changes in an `.xcproj` project (#100).** The Xcode 27.2 beta (27B5028f) can convert a project to the `.xcproj` format, which replaces `project.pbxproj`. Gate 0 matched only `*.pbxproj`, so a build-setting change in `project.xcproj` (for example `SWIFT_VERSION`) skipped build and test. The filter now includes `*.xcproj`.
+
 ## [2.1.1] — 2026-09-30
 
 ### Changed

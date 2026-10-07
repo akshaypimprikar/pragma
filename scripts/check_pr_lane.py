@@ -85,6 +85,15 @@ def validate_config(config):
             raise ConfigError(f"lane '{name}' lists unknown evidence: {sorted(unknown)}")
         if name != "default" and entry is not default and not isinstance(entry.get("paths"), list):
             raise ConfigError(f"lane '{name}' needs a 'paths' list")
+        small = entry.get("small_pr")
+        if small is not None:
+            if not isinstance(small, dict):
+                raise ConfigError(f"lane '{name}' small_pr must be an object")
+            if not isinstance(small.get("max_changed_lines"), int) or small["max_changed_lines"] < 1:
+                raise ConfigError(f"lane '{name}' small_pr needs a positive integer 'max_changed_lines'")
+            unknown = set(small.get("evidence", [])) - EVIDENCE_ITEMS
+            if unknown:
+                raise ConfigError(f"lane '{name}' small_pr lists unknown evidence: {sorted(unknown)}")
     if "sync" in config and not config["sync"].get("branch_prefix"):
         raise ConfigError("'sync' needs a 'branch_prefix'")
     return config
@@ -129,8 +138,13 @@ def evidence_for(config, lane_name):
     raise ConfigError(f"unknown lane '{lane_name}'")
 
 
-def evidence_for_change(config, lane_name, changed):
+def evidence_for_change(config, lane_name, changed, changed_lines=None):
     """Evidence a PR needs: its lane's, plus that of every other configured lane it touches.
+
+    A lane with `small_pr` swaps in the `small_pr` evidence (no model review) when
+    `changed_lines` (additions plus deletions) is below `max_changed_lines`. Only a
+    PR laned by that lane can qualify, and a PR with an app path is laned `app`, so
+    a small PR never skips review on app code.
 
     The lane rank decides the lane name only. A PR touching app and pipeline
     paths is laned `app` but still owes the pipeline lane's evidence (such as a
@@ -142,7 +156,13 @@ def evidence_for_change(config, lane_name, changed):
         return items
     for entry in config["lanes"]:
         if any(_matches_any(entry["paths"], p) for p in changed):
-            items += [i for i in entry.get("evidence", []) if i not in items]
+            evidence = entry.get("evidence", [])
+            small = entry.get("small_pr")
+            if small and entry["name"] == lane_name and changed_lines is not None \
+                    and changed_lines < small["max_changed_lines"]:
+                evidence = small.get("evidence", [])
+                items = [i for i in items if i in evidence]
+            items += [i for i in evidence if i not in items]
     return items
 
 

@@ -79,6 +79,7 @@ GATE_DEFINITION_FILES = (
 GUARDED_PATH_GLOBS = (
     "scripts/check_*",
     ".claude/skills/*/SKILL.md",
+    ".claude/skills/*/reference.md",
     "AGENTS.md",
     "CLAUDE.md",
     "CONSTRAINTS.md",

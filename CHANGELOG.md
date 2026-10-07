@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Skills and scripts synced from FinanceTracker (#157, #160, #159, #163, #164, #165, #176).** Gate 0 matches the whole `*.xcodeproj/**` and `*.xcworkspace/**` bundles, writes its result to `$GATE0`, and `scripts/tests/test_gate0_pathspec.py` fails on a second copy of the list or a dropped pattern; the scaffold's app CI path filters include `YOUR_PROJECT.xcodeproj/**`. `/pr-followup` runs `code-review` on the `app` lane only and `/review` alone on a `pipeline` PR; a pipeline PR under 30 changed lines (`small_pr`) gets no model review. `/review` runs one round by default, a second only to confirm blocking fixes, and `review-evidence` fails a third round. Blocking is decided by `scripts/review_verdict.py`, and `scripts/check_finding_lines.py` lowers a MEDIUM that cites lines outside the diff. A docs-only change after a verdict keeps it valid (`review_carryover_paths`). The long gate and review prose moved to `gates/reference.md` and `review/reference.md`, which the guard hook now protects. `/release` and the `release` lane accept `project.xcproj`. `/sync-workflow` is a weekly batch.
+
 ### Fixed
 - **Gate 0 missed build-setting changes in an `.xcproj` project (#100).** The Xcode 27.2 beta (27B5028f) can convert a project to the `.xcproj` format, which replaces `project.pbxproj`. Gate 0 matched only `*.pbxproj`, so a build-setting change in `project.xcproj` (for example `SWIFT_VERSION`) skipped build and test. The filter now includes `*.xcproj`.
 

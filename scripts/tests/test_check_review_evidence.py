@@ -83,6 +83,43 @@ class EvaluateTests(unittest.TestCase):
                                                         "submitted_at": "2026-09-28T10:00:00Z"}])
         self.assertFalse(r["review_verdict"])
 
+    def test_docs_only_change_since_verdict_passes(self):
+        r = ev.evaluate(["review_verdict"], HEAD, "", [verdict("APPROVED", OLD, "2026-09-28T10:00:00Z")], CARRY,
+                        changed_between_factory({OLD: ["docs/spec.md"]}), ["docs/**"])
+        self.assertTrue(r[0][1])
+
+    def test_docs_do_not_carry_over_gate_summary(self):
+        r = ev.evaluate(["gate_summary"], HEAD, f"Gates run at {OLD}", [], CARRY,
+                        changed_between_factory({OLD: ["docs/spec.md"]}), ["docs/**"])
+        self.assertFalse(r[0][1])
+
+    def test_code_change_since_verdict_fails_despite_docs_carryover(self):
+        r = ev.evaluate(["review_verdict"], HEAD, "", [verdict("APPROVED", OLD, "2026-09-28T10:00:00Z")], CARRY,
+                        changed_between_factory({OLD: ["docs/spec.md", "scripts/a.py"]}), ["docs/**"])
+        self.assertFalse(r[0][1])
+
+    def three_verdicts(self):
+        return [verdict("CHANGES REQUESTED", HEAD, "2026-09-28T09:00:00Z"),
+                verdict("CHANGES REQUESTED", HEAD, "2026-09-28T10:00:00Z"),
+                verdict("APPROVED", HEAD, "2026-09-28T11:00:00Z")]
+
+    def test_two_verdicts_pass(self):
+        r = self.run_eval(["review_verdict"], reviews=self.three_verdicts()[1:])
+        self.assertTrue(r["review_verdict"])
+
+    def test_third_verdict_fails(self):
+        self.assertFalse(self.run_eval(["review_verdict"], reviews=self.three_verdicts())["review_verdict"])
+
+    def test_confirm_verdict_is_not_a_round(self):
+        confirm = {"body": f"## Review Agent verdict: APPROVED\n\nReviewed at {HEAD}\nRound confirm\n",
+                   "submitted_at": "2026-09-28T12:00:00Z", "author_association": "OWNER"}
+        r = self.run_eval(["review_verdict"], reviews=self.three_verdicts()[1:] + [confirm])
+        self.assertTrue(r["review_verdict"])
+
+    def test_third_verdict_with_override_passes(self):
+        r = self.run_eval(["review_verdict"], body="Round cap override: user decided", reviews=self.three_verdicts())
+        self.assertTrue(r["review_verdict"])
+
     def test_non_verdict_reviews_ignored(self):
         r = self.run_eval(["review_verdict"], reviews=[{"body": f"LGTM APPROVED Reviewed at {HEAD}",
                                                         "submitted_at": "2026-09-28T10:00:00Z"}])

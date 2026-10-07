@@ -55,7 +55,7 @@ xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
 - Views contain no business logic
 
 ## Done when
-All tasks complete, full test suite green, `/test`'s coverage-gap audit done, and all blocking `/gates` criteria pass (Gate 8 is advisory). Then open a PR to `develop` and run `/pr-followup`, which runs `code-review` (medium) and then `/review` and records both in the PR body for the `review-evidence` check.
+All tasks complete, full test suite green, `/test`'s coverage-gap audit done, and all blocking `/gates` criteria pass (Gate 8 is advisory). Then open a PR to `develop` and run `/pr-followup`, which runs `code-review` (medium, `app` lane only) and then `/review` and records each in the PR body for the `review-evidence` check.
 
 To drive the entire feature-to-gates cycle autonomously:
 ```

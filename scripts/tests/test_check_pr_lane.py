@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import check_pr_lane as lane  # noqa: E402
 
 CONFIG = {
-    "release": {"paths": ["App.xcodeproj/project.pbxproj", "CHANGELOG.md"], "evidence": []},
+    "release": {"paths": ["App.xcodeproj/project.pbxproj", "App.xcodeproj/project.xcproj", "CHANGELOG.md"], "evidence": []},
     "sync": {"branch_prefix": "sync/", "paths": [".claude/skills/**", "scaffold/**"], "evidence": ["synced_from"]},
     "lanes": [
         {"name": "app", "paths": ["App/**", "*.xcodeproj/**", "**/*.xctestplan"], "evidence": ["gate_summary"]},
@@ -17,6 +17,37 @@ CONFIG = {
     "default": {"name": "docs", "evidence": []},
     "carryover_paths": [],
 }
+
+
+SMALL = dict(CONFIG, lanes=[CONFIG["lanes"][0], dict(
+    CONFIG["lanes"][1], evidence=["gate_summary", "review_verdict"],
+    small_pr={"max_changed_lines": 30, "evidence": ["gate_summary"]})])
+
+
+class SmallPrTests(unittest.TestCase):
+    def test_small_pipeline_pr_skips_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"], 29), ["gate_summary"])
+
+    def test_at_threshold_keeps_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"], 30),
+                         ["gate_summary", "review_verdict"])
+
+    def test_unknown_line_count_keeps_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"]),
+                         ["gate_summary", "review_verdict"])
+
+    def test_app_lane_pr_never_skips_review(self):
+        self.assertIn("review_verdict", lane.evidence_for_change(SMALL, "app", ["App/a.swift", "scripts/a.py"], 5))
+
+    def test_non_object_small_pr_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr=5)])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+
+    def test_bad_small_pr_config_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr={"max_changed_lines": 0})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
 
 
 class GlobMatchTests(unittest.TestCase):
@@ -57,6 +88,13 @@ class LaneForTests(unittest.TestCase):
         self.assertEqual(
             self.lane(["App/Model.swift", "CHANGELOG.md"], base="main", head="release/1.5.0",
                       release_changed=["CHANGELOG.md", "App.xcodeproj/project.pbxproj"]),
+            "release",
+        )
+
+    def test_release_lane_accepts_xcproj_version_bump(self):
+        self.assertEqual(
+            self.lane(["App.xcodeproj/project.xcproj", "CHANGELOG.md"], base="main", head="release/1.5.0",
+                      release_changed=["CHANGELOG.md", "App.xcodeproj/project.xcproj"]),
             "release",
         )
 

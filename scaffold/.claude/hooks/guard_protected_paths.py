@@ -51,6 +51,7 @@ import tempfile
 # Repo-relative globs. fnmatch's `*` also crosses `/`, so nested paths match.
 PROTECTED_GLOBS = (
     ".claude/skills/*/SKILL.md",
+    ".claude/skills/*/reference.md",
     "scripts/check_*",
     "AGENTS.md",
     "CLAUDE.md",
@@ -155,7 +156,7 @@ def is_protected_dir_prefix(rel_dir):
 # the dominant cost.
 _PROTECTED_FRAGMENTS = tuple(
     frag.lower() for frag in (
-        "skill.md", "scripts/check_", "agents.md", "claude.md",
+        "skill.md", "/reference.md", "scripts/check_", "agents.md", "claude.md",
         "invariants.md", "settings.json", ".claude/hooks/", "constraints.md",
         "pipeline_lanes.json", ".github/workflows/",
     )
@@ -649,6 +650,13 @@ def check_ci_list_in_step():
 
 def self_test():
     failures = 0
+    # Every protected glob must pass the substring pre-filter, or a Write/Edit to it exits early as
+    # unprotected (fail open). `*` becomes a sample name; a glob missing from _PROTECTED_FRAGMENTS fails here.
+    for g in PROTECTED_GLOBS:
+        sample = g.replace("*", "x").lower()
+        if not any(f in sample for f in _PROTECTED_FRAGMENTS):
+            print(f"FAIL  {g} is in PROTECTED_GLOBS but not in _PROTECTED_FRAGMENTS (edits to it skip the check)")
+            failures += 1
     with tempfile.TemporaryDirectory() as tmp:
         tmp = os.path.realpath(tmp)
         repos = {}

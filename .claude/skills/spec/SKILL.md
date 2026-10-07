@@ -94,7 +94,7 @@ Implementation details found in review that `/plan` decides, instead of more spe
 If the feature idea implies multiple independent subsystems, say so and suggest splitting into sub-specs.
 
 ## Project settings
-Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Rules tagged `[swiftdata]` apply only to that persistence, and `[swiftui]` / `[uikit]` only to that UI. Read "ViewModel" as Controller (mvc) or Presenter (viper).
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Apply the persistence and UI rules below for the configured values, not SwiftData and SwiftUI by default. Read "ViewModel" as Controller (mvc) or Presenter (viper).
 
 ## Architecture Rules (from AGENTS.md/CLAUDE.md — enforce in every spec)
 - Views contain no business logic

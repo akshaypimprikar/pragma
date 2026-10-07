@@ -122,3 +122,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.github/workflows/pr-checks.yml, scripts/check_file_registration.py
 **Caught by:** this review
+
+## 2026-10-07 — PR#116 — Project-settings detection scanned vendored dependency folders
+**What was wrong:** detect_project_settings.sh grepped the whole project dir, so Pods/ imports of SwiftUI/CoreData overrode the app's own sources and wrote wrong persistence/ui into pipeline_lanes.json without any error.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/detect_project_settings.sh:19
+**Caught by:** this review

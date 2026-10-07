@@ -11,14 +11,14 @@ set -euo pipefail
 PROJECT_DIR="$1"
 
 has_import() {
-    grep -rqE --include='*.swift' "^[[:space:]]*(@preconcurrency[[:space:]]+)?import $1\b" "$PROJECT_DIR" 2>/dev/null
+    grep -rqE --include='*.swift' --exclude-dir=Pods --exclude-dir=Carthage --exclude-dir=.build --exclude-dir=DerivedData --exclude-dir='*.xcframework' "^[[:space:]]*(@preconcurrency[[:space:]]+)?import $1\b" "$PROJECT_DIR" 2>/dev/null
 }
 
 if has_import SwiftData; then
     persistence=swiftdata
 elif has_import RealmSwift || grep -qiE "^[[:space:]]*pod[[:space:]]+['\"]Realm" "$PROJECT_DIR/Podfile" 2>/dev/null; then
     persistence=realm
-elif has_import CoreData || [[ -n "$(find "$PROJECT_DIR" -name '*.xcdatamodeld' -print -quit 2>/dev/null)" ]]; then
+elif has_import CoreData || [[ -n "$(find "$PROJECT_DIR" \( -name Pods -o -name Carthage -o -name .build -o -name DerivedData \) -prune -o -name '*.xcdatamodeld' -print -quit 2>/dev/null)" ]]; then
     persistence=coredata
 else
     persistence=none

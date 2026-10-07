@@ -48,7 +48,7 @@ xcodebuild test <BuildTarget> -scheme <AppName> \
 ```
 
 ## Project settings
-Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Rules tagged `[swiftdata]` apply only to that persistence, and `[swiftui]` / `[uikit]` only to that UI. Read "ViewModel" as Controller (mvc) or Presenter (viper).
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Apply the persistence and UI rules below for the configured values, not SwiftData and SwiftUI by default. Read "ViewModel" as Controller (mvc) or Presenter (viper).
 
 ## Architecture rules (from AGENTS.md/CLAUDE.md)
 - Domain Services: zero persistence-framework imports (SwiftData, CoreData, RealmSwift)

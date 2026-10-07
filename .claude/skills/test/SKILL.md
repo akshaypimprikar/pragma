@@ -20,7 +20,7 @@ Read `AGENTS.md/CLAUDE.md` first for build commands, simulator name, and test fr
 
 Also read `.claude/context/invariants.md` if it exists — skip silently if absent. Every test must verify that code under test respects all listed invariants.
 
-## Project settings
+### Project settings
 Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. For `ui: uikit`, or `persistence` other than swiftdata, also read `.claude/skills/test/uikit.md` (controller loading, in-memory Core Data). Read "ViewModel" as Controller (mvc) or Presenter (viper).
 
 ### Test framework

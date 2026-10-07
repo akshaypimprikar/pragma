@@ -103,6 +103,15 @@ class LayerPresetTests(unittest.TestCase):
                       {"architecture": "mvvm", "scoped_layer_dirs": ["/UseCases/"]})
         self.assertEqual(run_tdd(d).returncode, 1)
 
+    def test_string_layer_dirs_is_an_error(self):
+        d = self.repo([[VIPER_TEST]], {"scoped_layer_dirs": "Services"})
+        self.assertEqual(run_tdd(d).returncode, 2)
+
+    def test_malformed_config_is_an_error(self):
+        d = self.repo([[VIPER_TEST]], {"architecture": "viper"})
+        write(d, "scripts/pipeline_lanes.json", "{not json")
+        self.assertEqual(run_tdd(d).returncode, 2)
+
     def test_unknown_architecture_is_an_error(self):
         d = self.repo([[VIPER_TEST]], {"architecture": "clean"})
         self.assertEqual(run_tdd(d).returncode, 2)
@@ -146,6 +155,13 @@ class DetectTests(unittest.TestCase):
             write(d, "App/A.swift", "import UIKit\n")
             write(d, "App/Model.xcdatamodeld/contents", "")
             self.assertEqual(self.detect(d), "coredata uikit")
+
+    def test_pods_folder_is_ignored(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "App/A.swift", "import UIKit\n")
+            write(d, "Pods/X/B.swift", "import SwiftUI\nimport CoreData\n")
+            write(d, "Pods/Y/M.xcdatamodeld/contents", "")
+            self.assertEqual(self.detect(d), "none uikit")
 
     def test_realm_from_podfile(self):
         with tempfile.TemporaryDirectory() as d:

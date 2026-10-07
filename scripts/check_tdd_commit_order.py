@@ -35,13 +35,23 @@ ARCHITECTURE_PRESETS = {
 def load_scoped_layer_dirs(config_path):
     try:
         with open(config_path) as f:
-            project = json.load(f).get("project", {})
-    except (OSError, ValueError, AttributeError):
-        project = {}
-    custom = project.get("scoped_layer_dirs") if isinstance(project, dict) else None
+            config = json.load(f)
+    except FileNotFoundError:
+        return ARCHITECTURE_PRESETS["mvvm"]
+    except (OSError, ValueError) as e:
+        print(f"ERROR: cannot read {config_path}: {e}")
+        sys.exit(2)
+    project = config.get("project", {}) if isinstance(config, dict) else {}
+    if not isinstance(project, dict):
+        print("ERROR: 'project' in scripts/pipeline_lanes.json must be an object.")
+        sys.exit(2)
+    custom = project.get("scoped_layer_dirs")
     if custom:
+        if not isinstance(custom, list) or not all(isinstance(x, str) for x in custom):
+            print("ERROR: project.scoped_layer_dirs must be a list of strings.")
+            sys.exit(2)
         return tuple(custom)
-    arch = project.get("architecture", "mvvm") if isinstance(project, dict) else "mvvm"
+    arch = project.get("architecture", "mvvm")
     if arch not in ARCHITECTURE_PRESETS:
         print(f"ERROR: unknown project.architecture {arch!r}; use one of {sorted(ARCHITECTURE_PRESETS)} or set scoped_layer_dirs.")
         sys.exit(2)

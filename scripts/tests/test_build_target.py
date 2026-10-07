@@ -80,11 +80,14 @@ class NoHardCodedProjectTests(unittest.TestCase):
                 for n, line in enumerate(f, 1):
                     self.assertIsNone(HARD_CODED.search(line), f"{path}:{n}: {line.strip()}")
 
-    def test_pod_install_step_gated_on_podfile(self):
+    def test_pod_install_precedes_xcodebuild_in_every_job(self):
+        pod = "if: hashFiles('Podfile') != ''"
         for path in glob.glob(os.path.join(WORKFLOWS, "*.yml")):
-            text = open(path).read()
-            if re.search(r"^\s+xcodebuild ", text, re.M):
-                self.assertIn("if: hashFiles('Podfile') != ''", text, path)
+            jobs = re.split(r"^  [a-z][a-z-]*:$", open(path).read(), flags=re.M)[1:]
+            for job in jobs:
+                xcb = re.search(r"^\s+xcodebuild ", job, re.M)
+                if xcb:
+                    self.assertIn(pod, job[: xcb.start()], f"{path}: job runs xcodebuild without a prior gated pod install")
 
 
 if __name__ == "__main__":

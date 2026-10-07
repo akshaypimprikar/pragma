@@ -23,7 +23,16 @@ abort 'usage: register_files.rb [--check] PROJECT_DIR APP_NAME FILE...' if dir.n
 mode, reason, = Open3.capture3(File.join(__dir__, 'detect_file_registration.sh'), dir, app)
 mode = mode.strip
 root = Pathname.new(File.expand_path(dir))
-files = files.map { |f| File.expand_path(f) }
+files = files.map { |f| File.expand_path(f) }.select { |f| f.end_with?('.swift') }
+if files.empty?
+  warn 'no .swift files given: nothing to register.'
+  exit 0
+end
+outside = files.reject { |f| Pathname.new(f).relative_path_from(root).each_filename.first != '..' }
+unless outside.empty?
+  warn "outside the project directory (#{root}): #{outside.join(', ')}. Stop and ask the human."
+  exit 3
+end
 
 unless %w[classic xcproj].include?(mode)
   warn(mode == 'synchronized' ? 'project uses synchronized groups: new files compile without registration.' : reason.to_s.strip)
@@ -160,6 +169,11 @@ class Xcproj
   # Inserts `entry` (a block of text lines) before the closing bracket of `arr`.
   def append(arr, entry)
     close = arr.e - 1
+    last = @text.rindex(/\S/, close - 1)
+    if last && @text[last] !~ /[\[,]/ # the previous item lacks its comma
+      @text.insert(last + 1, ',')
+      close += 1
+    end
     line_start = @text.rindex("\n", close - 1)
     if line_start.nil? || @text[line_start + 1...close] !~ /\A\s*\z/
       raise ParseError, 'array is not laid out one item per line'
@@ -170,29 +184,43 @@ class Xcproj
     reparse
   end
 
-  def find_group(arr, name)
-    arr.items.find { |it| group?(it) && (str(it, 'path') == name || str(it, 'name') == name) }
+  # The group in `arr` whose path or name covers the front of `comps` (a group path
+  # may have several components, "Sources/App"), with how many components it covers.
+  def find_group(arr, comps)
+    best = [nil, 0]
+    arr.items.each do |it|
+      next unless group?(it)
+      [str(it, 'path'), str(it, 'name')].compact.each do |key|
+        parts = key.split('/')
+        best = [it, parts.length] if comps.first(parts.length) == parts && parts.length > best[1]
+      end
+    end
+    best
   end
 
-  # The children array reached by walking the group names from the top, or nil.
-  def children_at(names)
+  # The deepest children array reached by walking `comps` from the top, and how many
+  # components that consumed.
+  def walk(comps)
     arr = files_array
-    names.each do |name|
-      group = find_group(arr, name)
-      return nil unless group
+    used = 0
+    while used < comps.length
+      group, n = find_group(arr, comps[used..-1])
+      break unless group
       arr = get(group, 'children')
+      used += n
     end
-    arr
+    [arr, used]
   end
 
   def add_file(abs, root, target)
     rel = Pathname.new(abs).relative_path_from(root)
     comps = rel.dirname.each_filename.reject { |c| c == '.' }
-    comps.each_index do |i|
-      next if children_at(comps[0..i])
-      append(children_at(comps[0...i]), ['{', '  "kind": "group",', "  \"path\": #{comps[i].to_json},", '  "children": [', '  ],', '},'])
+    loop do
+      arr, used = walk(comps)
+      break if used == comps.length
+      append(arr, ['{', '  "kind": "group",', "  \"path\": #{comps[used].to_json},", '  "children": [', '  ],', '},'])
     end
-    append(children_at(comps), ["{ \"path\": #{rel.basename.to_s.to_json}, \"index\": true, \"target-membership\": [ #{(target + '/compile-sources').to_json} ] },"])
+    append(walk(comps).first, ["{ \"path\": #{rel.basename.to_s.to_json}, \"index\": true, \"target-membership\": [ #{(target + '/compile-sources').to_json} ] },"])
   end
 end
 
@@ -206,7 +234,13 @@ if mode == 'xcproj'
       todo.each { |f| puts f }
       exit(todo.empty? ? 0 : 1)
     end
-    todo.each { |abs| proj.add_file(abs, root, target_for(abs, root, app, proj.target_names)) }
+    plan = todo.map { |abs| [abs, target_for(abs, root, app, proj.target_names)] }
+    missing = plan.map(&:last).uniq - proj.target_names
+    unless missing.empty?
+      warn "no target named #{missing.join(', ')} in #{path}: pass the app target's name as APP_NAME. Stop and ask the human."
+      exit 3
+    end
+    plan.each { |abs, target| proj.add_file(abs, root, target) }
     File.write(path, proj.text) unless todo.empty?
   rescue Xcproj::ParseError => e
     warn "cannot use #{path}: #{e.message}"
@@ -237,14 +271,37 @@ if check
 end
 
 names = project.targets.map(&:name)
-todo.each do |abs|
-  name = target_for(abs, root, app, names)
-  target = project.targets.find { |t| t.name == name } || project.targets.first
+plan = todo.map { |abs| [abs, target_for(abs, root, app, names)] }
+missing = plan.map(&:last).uniq - names
+unless missing.empty?
+  warn "no target named #{missing.join(', ')} in #{app}.xcodeproj: pass the app target's name as APP_NAME. Stop and ask the human."
+  exit 3
+end
+plan.each do |abs, name|
+  target = project.targets.find { |t| t.name == name }
+  comps = Pathname.new(abs).relative_path_from(root).dirname.each_filename.reject { |c| c == '.' }
   group = project.main_group
-  Pathname.new(abs).relative_path_from(root).dirname.each_filename do |comp|
-    next if comp == '.'
-    group = group.children.find { |c| c.isa == 'PBXGroup' && (c.path == comp || c.name == comp) } ||
-            group.new_group(comp, comp)
+  i = 0
+  while i < comps.length
+    found = nil
+    used = 0
+    group.children.each do |c|
+      next unless c.isa == 'PBXGroup'
+      [c.path, c.name].compact.each do |key|
+        parts = key.split('/')
+        if comps[i, parts.length] == parts && parts.length > used
+          found = c
+          used = parts.length
+        end
+      end
+    end
+    if found
+      group = found
+      i += used
+    else
+      group = group.new_group(comps[i], comps[i])
+      i += 1
+    end
   end
   target.add_file_references([group.new_file(abs)])
 end

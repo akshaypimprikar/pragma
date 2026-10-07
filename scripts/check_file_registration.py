@@ -24,6 +24,11 @@ def main():
     ap.add_argument("files", nargs="*")
     args = ap.parse_args()
 
+    swift = [f for f in args.files if f.endswith(".swift")]
+    if not swift:
+        print("no new .swift files: nothing to check")
+        return 0
+
     detect = subprocess.run(
         [os.path.join(HERE, "detect_file_registration.sh"), args.project_dir, args.app_name],
         capture_output=True, text=True,
@@ -47,9 +52,6 @@ def main():
         print(f"xcodebuild -list failed: {listing.stderr.strip()[-300:]}")
         return 1
 
-    swift = [f for f in args.files if f.endswith(".swift")]
-    if not swift:
-        return 0
     chk = subprocess.run(
         ["ruby", os.path.join(HERE, "register_files.rb"), "--check", args.project_dir, args.app_name, *swift],
         capture_output=True, text=True,

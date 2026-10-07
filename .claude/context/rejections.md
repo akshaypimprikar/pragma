@@ -86,3 +86,39 @@
 **Rule violated:** No formal rule, caught in review (a test that cannot fail on the defect it names).
 **File:** `scripts/tests/test_build_target.py:86`
 **Caught by:** this review (round 1)
+
+## 2026-10-07 — PR#112 — Invalid .xcproj after insert
+**What was wrong:** Inserting into a children array whose last item had no trailing comma wrote two adjacent objects with no comma between them.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/register_files.rb (append)
+**Caught by:** this review
+
+## 2026-10-07 — PR#112 — Duplicate group for multi-component path
+**What was wrong:** A group whose path has several components (Sources/App) was not matched, so a second Sources > App tree was created.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/register_files.rb (classic loop, find_group)
+**Caught by:** this review
+
+## 2026-10-07 — PR#112 — File outside project / non-Swift registered
+**What was wrong:** A file outside PROJECT_DIR created a group named `..`, and any argument (md, png) was added to Sources.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/register_files.rb (add_file)
+**Caught by:** this review
+
+## 2026-10-07 — PR#112 — Silent fallback to first target
+**What was wrong:** An APP_NAME with no matching target registered files in the first target (classic) or wrote a membership for a nonexistent target (.xcproj).
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/register_files.rb (target selection)
+**Caught by:** this review
+
+## 2026-10-07 — PR#112 — Mixed projects treated as synchronized
+**What was wrong:** A project with synchronized and classic groups was classified synchronized, so the gate skipped and new files in the classic part were never registered.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/detect_file_registration.sh
+**Caught by:** this review
+
+## 2026-10-07 — PR#112 — PR check step unsafe for odd paths and empty lists
+**What was wrong:** Unquoted word-split of git diff output, step failed every PR in a stop-mode project when no Swift file was new, and renamed files were not checked.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.github/workflows/pr-checks.yml, scripts/check_file_registration.py
+**Caught by:** this review

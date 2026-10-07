@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 
-CITATION = re.compile(r"^(?:[^\w.`]|\d+[.)]|\[[^\]]*\])*`?([A-Za-z0-9_.][A-Za-z0-9_./-]*):(\d+)(?:-(\d+))?`?")
+CITATION = re.compile(r"^(?:[^\w.`]|\d+[.)]\s|\[[^\]]*\])*`?([A-Za-z0-9_.][A-Za-z0-9_./-]*):(\d+)(?:-(\d+))?`?")
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 

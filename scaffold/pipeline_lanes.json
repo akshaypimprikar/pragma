@@ -39,7 +39,7 @@
       "evidence": ["gate_summary", "review_verdict", "motivating_incident"],
       "small_pr": {
         "max_changed_lines": 30,
-        "exclude_paths": [".claude/hooks/**", ".claude/skills/gates/**", ".claude/skills/review/**", "scripts/check_*", "scripts/pipeline_lanes.json", "scaffold/pipeline_lanes.json", "scaffold/.claude/hooks/**", ".github/**"],
+        "exclude_paths": [".claude/hooks/**", ".claude/skills/gates/**", ".claude/skills/review/**", "scripts/check_*", "scripts/review_verdict.py", "scripts/install_*", "scripts/pipeline_lanes.json", "scaffold/pipeline_lanes.json", "scaffold/.claude/hooks/**", ".github/**"],
         "evidence": ["gate_summary", "motivating_incident"]
       }
     }

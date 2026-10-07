@@ -64,6 +64,9 @@ class FormatTests(unittest.TestCase):
         for line in ("1. a.py:4 text", "[MEDIUM] a.py:4 text", "- **a.py:4** text", "2) `a.py:4` text"):
             self.assertEqual(fl.classify(line, ranges)[0], "INSIDE", line)
 
+    def test_numeric_path_is_not_eaten_by_list_marker(self):
+        self.assertEqual(fl.classify("12.5:3 text", {})[1], "12.5:3")
+
     def test_path_with_trailing_tab_in_header(self):
         ranges = fl.changed_ranges("+++ b/my file.py\t\n@@ -1 +1 @@\n")
         self.assertEqual(ranges, {"my file.py": [(1, 1)]})

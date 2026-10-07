@@ -49,7 +49,7 @@ Gates 3–11 still scope their own greps to `*.swift` where they say so.
 ### Gate 1 — Build (conditional: Gate 0 listed files)
 ```bash
 LOG=$(mktemp -t gate1-build)
-xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild build <BuildTarget> -scheme <AppName> \
   -configuration Debug -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
@@ -64,7 +64,7 @@ Xcode 27 SDK-break advisory: `reference.md` § Gate 1.
 ### Gate 2 — Full test suite (conditional: Gate 0 listed files)
 ```bash
 LOG=$(mktemp -t gate2-test)
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"

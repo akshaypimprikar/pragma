@@ -47,6 +47,10 @@ jobs:
         with:
           xcode-version: '~26.4'
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
       - name: Unit tests under ThreadSanitizer
         run: |
           set -o pipefail
@@ -54,7 +58,7 @@ jobs:
           echo "Selected simulator: $SIM_ID"
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -skip-testing:YOUR_PROJECTUITests \
@@ -82,7 +86,7 @@ jobs:
           set -o pipefail
           SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
           xcodebuild build \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             SWIFT_STRICT_CONCURRENCY=complete \

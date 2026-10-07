@@ -40,7 +40,7 @@ Build-input files count as changes even though they are not source code: a build
 Swift/Xcode example:
 ```bash
 LOG=$(mktemp -t build)
-xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild build <BuildTarget> -scheme <AppName> \
   -configuration Debug -destination 'platform=<simulator platform>,name=<simulator>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"

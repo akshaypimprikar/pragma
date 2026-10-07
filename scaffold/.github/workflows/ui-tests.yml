@@ -45,6 +45,10 @@ jobs:
           restore-keys: |
             deriveddata-ui-${{ runner.os }}-
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
       - name: Run UI tests
         run: |
           set -o pipefail
@@ -54,7 +58,7 @@ jobs:
           # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -only-testing:YOUR_PROJECTUITests \

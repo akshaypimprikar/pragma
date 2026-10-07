@@ -31,7 +31,7 @@ Before changing any production code, write a test that:
 
 Run it to confirm it fails:
 ```bash
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   -only-testing:<AppName>Tests/<SuiteName>/<testName> \
   2>&1 | grep -E "Test.*passed|Test.*failed|BUILD"
@@ -46,7 +46,7 @@ Change only what's needed to make the failing test pass. Do not refactor, rename
 - Run the new test — must pass
 - Run the full test suite — must all pass, no regressions:
 ```bash
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   2>&1 | grep -E "TEST SUCCEEDED|TEST FAILED"
 ```

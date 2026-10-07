@@ -18,6 +18,7 @@ REGISTER = os.path.join(ROOT, "scripts", "register_files.rb")
 CHECK = os.path.join(ROOT, "scripts", "check_file_registration.py")
 
 HAS_GEM = subprocess.run(["ruby", "-e", "require 'xcodeproj'"], capture_output=True).returncode == 0
+HAS_APPLE_TOOLS = shutil.which("plutil") is not None and shutil.which("xcodebuild") is not None
 
 MAKE_PROJECT = """
 require 'xcodeproj'
@@ -56,6 +57,8 @@ def xcproj_env():
                                 os.path.join(probe, "App.xcodeproj")], capture_output=True, env=env)
             if r.returncode == 0:
                 return env
+        except OSError:  # no xcodebuild on this machine (Linux CI)
+            return None
         finally:
             shutil.rmtree(probe, True)
     return None
@@ -235,7 +238,7 @@ class XcprojRegisterTests(TempDirCase):
         self.assertEqual(r.returncode, 1)
 
 
-@unittest.skipUnless(HAS_GEM, "xcodeproj gem not installed")
+@unittest.skipUnless(HAS_GEM and HAS_APPLE_TOOLS, "needs the xcodeproj gem, plutil and xcodebuild")
 class GateTests(TempDirCase):
     def gate(self, *files):
         return subprocess.run(

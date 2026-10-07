@@ -24,10 +24,12 @@ Run Gate 0 through Gate 10 below in order, then report the Gate summary. Not eve
 ## Gate 0 — Change scope check (runs first)
 
 ```bash
-git diff <base-branch>...HEAD --name-only -- '<source file extension(s), e.g. *.swift or *.py *.ts>'
+git diff <base-branch>...HEAD --name-only -- '<source file extension(s), e.g. *.swift or *.py *.ts>' '<build-input patterns, see below>'
 ```
 
-If this returns no output, no source code changed on this branch — skip the Build and Test gates below and continue from Gate 2. If source files are listed, run Build and Test as normal. This is what lets a docs-only or config-only PR skip an expensive build/test cycle without skipping it silently.
+If this returns no output, nothing that affects the build or tests changed on this branch — skip the Build and Test gates below and continue from Gate 3. If any file is listed, run Build and Test as normal. This is what lets a docs-only PR skip an expensive build/test cycle without skipping it silently.
+
+Build-input files count as changes even though they are not source code: a build-setting change (e.g. `SWIFT_VERSION` or a default actor-isolation setting) can break the build or change runtime behavior without touching a source file. Add every build input your project has to the pathspec. Swift/Xcode: `'*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan'`. Match the project and workspace bundles whole, not by file extension, so `project.pbxproj`, the `project.xcproj` that `xcodebuild -convert-project xcproj` produces, shared schemes and later-added files all count. Node/Python: `package.json` and lockfiles, `tsconfig*.json`, `pyproject.toml`, `requirements*.txt`. Mirrors Gate 0 in `gates/SKILL.md`.
 
 ## Gate 1 — Build (conditional: source files changed)
 

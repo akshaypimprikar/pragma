@@ -475,6 +475,8 @@ class GateEmptyListTests(TempDirCase):
         self.assertIn("git diff -z", step)          # NUL-separated: spaces and non-ASCII survive
         self.assertIn('"${NEW[@]}"', step)          # quoted array, no word splitting
         self.assertIn("--diff-filter=AR", step)     # moved files count
+        self.assertNotIn("< <(git diff", step)      # a git failure inside <( ) is invisible to bash -e (fail-open)
+        self.assertIn('> "$RUNNER_TEMP/', step)     # diff goes to a file first, so its failure fails the step
         self.assertRegex(step, r"\$\{#NEW\[@\]\}")  # skips when nothing is new
 
 

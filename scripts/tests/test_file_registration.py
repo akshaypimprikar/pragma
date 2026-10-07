@@ -6,7 +6,9 @@ fails when a new .swift file is not registered. Fixtures are built with the gem,
 the gem-backed tests skip where it is not installed (macOS system Ruby + CocoaPods
 projects have it; a bare machine may not).
 """
+import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -33,6 +35,7 @@ if mode == 'synchronized'
   group.path = 'App'
   group.source_tree = '<group>'
   project.main_group << group
+  target.file_system_synchronized_groups << group
 else
   group = project.main_group.new_group('App', 'App')
   target.add_file_references([group.new_file('A.swift')])
@@ -274,6 +277,205 @@ class GateTests(TempDirCase):
         with open(os.path.join(self.d, "App.xcodeproj", "project.pbxproj"), "a") as f:
             f.write("}}}}")
         self.assertEqual(self.gate(add_swift(self.d)).returncode, 1)
+
+
+HAS_RUBY = shutil.which("ruby") is not None
+
+XCPROJ_TEMPLATE = """{
+  "files": [
+    {
+      "kind": "group",
+      "path": "%(group_path)s",
+      "children": [
+%(children)s
+      ],
+    },
+  ],
+  "targets": [
+    { "name": "%(target)s" },
+  ],
+}
+"""
+
+
+def write_xcproj(d, children='{ "path": "A.swift", "index": true, "target-membership": [ "App/compile-sources" ] },',
+                 group_path="App", target="App"):
+    """A minimal hand-written project.xcproj (relaxed JSON), so these tests need no Xcode 27.2."""
+    bundle = os.path.join(d, "App.xcodeproj")
+    os.makedirs(bundle, exist_ok=True)
+    os.makedirs(os.path.join(d, *group_path.split("/")), exist_ok=True)
+    with open(os.path.join(bundle, "project.xcproj"), "w") as f:
+        f.write(XCPROJ_TEMPLATE % {"children": children, "group_path": group_path, "target": target})
+    return os.path.join(bundle, "project.xcproj")
+
+
+def strict_json(path):
+    """The .xcproj text with trailing commas removed, parsed as strict JSON."""
+    with open(path) as f:
+        text = f.read()
+    return json.loads(re.sub(r",(\s*[\]}])", r"\1", text))
+
+
+def run_register(d, *args, check=False):
+    cmd = ["ruby", REGISTER] + (["--check"] if check else []) + [d, "App", *args]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+@unittest.skipUnless(HAS_RUBY, "ruby not installed")
+class XcprojTextEditTests(TempDirCase):
+    def test_last_item_without_trailing_comma_stays_valid(self):
+        path = write_xcproj(self.d, '{ "path": "A.swift", "index": true, "target-membership": [ "App/compile-sources" ] }')
+        self.assertEqual(run_register(self.d, add_swift(self.d)).returncode, 0)
+        names = [c["path"] for c in strict_json(path)["files"][0]["children"]]
+        self.assertEqual(names, ["A.swift", "B.swift"])
+
+    def test_multi_component_group_path_is_not_duplicated(self):
+        path = write_xcproj(self.d, '{ "path": "A.swift", "index": true, "target-membership": [ "App/compile-sources" ] },',
+                            group_path="Sources/App")
+        os.makedirs(os.path.join(self.d, "Sources", "App", "Sub"))
+        q = os.path.join(self.d, "Sources", "App", "Sub", "Q.swift")
+        open(q, "w").write("struct Q {}\n")
+        self.assertEqual(run_register(self.d, q).returncode, 0)
+        files = strict_json(path)["files"]
+        self.assertEqual(len(files), 1)
+        sub = [c for c in files[0]["children"] if c.get("path") == "Sub"]
+        self.assertEqual(len(sub), 1)
+        self.assertEqual(run_register(self.d, q, check=True).returncode, 0)
+
+    def test_file_outside_project_is_refused(self):
+        write_xcproj(self.d)
+        outside = os.path.join(os.path.dirname(self.d), "outside_" + os.path.basename(self.d) + ".swift")
+        open(outside, "w").write("x\n")
+        self.addCleanup(os.remove, outside)
+        r = run_register(self.d, outside)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("outside", r.stderr)
+
+    def test_non_swift_arguments_are_ignored(self):
+        path = write_xcproj(self.d)
+        notes = os.path.join(self.d, "App", "notes.md")
+        open(notes, "w").write("x\n")
+        self.assertEqual(run_register(self.d, notes).returncode, 0)
+        names = [c["path"] for c in strict_json(path)["files"][0]["children"]]
+        self.assertEqual(names, ["A.swift"])
+
+    def test_unknown_target_stops(self):
+        write_xcproj(self.d, target="Other")
+        r = run_register(self.d, add_swift(self.d))
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("target", r.stderr)
+
+    def test_mixed_folder_and_classic_files_stop(self):
+        path = write_xcproj(self.d)
+        with open(path) as f:
+            text = f.read()
+        with open(path, "w") as f:
+            f.write(text.replace('  "targets"', '  { "kind": "folder", "path": "Other", "target-membership": [ "App" ] },\n  "targets"', 1)
+                    .replace('    },\n  ],\n  "targets"', '    },\n    { "kind": "folder", "path": "Other", "target-membership": [ "App" ] },\n  ],\n  "targets"', 1))
+        code, out, err = detect(self.d)
+        self.assertEqual(out, "stop")
+        self.assertIn("mixed", err)
+
+
+@unittest.skipUnless(HAS_GEM, "xcodeproj gem not installed")
+class ClassicEdgeTests(TempDirCase):
+    def test_multi_component_group_path_is_not_duplicated(self):
+        make_project(self.d)
+        subprocess.run(["ruby", "-e", """
+require 'xcodeproj'
+Dir.chdir(ARGV[0])
+p = Xcodeproj::Project.open('App.xcodeproj')
+g = p.main_group.children.find { |c| c.path == 'App' }
+g.path = 'Sources/App'
+FileUtils.mkdir_p('Sources/App/Sub')
+FileUtils.mv('App/A.swift', 'Sources/App/A.swift')
+p.save
+""", self.d], check=True)
+        q = os.path.join(self.d, "Sources", "App", "Sub", "Q.swift")
+        open(q, "w").write("struct Q {}\n")
+        self.assertEqual(run_register(self.d, q).returncode, 0)
+        groups = subprocess.run(["ruby", "-e", """
+require 'xcodeproj'
+p = Xcodeproj::Project.open(File.join(ARGV[0], 'App.xcodeproj'))
+puts p.main_group.children.select { |c| c.isa == 'PBXGroup' }.map { |c| c.path || c.name }.grep(/App/)
+""", self.d], capture_output=True, text=True).stdout.split()
+        self.assertEqual(groups, ["Sources/App"])
+        self.assertEqual(run_register(self.d, q, check=True).returncode, 0)
+
+    def test_file_outside_project_is_refused(self):
+        make_project(self.d)
+        outside = os.path.join(os.path.dirname(self.d), "outside_" + os.path.basename(self.d) + ".swift")
+        open(outside, "w").write("x\n")
+        self.addCleanup(os.remove, outside)
+        r = run_register(self.d, outside)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("outside", r.stderr)
+
+    def test_non_swift_arguments_are_ignored(self):
+        make_project(self.d)
+        notes = os.path.join(self.d, "App", "notes.md")
+        open(notes, "w").write("x\n")
+        self.assertEqual(run_register(self.d, notes).returncode, 0)
+        with open(os.path.join(self.d, "App.xcodeproj", "project.pbxproj")) as f:
+            self.assertNotIn("notes.md", f.read())
+
+    def test_unknown_target_stops(self):
+        make_project(self.d)
+        subprocess.run(["ruby", "-e", """
+require 'xcodeproj'
+path = File.join(ARGV[0], 'App.xcodeproj')
+p = Xcodeproj::Project.open(path)
+p.targets.first.name = 'Other'
+p.save
+""", self.d], check=True)
+        r = run_register(self.d, add_swift(self.d))
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("target", r.stderr)
+
+    def test_synchronized_target_plus_classic_target_is_mixed(self):
+        make_project(self.d, "synchronized")
+        subprocess.run(["ruby", "-e", """
+require 'xcodeproj'
+path = File.join(ARGV[0], 'App.xcodeproj')
+p = Xcodeproj::Project.open(path)
+p.new_target(:unit_test_bundle, 'AppTests', :ios, '17.0')
+p.save
+""", self.d], check=True)
+        code, out, err = detect(self.d)
+        self.assertEqual(out, "stop")
+        self.assertIn("mixed", err)
+
+    def test_synchronized_target_with_classic_sources_is_mixed(self):
+        make_project(self.d, "synchronized")
+        subprocess.run(["ruby", "-e", """
+require 'xcodeproj'
+Dir.chdir(ARGV[0])
+p = Xcodeproj::Project.open('App.xcodeproj')
+File.write('Extra.swift', "struct E {}\\n")
+p.targets.first.add_file_references([p.main_group.new_file('Extra.swift')])
+p.save
+""", self.d], check=True)
+        self.assertEqual(detect(self.d)[1], "stop")
+
+
+class GateEmptyListTests(TempDirCase):
+    def test_no_new_files_passes_even_in_stop_mode(self):
+        os.makedirs(os.path.join(self.d, "App.xcodeproj"))
+        open(os.path.join(self.d, "project.yml"), "w").close()
+        r = subprocess.run(["python3", CHECK, "--project-dir", self.d, "--app-name", "App"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0)
+
+    def test_workflow_step_is_safe_for_odd_paths(self):
+        path = os.path.join(ROOT, "scaffold", ".github", "workflows", "pr-checks.yml")
+        with open(path) as f:
+            text = f.read()
+        step = text[text.index("Check new Swift files are registered"):]
+        step = step[:step.index("\n      - name:", 10)] if "\n      - name:" in step[10:] else step
+        self.assertIn("git diff -z", step)          # NUL-separated: spaces and non-ASCII survive
+        self.assertIn('"${NEW[@]}"', step)          # quoted array, no word splitting
+        self.assertIn("--diff-filter=AR", step)     # moved files count
+        self.assertRegex(step, r"\$\{#NEW\[@\]\}")  # skips when nothing is new
 
 
 if __name__ == "__main__":

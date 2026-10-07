@@ -59,13 +59,22 @@ jobs:
             -destination "id=$SIM_ID" \
             -skip-testing:YOUR_PROJECTUITests \
             -enableThreadSanitizer YES \
+            -resultBundlePath tsan.xcresult \
             2>&1 | tee tsan.log
 
       - name: Summarize ThreadSanitizer result
         if: always()
         run: |
-          reports=$(grep -c "WARNING: ThreadSanitizer" tsan.log || true)
-          echo "ThreadSanitizer unit-test run: $reports report(s) (the previous step's exit status decides pass/fail)" | tee -a "$GITHUB_STEP_SUMMARY"
+          # TSan writes its reports to the test process's stderr, which xcodebuild does
+          # not echo into tsan.log; the result bundle keeps that stream per test run.
+          # No stdout files means nothing was read, so say so rather than print 0.
+          if [ -d tsan.xcresult ] && xcrun xcresulttool export diagnostics --path tsan.xcresult --output-path tsan-diagnostics > /dev/null \
+            && [ -n "$(find tsan-diagnostics -name StandardOutputAndStandardError.txt)" ]; then
+            reports=$({ find tsan-diagnostics -name StandardOutputAndStandardError.txt -exec grep -h "WARNING: ThreadSanitizer" {} + || true; } | wc -l | tr -d ' ')
+            echo "ThreadSanitizer unit-test run: $reports report(s) (the previous step's exit status decides pass/fail)" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ThreadSanitizer unit-test run: report count unavailable (no test output in the result bundle)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Build with strict concurrency
         if: always()

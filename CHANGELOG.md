@@ -9,6 +9,7 @@ All notable changes to this project are documented in this file.
 - **README Quick Start shows a one-command terminal install.** `claude plugin install pragma --marketplace akshaypimprikar/pragma` adds the marketplace and installs the plugin. It needs Claude Code 2.1.292 or later.
 
 ### Fixed
+- **Concurrency Advisory always reported 0 ThreadSanitizer reports.** TSan writes to the test process's stderr, not to `tsan.log`. The scaffold workflow now saves a result bundle and counts reports from its test output; it says "report count unavailable" when no output was captured (mirrors FinanceTracker #156).
 - **Gate 0 missed build-setting changes in an `.xcproj` project (#100).** The Xcode 27.2 beta (27B5028f) can convert a project to the `.xcproj` format, which replaces `project.pbxproj`. Gate 0 matched only `*.pbxproj`, so a build-setting change in `project.xcproj` (for example `SWIFT_VERSION`) skipped build and test. The filter now includes `*.xcproj`.
 
 ## [2.1.1] — 2026-09-30

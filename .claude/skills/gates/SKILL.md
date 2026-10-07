@@ -36,8 +36,8 @@ the SHA, because the gate summary must describe the commit that actually opens t
 GATE0="$(git rev-parse --git-dir)/gate0-$(git rev-parse HEAD)"   # untracked, so the tree stays clean
 git diff develop...HEAD --name-only -- '*.swift' '*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan' | tee "$GATE0"
 ```
-This is the only copy of the build-relevance list: later steps that depend on Gate 0 read `$GATE0` (the file is named
-after the pinned SHA, so a stale result from another commit is never read) instead of repeating it.
+This is the only copy of the build-relevance list. `$GATE0` keeps the result for the pinned SHA (the file is named
+after it, so a stale result from another commit is never read); Gates 1 and 2 are conditional on this listing, so do not repeat the list.
 If this returns **no output**, skip Gates 1 and 2 — nothing that affects the build or test suite changed. Continue from Gate 3.
 If any file is listed, run Gates 1 and 2 as normal. Project, config, plist, entitlement and
 package-manifest, scheme and test-plan changes are included on purpose (a test-plan edit changes which tests run; add any other build input your project has — asset or string catalogs, data models): a build-setting change (e.g. a default actor-isolation

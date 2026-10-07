@@ -41,7 +41,7 @@
       ],
       "small_pr": {
         "max_changed_lines": 30,
-        "evidence": ["gate_summary", "motivating_incident"]
+        "evidence": ["motivating_incident"]
       }
     }
   ],

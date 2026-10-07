@@ -39,6 +39,31 @@ class SmallPrTests(unittest.TestCase):
     def test_app_lane_pr_never_skips_review(self):
         self.assertIn("review_verdict", lane.evidence_for_change(SMALL, "app", ["App/a.swift", "scripts/a.py"], 5))
 
+    def test_small_pr_keeps_evidence_another_lane_owes(self):
+        cfg = dict(SMALL, lanes=[{"name": "other", "paths": ["x/**"], "evidence": ["code_review"]}, SMALL["lanes"][1]])
+        self.assertEqual(lane.evidence_for_change(cfg, "pipeline", ["x/b", "scripts/a.py"], 5),
+                         ["gate_summary", "code_review"])
+
+    def test_small_pr_touching_excluded_path_keeps_review(self):
+        cfg = dict(SMALL, lanes=[SMALL["lanes"][0], dict(
+            SMALL["lanes"][1], small_pr={"max_changed_lines": 30, "evidence": ["gate_summary"],
+                                         "exclude_paths": ["scripts/check_*"]})])
+        self.assertIn("review_verdict", lane.evidence_for_change(cfg, "pipeline", ["scripts/check_x.py"], 5))
+        self.assertEqual(lane.evidence_for_change(cfg, "pipeline", ["scripts/other.py"], 5), ["gate_summary"])
+
+    def test_bool_max_changed_lines_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr={"max_changed_lines": True})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+
+    def test_bad_exclude_paths_and_carryover_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(
+            SMALL["lanes"][1], small_pr={"max_changed_lines": 30, "exclude_paths": "scripts/**"})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(dict(SMALL, review_carryover_paths="docs/*.md"))
+
     def test_non_object_small_pr_rejected(self):
         bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr=5)])
         with self.assertRaises(lane.ConfigError):

@@ -41,6 +41,7 @@
       ],
       "small_pr": {
         "max_changed_lines": 30,
+        "exclude_paths": [".claude/hooks/**", ".claude/skills/gates/**", ".claude/skills/review/**", "scripts/check_*", "scripts/pipeline_lanes.json", "scaffold/pipeline_lanes.json", "scaffold/.claude/hooks/**", ".github/**"],
         "evidence": ["motivating_incident"]
       }
     }

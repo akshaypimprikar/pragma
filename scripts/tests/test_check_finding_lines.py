@@ -57,5 +57,16 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual(fl.classify("no citation here", self.ranges)[0], "UNCITED")
 
 
+
+class FormatTests(unittest.TestCase):
+    def test_list_and_bracket_prefixes_are_cited(self):
+        ranges = {"a.py": [(4, 5)]}
+        for line in ("1. a.py:4 text", "[MEDIUM] a.py:4 text", "- **a.py:4** text", "2) `a.py:4` text"):
+            self.assertEqual(fl.classify(line, ranges)[0], "INSIDE", line)
+
+    def test_path_with_trailing_tab_in_header(self):
+        ranges = fl.changed_ranges("+++ b/my file.py\t\n@@ -1 +1 @@\n")
+        self.assertEqual(ranges, {"my file.py": [(1, 1)]})
+
 if __name__ == "__main__":
     unittest.main()

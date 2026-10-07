@@ -89,11 +89,18 @@ def validate_config(config):
         if small is not None:
             if not isinstance(small, dict):
                 raise ConfigError(f"lane '{name}' small_pr must be an object")
-            if not isinstance(small.get("max_changed_lines"), int) or small["max_changed_lines"] < 1:
+            n = small.get("max_changed_lines")
+            if type(n) is not int or n < 1:
                 raise ConfigError(f"lane '{name}' small_pr needs a positive integer 'max_changed_lines'")
             unknown = set(small.get("evidence", [])) - EVIDENCE_ITEMS
             if unknown:
                 raise ConfigError(f"lane '{name}' small_pr lists unknown evidence: {sorted(unknown)}")
+            excluded = small.get("exclude_paths", [])
+            if not isinstance(excluded, list) or not all(isinstance(x, str) for x in excluded):
+                raise ConfigError(f"lane '{name}' small_pr 'exclude_paths' must be a list of strings")
+    carry = config.get("review_carryover_paths", [])
+    if not isinstance(carry, list) or not all(isinstance(x, str) for x in carry):
+        raise ConfigError("'review_carryover_paths' must be a list of strings")
     if "sync" in config and not config["sync"].get("branch_prefix"):
         raise ConfigError("'sync' needs a 'branch_prefix'")
     return config
@@ -144,7 +151,8 @@ def evidence_for_change(config, lane_name, changed, changed_lines=None):
     A lane with `small_pr` swaps in the `small_pr` evidence (no model review) when
     `changed_lines` (additions plus deletions) is below `max_changed_lines`. Only a
     PR laned by that lane can qualify, and a PR with an app path is laned `app`, so
-    a small PR never skips review on app code.
+    a small PR never skips review on app code. A PR touching a path in the lane's
+    `small_pr.exclude_paths` (the files that enforce the rules) never qualifies.
 
     The lane rank decides the lane name only. A PR touching app and pipeline
     paths is laned `app` but still owes the pipeline lane's evidence (such as a
@@ -154,14 +162,17 @@ def evidence_for_change(config, lane_name, changed, changed_lines=None):
     items = evidence_for(config, lane_name)
     if lane_name in ("release", "sync"):
         return items
+    small_for = {}
+    for entry in config["lanes"]:
+        small = entry.get("small_pr")
+        if small and entry["name"] == lane_name and changed_lines is not None \
+                and changed_lines < small["max_changed_lines"] \
+                and not any(_matches_any(small.get("exclude_paths", []), p) for p in changed):
+            small_for[entry["name"]] = small.get("evidence", [])
+            items = [i for i in items if i in small_for[entry["name"]]]
     for entry in config["lanes"]:
         if any(_matches_any(entry["paths"], p) for p in changed):
-            evidence = entry.get("evidence", [])
-            small = entry.get("small_pr")
-            if small and entry["name"] == lane_name and changed_lines is not None \
-                    and changed_lines < small["max_changed_lines"]:
-                evidence = small.get("evidence", [])
-                items = [i for i in items if i in evidence]
+            evidence = small_for.get(entry["name"], entry.get("evidence", []))
             items += [i for i in evidence if i not in items]
     return items
 

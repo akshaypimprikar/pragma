@@ -25,6 +25,7 @@ import json
 import sys
 
 SEVERITIES = ("HIGH", "MEDIUM", "LOW")
+BLOCK_FLAGS = ("in_diff", "depends_on_unchanged", "guard_bypass")
 FLAGS = ("dismissed", "advisory", "in_diff", "depends_on_unchanged", "guard_bypass")
 
 
@@ -58,6 +59,10 @@ def main(argv=None):
             if not isinstance(f.get("id"), str) or not f["id"] or f["id"] in seen:
                 raise ValueError(f"bad finding {f!r}: 'id' must be a non-empty string, unique in the list")
             seen.add(f["id"])
+            if f["severity"] == "MEDIUM" and not f.get("dismissed") and not f.get("advisory") \
+                    and not any(k in f for k in BLOCK_FLAGS):
+                raise ValueError(f"bad finding {f!r}: a MEDIUM must set in_diff, depends_on_unchanged "
+                                 "or guard_bypass explicitly (true or false), or be advisory or dismissed")
             for flag in FLAGS:
                 if flag in f and not isinstance(f[flag], bool):
                     raise ValueError(f"bad finding {f!r}: '{flag}' must be true or false")

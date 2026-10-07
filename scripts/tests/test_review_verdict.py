@@ -66,6 +66,11 @@ class MainTests(unittest.TestCase):
         for bad in ('{"severity": "LOW"}', '{"id": "", "severity": "LOW"}', '{"id": 1, "severity": "LOW"}'):
             self.assertEqual(self.run_main_out(f"[{bad}]")[0], 2)
 
+    def test_unflagged_medium_exits_2(self):
+        self.assertEqual(self.run_main_out('[{"id": "a", "severity": "MEDIUM"}]')[0], 2)
+        self.assertEqual(self.run_main_out('[{"id": "a", "severity": "MEDIUM", "in_diff": false}]')[0], 0)
+        self.assertEqual(self.run_main_out('[{"id": "a", "severity": "MEDIUM", "advisory": true}]')[0], 0)
+
     def test_duplicate_id_exits_2(self):
         self.assertEqual(self.run_main_out('[{"id": "a", "severity": "LOW"}, {"id": "a", "severity": "HIGH"}]')[0], 2)
 

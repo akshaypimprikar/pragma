@@ -36,12 +36,12 @@ Before starting any task:
 
 ```bash
 # Full test suite
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   2>&1 | grep -E "Test.*passed|Test.*failed|TEST SUCCEEDED|TEST FAILED"
 
 # Single suite
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   -only-testing:<AppName>Tests/<SuiteName> \
   2>&1 | grep -E "Test.*passed|Test.*failed|BUILD"

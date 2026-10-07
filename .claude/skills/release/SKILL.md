@@ -17,7 +17,7 @@ Invoked with a version number (e.g. `/release 1.0.0`).
 - [ ] All tests pass on `develop`:
   ```bash
   LOG=$(mktemp -t test)
-  xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+  xcodebuild test <BuildTarget> -scheme <AppName> \
     -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
     > "$LOG" 2>&1; RC=$?
   xcsift < "$LOG"

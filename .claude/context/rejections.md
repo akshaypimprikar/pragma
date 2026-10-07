@@ -74,3 +74,15 @@
 **Rule violated:** No formal rule, caught pre-merge on correctness grounds.
 **File:** `README.md` (Harness Design section)
 **Caught by:** code-review pass (`code-review:code-review` on PR#84, fixed in `fb020aa`)
+
+## 2026-10-07 — PR#110 — CHANGELOG claimed behavior the plugin init path did not implement
+**What was wrong:** The CHANGELOG entry said the plugin `init` writes the detected build flag into the generated `AGENTS.md`, but `init.md` never told the agent to use `detect_build_target.sh` for the Build & Test section.
+**Rule violated:** No formal rule, caught in review (an entry that would mislead a reader).
+**File:** `CHANGELOG.md:8`
+**Caught by:** this review (round 1)
+
+## 2026-10-07 — PR#110 — pod-install test passed with a step missing
+**What was wrong:** `test_pod_install_step_gated_on_podfile` only checked the gated condition appeared once per workflow file, so dropping one of release.yml's two pod install steps, or placing it after `xcodebuild`, still passed.
+**Rule violated:** No formal rule, caught in review (a test that cannot fail on the defect it names).
+**File:** `scripts/tests/test_build_target.py:86`
+**Caught by:** this review (round 1)

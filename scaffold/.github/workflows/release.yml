@@ -31,6 +31,10 @@ jobs:
           restore-keys: |
             deriveddata-release-${{ runner.os }}-
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
       - name: Run unit and integration tests (Release)
         run: |
           set -o pipefail
@@ -40,7 +44,7 @@ jobs:
           # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -configuration Release \
             -destination "id=$SIM_ID" \
@@ -85,6 +89,10 @@ jobs:
           restore-keys: |
             deriveddata-release-ui-${{ runner.os }}-
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
       - name: Run UI tests (Release)
         run: |
           set -o pipefail
@@ -94,7 +102,7 @@ jobs:
           # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -configuration Release \
             -destination "id=$SIM_ID" \
@@ -153,7 +161,7 @@ jobs:
   #     - name: Archive
   #       run: |
   #         xcodebuild archive \
-  #           -project YOUR_PROJECT.xcodeproj \
+  #           YOUR_BUILD_TARGET \
   #           -scheme YOUR_SCHEME \
   #           -configuration Release \
   #           -archivePath YOUR_PROJECT.xcarchive

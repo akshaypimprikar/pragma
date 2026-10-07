@@ -8,14 +8,18 @@
 # Usage: sync_skills.sh SKILLS_SRC PROJECT_DIR APP_NAME
 #   SKILLS_SRC   — path to the pragma .claude/skills directory to copy from
 #   PROJECT_DIR  — target project root (already resolved/validated by the caller)
-#   APP_NAME     — substituted for <AppName> in copied skill files
+#   APP_NAME     — substituted for <AppName> in copied skill files; <BuildTarget>
+#                  becomes the detected -workspace/-project flag (detect_build_target.sh)
 set -euo pipefail
 
 SKILLS_SRC="$1"
 PROJECT_DIR="$2"
 APP_NAME="$3"
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_sedi.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib_sedi.sh"
+# <BuildTarget> becomes "-workspace <App>.xcworkspace" or "-project <App>.xcodeproj".
+BUILD_TARGET="$("$SCRIPT_DIR/detect_build_target.sh" "$PROJECT_DIR" "$APP_NAME")"
 
 # Appends -x until $1 no longer exists — a same-second re-run must not nest
 # inside the earlier backup. Used for both the skills.bak and commands.bak
@@ -37,7 +41,7 @@ CUSTOMIZED=""
 while IFS= read -r rel; do
     dest="$PROJECT_DIR/.claude/skills/$rel"
     [[ -f "$dest" ]] || continue
-    sed "s|<AppName>|${APP_NAME}|g" "$SKILLS_SRC/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
+    sed -e "s|<AppName>|${APP_NAME}|g" -e "s|<BuildTarget>|${BUILD_TARGET}|g" "$SKILLS_SRC/$rel" | cmp -s - "$dest" || CUSTOMIZED="$CUSTOMIZED $rel"
 done <<< "$PRAGMA_SKILLS"
 if [[ -n "$CUSTOMIZED" ]]; then
     BACKUP_DIR="$(unique_backup_dir "$PROJECT_DIR/.claude/skills.bak-$(date +%Y%m%d-%H%M%S)")"
@@ -51,7 +55,7 @@ cp -r "$SKILLS_SRC/." "$PROJECT_DIR/.claude/skills/"
 
 while IFS= read -r rel; do
     dest="$PROJECT_DIR/.claude/skills/$rel"
-    if [[ -f "$dest" ]]; then sedi "s|<AppName>|${APP_NAME}|g" "$dest"; fi
+    if [[ -f "$dest" ]]; then sedi -e "s|<AppName>|${APP_NAME}|g" -e "s|<BuildTarget>|${BUILD_TARGET}|g" "$dest"; fi
 done <<< "$PRAGMA_SKILLS"
 
 # Migrate an older command-based install — one backup dir for the whole

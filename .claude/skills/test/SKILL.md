@@ -65,7 +65,7 @@ final class Mock<Model>Repository: <Model>RepositoryProtocol {
 ## Build command (run from git root — see AGENTS.md/CLAUDE.md for exact path)
 ```bash
 LOG=$(mktemp -t test)
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"

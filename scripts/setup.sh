@@ -88,6 +88,7 @@ echo ""
 
 # ── sed helper (BSD/GNU portable) ────────────────────────────────────────────
 source "$SCRIPT_DIR/lib_sedi.sh"
+BUILD_TARGET="$("$SCRIPT_DIR/detect_build_target.sh" "$PROJECT_DIR" "$APP_NAME")"
 
 # ── 1. Skills ────────────────────────────────────────────────────────────────
 info "Copying skill files…"
@@ -119,6 +120,7 @@ success "Context files ready"
 info "Copying support scripts…"
 mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_build_target.sh"   "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
@@ -191,6 +193,7 @@ for f in "$REPO_ROOT/scaffold/.github/workflows/"*.yml; do
         # Strip the setup comment block (up to and including the closing ===== line)
         sedi '1,/^# ====/d' "$dest"
         # Substitute placeholders
+        sedi "s|YOUR_BUILD_TARGET|${BUILD_TARGET}|g" "$dest"
         sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$dest"
         sedi "s|YOUR_SCHEME|${SCHEME}|g"   "$dest"
     fi
@@ -220,17 +223,17 @@ ${APP_NAME} — iOS app (SwiftUI + SwiftData).
 
 ## Build & Test
 
-All commands run from the repo root (contains \`${APP_NAME}.xcodeproj\`).
+All commands run from the repo root (contains \`${APP_NAME}.xcodeproj\`, or \`${APP_NAME}.xcworkspace\` for CocoaPods projects).
 
 \`\`\`bash
 # Build
-xcodebuild build -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
+xcodebuild build ${BUILD_TARGET} -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Full test suite
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
+xcodebuild test ${BUILD_TARGET} -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Single suite / single test
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>' -only-testing:${APP_NAME}Tests/<SuiteName>
+xcodebuild test ${BUILD_TARGET} -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>' -only-testing:${APP_NAME}Tests/<SuiteName>
 \`\`\`
 
 > **Simulator:** pin \`OS=\` explicitly to your installed runtime version (check with \`xcrun simctl list runtimes\`; \`xcodebuild\` requires an exact match) — a bare \`name=iPhone 17\` destination becomes ambiguous the moment a second iOS runtime is installed, since each gets its own "iPhone 17" device. If a UI test fails with \`RequestDenied ... SBMainWorkspace\`, the simulator's SpringBoard state is corrupt — \`xcrun simctl erase <device-id>\` and reboot it; killing \`Simulator.app\`/\`CoreSimulatorService\` alone won't fix it.

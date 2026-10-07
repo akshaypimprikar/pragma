@@ -44,6 +44,32 @@ def make_project(d, mode="classic"):
     subprocess.run(["ruby", "-e", MAKE_PROJECT, d, mode], check=True)
 
 
+def xcproj_env():
+    """Environment whose xcodebuild can write the .xcproj format (Xcode 27.2+), or None."""
+    candidates = [os.environ.get("DEVELOPER_DIR"), "/Applications/Xcode-beta.app/Contents/Developer"]
+    for dev in filter(None, candidates):
+        env = dict(os.environ, DEVELOPER_DIR=dev)
+        probe = tempfile.mkdtemp()
+        try:
+            subprocess.run(["ruby", "-e", MAKE_PROJECT, probe, "classic"], check=True)
+            r = subprocess.run(["xcodebuild", "-convert-project", "xcproj", "-project",
+                                os.path.join(probe, "App.xcodeproj")], capture_output=True, env=env)
+            if r.returncode == 0:
+                return env
+        finally:
+            shutil.rmtree(probe, True)
+    return None
+
+
+XCPROJ_ENV = xcproj_env() if HAS_GEM else None
+
+
+def make_xcproj(d, mode="classic"):
+    make_project(d, mode)
+    subprocess.run(["xcodebuild", "-convert-project", "xcproj", "-project", os.path.join(d, "App.xcodeproj")],
+                   check=True, capture_output=True, env=XCPROJ_ENV)
+
+
 def detect(d):
     r = subprocess.run([DETECT, d, "App"], capture_output=True, text=True)
     return r.returncode, r.stdout.strip(), r.stderr
@@ -84,10 +110,20 @@ class DetectTests(TempDirCase):
         open(os.path.join(self.d, "Project.swift"), "w").close()
         self.assertEqual(detect(self.d)[1], "stop")
 
-    def test_xcproj_is_reported_not_edited(self):
+    def test_xcproj_without_folders_is_xcproj(self):
         make_project(self.d)
         open(os.path.join(self.d, "App.xcodeproj", "project.xcproj"), "w").close()
         self.assertEqual(detect(self.d)[1], "xcproj")
+
+    @unittest.skipUnless(XCPROJ_ENV, "needs Xcode 27.2+ to write .xcproj")
+    def test_converted_classic_project_is_xcproj(self):
+        make_xcproj(self.d, "classic")
+        self.assertEqual(detect(self.d)[1], "xcproj")
+
+    @unittest.skipUnless(XCPROJ_ENV, "needs Xcode 27.2+ to write .xcproj")
+    def test_converted_synchronized_project_is_synchronized(self):
+        make_xcproj(self.d, "synchronized")
+        self.assertEqual(detect(self.d)[1], "synchronized")
 
 
 class DetectWithoutGemTests(TempDirCase):
@@ -142,6 +178,61 @@ class RegisterTests(TempDirCase):
         r = self.register(add_swift(self.d))
         self.assertEqual(r.returncode, 3)
         self.assertIn("project.yml", r.stderr)
+
+
+@unittest.skipUnless(XCPROJ_ENV, "needs Xcode 27.2+ to write .xcproj")
+class XcprojRegisterTests(TempDirCase):
+    def run_register(self, *args):
+        return subprocess.run(["ruby", REGISTER, *args], capture_output=True, text=True, env=XCPROJ_ENV)
+
+    def setUp(self):
+        super().setUp()
+        make_xcproj(self.d)
+
+    def test_register_adds_file_to_compile_sources(self):
+        b = add_swift(self.d)
+        self.assertEqual(self.run_register("--check", self.d, "App", b).returncode, 1)
+        self.assertEqual(self.run_register(self.d, "App", b).returncode, 0)
+        self.assertEqual(self.run_register("--check", self.d, "App", b).returncode, 0)
+        with open(os.path.join(self.d, "App.xcodeproj", "project.xcproj")) as f:
+            text = f.read()
+        self.assertEqual(text.count('"B.swift"'), 1)
+        self.assertIn('"B.swift", "index": true, "target-membership": [ "App/compile-sources" ]', text)
+
+    def test_register_is_idempotent(self):
+        b = add_swift(self.d)
+        self.run_register(self.d, "App", b)
+        self.assertEqual(self.run_register(self.d, "App", b).returncode, 0)
+        with open(os.path.join(self.d, "App.xcodeproj", "project.xcproj")) as f:
+            self.assertEqual(f.read().count('"B.swift"'), 1)
+
+    def test_register_creates_missing_group(self):
+        os.makedirs(os.path.join(self.d, "App", "Feature"))
+        c = add_swift(self.d, os.path.join("Feature", "C.swift"))
+        self.assertEqual(self.run_register(self.d, "App", c).returncode, 0)
+        self.assertEqual(self.run_register("--check", self.d, "App", c).returncode, 0)
+
+    def test_register_keeps_project_listable(self):
+        os.makedirs(os.path.join(self.d, "App", "Feature"))
+        self.run_register(self.d, "App", add_swift(self.d), add_swift(self.d, os.path.join("Feature", "C.swift")))
+        r = subprocess.run(["xcodebuild", "-list", "-project", os.path.join(self.d, "App.xcodeproj")],
+                           capture_output=True, text=True, env=XCPROJ_ENV)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_gate_fails_then_passes(self):
+        b = add_swift(self.d)
+        gate = lambda: subprocess.run(["python3", CHECK, "--project-dir", self.d, "--app-name", "App", b],
+                                      capture_output=True, text=True, env=XCPROJ_ENV)
+        self.assertEqual(gate().returncode, 1)
+        self.run_register(self.d, "App", b)
+        self.assertEqual(gate().returncode, 0, gate().stdout)
+
+    def test_unparseable_xcproj_fails_gate(self):
+        with open(os.path.join(self.d, "App.xcodeproj", "project.xcproj"), "a") as f:
+            f.write("}}}}")
+        r = subprocess.run(["python3", CHECK, "--project-dir", self.d, "--app-name", "App", add_swift(self.d)],
+                           capture_output=True, text=True, env=XCPROJ_ENV)
+        self.assertEqual(r.returncode, 1)
 
 
 @unittest.skipUnless(HAS_GEM, "xcodeproj gem not installed")

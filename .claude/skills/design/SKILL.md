@@ -21,6 +21,10 @@ Run bootstrap once. Run extend before any `/spec` that introduces a visual patte
 - `docs/design-system.md` — human-readable reference consumed by `/spec` and `/review`
 - Branch + PR to `develop`
 
+## Project settings
+
+Read `project.ui` in `scripts/pipeline_lanes.json` (`swiftui` | `uikit`). If the key is absent, assume `swiftui`. Everything below is the SwiftUI path unless a step says "UIKit". For `ui: uikit`, also read "UIKit mode" at the end of this file; it replaces the SwiftUI token types and the view audit.
+
 ## Theme file structure
 
 All tokens are `static` members on extensions of a `Theme` enum. Token names are **semantic** — they describe meaning, not value. `Theme.Colors.positive`, not `Theme.Colors.teal`.
@@ -67,7 +71,7 @@ Two modes, selected by the trigger used — see "Trigger" above.
 ### Bootstrap process
 
 #### 1. Audit all views
-Read every file in `<AppName>/Views/`. Extract:
+Read every file in `<AppName>/Views/`. (UIKit: see "UIKit mode".) Extract:
 - All hardcoded colors and opacities — note semantic meaning from context
 - All spacing values: padding, corner radii, gaps
 - All typography uses: font sizes, weights, styles
@@ -103,6 +107,30 @@ Present proposed token names and values for the new pattern. **Wait for approval
 
 #### 4. Extend Theme/ and design-system.md
 Add approved tokens to the appropriate `Theme/*.swift` file. Create a new file if the pattern warrants a new category (e.g. `Charts.swift`). Update `docs/design-system.md`.
+
+## UIKit mode
+
+Applies when `project.ui` is `uikit`. The Theme enum, semantic names, approval gates and `docs/design-system.md` stay the same. Only the token types and the audit change.
+
+- **Audit:** read view controllers, custom `UIView` subclasses, and `.xib`/`.storyboard` files (find them with `find <AppName> -name '*.swift' -o -name '*.xib' -o -name '*.storyboard'`; skip `Pods/`). Extract hardcoded `UIColor(...)`, `.systemX` colors, `UIFont` sizes and weights, `NSLayoutConstraint` constants, `layer.cornerRadius` values, and Auto Layout margins.
+- **Colors:** prefer asset catalog colors (`UIColor(named:)`) so light/dark variants live in the catalog. Tokens are `static let` members on `Theme.Colors` of type `UIColor`. Create new color sets in the existing `.xcassets` only after approval; never hand-edit `project.pbxproj`. If the app has no asset catalog, ask the human to add one in Xcode.
+- **Typography:** `UIFont.preferredFont(forTextStyle:)` or `UIFontMetrics` scaling, so Dynamic Type works. Tokens are `static func` or `static let` of type `UIFont`.
+- **Spacing:** `CGFloat` constants, same as SwiftUI.
+- **Example:**
+
+```swift
+// Colors.swift
+import UIKit
+
+extension Theme {
+    enum Colors {
+        static let positiveBackground = UIColor(named: "PositiveBackground")!
+        static let destructive        = UIColor.systemRed
+    }
+}
+```
+
+- **Mixed apps:** if both `UIView` and SwiftUI views exist, `project.ui` decides which token type `/design` creates. Ask the human before adding a second token set.
 
 ## Rules
 

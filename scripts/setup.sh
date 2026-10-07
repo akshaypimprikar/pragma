@@ -121,6 +121,7 @@ info "Copying support scripts…"
 mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/detect_build_target.sh"   "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_project_settings.sh" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/detect_file_registration.sh" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/register_files.rb"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_file_registration.py" "$PROJECT_DIR/scripts/"
@@ -143,6 +144,9 @@ if [[ -f "$LANES" ]]; then
 else
     cp "$REPO_ROOT/scaffold/pipeline_lanes.json" "$LANES"
     sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$LANES"
+    read -r PERSISTENCE UI_KIT <<< "$("$SCRIPT_DIR/detect_project_settings.sh" "$PROJECT_DIR")"
+    sedi "s|YOUR_PERSISTENCE|${PERSISTENCE}|g; s|YOUR_UI|${UI_KIT}|g" "$LANES"
+    info "Detected persistence=${PERSISTENCE}, ui=${UI_KIT}; architecture defaults to mvvm. Edit \"project\" in scripts/pipeline_lanes.json if wrong (architecture: mvvm | mvc | viper)."
 fi
 success "Scripts ready"
 

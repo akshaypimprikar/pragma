@@ -132,8 +132,9 @@ This gate is advisory: list candidates in the gate summary but do not block the 
 python3 scripts/check_tdd_commit_order.py
 ```
 For every new file in a layer with a 1:1 "<Type>.swift → <Type>Tests.swift" convention
-(ViewModels, Services, Repositories — adjust `SCOPED_LAYER_DIRS` in the script to your
-project's layer names) that has a matching test file, the script checks that the test file
+(mvvm: ViewModels, Services, Repositories; mvc: Controllers, Services; viper: Presenters,
+Interactors, Entities — set `project.architecture` in `scripts/pipeline_lanes.json`, or list your own
+folders in `project.scoped_layer_dirs`) that has a matching test file, the script checks that the test file
 was added in a strictly earlier commit than the implementation — never the same commit,
 never a later one.
 
@@ -142,8 +143,8 @@ never a later one.
 Pass: script exits 0 (no violations, or nothing in scope to check).
 Fail: script lists each violation (file, commit, reason) — fix by re-doing the task as two
 commits (test-only, confirm it fails, then implementation) per `/feature`'s per-task rules.
-Unconfigured (exit 2): the script warns that `SCOPED_LAYER_DIRS` still holds the template's
-default layer names and matches nothing anywhere in this repo — edit it to your project's
+Unconfigured (exit 2): the script warns that the configured layer names match nothing anywhere in
+this repo — set `project.architecture` or `project.scoped_layer_dirs` to your project's
 actual layer folders before trusting this gate. Do not treat exit 2 as a pass; it means the
 gate hasn't actually checked anything yet, on any branch, ever. Report it as `[✗]`.
 Rewriting already-pushed history is not required; this gate only evaluates the branch as it

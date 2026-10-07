@@ -1,4 +1,9 @@
 {
+  "project": {
+    "persistence": "YOUR_PERSISTENCE",
+    "ui": "YOUR_UI",
+    "architecture": "mvvm"
+  },
   "release": {
     "paths": [
       "YOUR_PROJECT.xcodeproj/project.pbxproj",

@@ -64,6 +64,13 @@ def _matches_any(patterns, path):
     return any(glob_match(p, path) for p in patterns)
 
 
+PROJECT_CHOICES = {
+    "persistence": {"swiftdata", "coredata", "realm", "none"},
+    "ui": {"swiftui", "uikit"},
+    "architecture": {"mvvm", "mvc", "viper"},
+}
+
+
 def validate_config(config):
     if not isinstance(config, dict):
         raise ConfigError("config must be a JSON object")
@@ -98,6 +105,15 @@ def validate_config(config):
             excluded = small.get("exclude_paths", [])
             if not isinstance(excluded, list) or not all(isinstance(x, str) for x in excluded):
                 raise ConfigError(f"lane '{name}' small_pr 'exclude_paths' must be a list of strings")
+    project = config.get("project", {})
+    if not isinstance(project, dict):
+        raise ConfigError("'project' must be an object")
+    for key, allowed in PROJECT_CHOICES.items():
+        if key in project and project[key] not in allowed:
+            raise ConfigError(f"project.{key} must be one of {sorted(allowed)}, got {project[key]!r}")
+    layers = project.get("scoped_layer_dirs", [])
+    if not isinstance(layers, list) or not all(isinstance(x, str) for x in layers):
+        raise ConfigError("project.scoped_layer_dirs must be a list of strings")
     carry = config.get("review_carryover_paths", [])
     if not isinstance(carry, list) or not all(isinstance(x, str) for x in carry):
         raise ConfigError("'review_carryover_paths' must be a list of strings")

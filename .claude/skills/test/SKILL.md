@@ -20,15 +20,18 @@ Read `AGENTS.md/CLAUDE.md` first for build commands, simulator name, and test fr
 
 Also read `.claude/context/invariants.md` if it exists — skip silently if absent. Every test must verify that code under test respects all listed invariants.
 
+### Project settings
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. For `ui: uikit`, or `persistence` other than swiftdata, also read `.claude/skills/test/uikit.md` (controller loading, in-memory Core Data). Read "ViewModel" as Controller (mvc) or Presenter (viper).
+
 ### Test framework
 - **Unit tests and integration tests:** Apple `Testing` framework — `import Testing`, `@Suite`, `@Test`, `#expect()`, `#require()`
 - **UI tests:** `XCTest`
 - **NOT** XCTest for unit/integration tests
 
 ### Coverage targets
-- **Domain Services** — unit test every public method; no simulator needed, no SwiftData
-- **Repository implementations** — integration test against an in-memory `ModelContainer`
-- **ViewModels** — unit test with mock repository implementations injected via protocol
+- **Domain Services** — unit test every public method; no simulator needed, no persistence framework
+- **Repository implementations** — integration test against an in-memory store (`ModelContainer` for swiftdata; see `uikit.md` for Core Data)
+- **ViewModels** (or Controllers / Presenters) — unit test with mock repository implementations injected via protocol
 - **UI flows** — cover critical happy paths: <your app's 2–3 core user flows>
 - **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
@@ -37,7 +40,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - Unit/integration: `<AppName>Tests/<Layer>/`
 - UI: `<AppName>UITests/`
 
-### In-memory ModelContainer pattern for repository tests
+### In-memory ModelContainer pattern for repository tests `[swiftdata]`
 ```swift
 import Testing
 import SwiftData
@@ -51,7 +54,7 @@ func makeContainer() throws -> ModelContainer {
 }
 ```
 
-### Mock repository pattern for ViewModel tests
+### Mock repository pattern for ViewModel tests (the protocol-mock idea applies to every persistence)
 ```swift
 final class Mock<Model>Repository: <Model>RepositoryProtocol {
     var items: [<Model>] = []

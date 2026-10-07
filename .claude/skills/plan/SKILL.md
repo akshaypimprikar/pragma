@@ -45,8 +45,11 @@ The plan must be executable by a subagent with no prior context. Every task need
 **All commands run from:** `<path containing .xcodeproj>`
 ```
 
+## Project settings
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Apply the persistence and UI rules below for the configured values, not SwiftData and SwiftUI by default. Read "ViewModel" as Controller (mvc) or Presenter (viper).
+
 ## Architecture Rules to enforce in every task
-- Domain Services: no SwiftData imports
+- Domain Services: no persistence-framework imports (SwiftData, CoreData, RealmSwift)
 - Repository Protocols: Foundation-only imports
 - <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - Simulator: see AGENTS.md/CLAUDE.md — use your project's target device and OS version

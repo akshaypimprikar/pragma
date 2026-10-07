@@ -96,8 +96,8 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    ```
    A script that is not on the base branch yet (the PR introducing it, or before it merges) is reported
    as `NOT VERIFIED: <script> not on <base>` and, for a PR that adds it, run from the PR copy
-   with that caveat stated — never counted as a clean pass. Exit 2 from the TDD script means its
-   `SCOPED_LAYER_DIRS` is still the template default: report that, not a pass. Also re-run the grep-only
+   with that caveat stated — never counted as a clean pass. Exit 2 from the TDD script means the
+   configured layer names (`project.architecture` / `project.scoped_layer_dirs`) match nothing in the repo: report that, not a pass. Also re-run the grep-only
    gates exactly as written in `gates/SKILL.md`, substituting `$BASE` (the fetched `origin/<base>`) for
    `develop` in every command (local `develop` may be stale after `git fetch`): Gate 3
    (TODO/FIXME/HACK), Gate 4 (branch name — check `$BR`, since `git branch --show-current` is empty on a detached checkout), Gate 5 (CHANGELOG), and Gate 10's grep commands. Each grep

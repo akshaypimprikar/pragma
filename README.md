@@ -68,7 +68,7 @@ Both installers have safety behavior. `setup.sh` enforces it in the script. `/pr
 - If `.claude/skills/` has files that differ from the files of pragma, the installers copy the whole directory to `.claude/skills.bak-<timestamp>/` before they overwrite it. This includes files from an earlier version of pragma or from a different app name. To re-apply your edits, compare the backup with the new files. Then delete the backup.
 - If your project still has a `.claude/commands/<name>.md` file from a pragma version that shipped commands instead of skills, the installers back it up to `.claude/commands.bak-<timestamp>/` and remove it. The old command then cannot hide the new skill of the same name.
 - The installers skip existing context files, `CONSTRAINTS.md`, `AGENTS.md`, `CLAUDE.md`, and workflow files. They do not overwrite them.
-- The installers overwrite files in `scripts/`. If you edited `SCOPED_LAYER_DIRS`, re-apply your edit.
+- The installers overwrite files in `scripts/`. Your layer choice lives in `scripts/pipeline_lanes.json` (`project.architecture`), which the installers never overwrite.
 
 After either method, start your first feature:
 

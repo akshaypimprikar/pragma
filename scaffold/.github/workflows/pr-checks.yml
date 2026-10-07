@@ -53,6 +53,12 @@ jobs:
         if: hashFiles('Podfile') != ''
         run: pod install
 
+      - name: Check new Swift files are registered in the project
+        run: |
+          git fetch --depth=1 origin ${{ github.event.pull_request.base.sha }}
+          NEW=$(git diff --name-only --diff-filter=A ${{ github.event.pull_request.base.sha }} HEAD -- '*.swift')
+          python3 scripts/check_file_registration.py --project-dir . --app-name YOUR_PROJECT $NEW
+
       - name: Run unit and integration tests
         run: |
           set -o pipefail

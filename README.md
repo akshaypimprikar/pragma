@@ -42,6 +42,12 @@ Run these commands in Claude Code, in the root of your iOS project repository:
 /pragma:init MyApp
 ```
 
+To install from a terminal instead of from inside Claude Code, run this one command. It adds the marketplace and installs the plugin. It needs Claude Code 2.1.292 or later.
+
+```bash
+claude plugin install pragma --marketplace akshaypimprikar/pragma
+```
+
 `/pragma:init` does the same work as `scripts/setup.sh`. It copies skills, context files, CI workflows, and support scripts. It replaces the placeholder app name in all of them. It also asks you questions about the architecture and key constraints of your app. It uses your answers for the content of `AGENTS.md`. It also seeds `.claude/context/invariants.md` from the same answers. `setup.sh` leaves both files as templates for you to fill in later.
 
 Alternative: clone the repository and run the setup script directly:

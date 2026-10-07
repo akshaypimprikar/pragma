@@ -26,7 +26,28 @@ These screenshots are not mockups. They show what 120+ merged PRs of `/spec → 
 
 ---
 
-[Quick Start](#quick-start) · [At a Glance](#at-a-glance-what-needs-you-and-what-does-not) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)
+[Scope](#scope-and-requirements) · [Quick Start](#quick-start) · [At a Glance](#at-a-glance-what-needs-you-and-what-does-not) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)
+
+---
+
+## Scope and requirements
+
+Pragma supports two project shapes. Both are iOS only.
+
+| | Modern (default) | Legacy mode |
+|---|---|---|
+| UI | SwiftUI | SwiftUI or UIKit |
+| Persistence | SwiftData | SwiftData, Core Data, Realm, or none |
+| Architecture | MVVM | MVVM, MVC, or VIPER |
+| Dependencies | Swift Package Manager | Swift Package Manager or CocoaPods |
+| Xcode project | Xcode 16+ synchronized folders | Classic groups, or the Xcode 27.2 `project.xcproj` format |
+| Build command | `-project <App>.xcodeproj` | `-workspace <App>.xcworkspace` when a Podfile or workspace exists |
+
+`scripts/setup.sh` detects these settings at install time and writes them to `scripts/pipeline_lanes.json`. You can edit them there. The architecture cannot be detected, so it defaults to MVVM.
+
+- **New files:** with synchronized folders, the agent adds nothing to the project file. With classic groups, the agent registers new files with the `xcodeproj` gem (`scripts/register_files.rb`) and a gate checks that every new `.swift` file is in a build phase. The agent never hand-edits `project.pbxproj`.
+- **Stops and asks:** if the project is generated from `project.yml` or `Project.swift`, or mixes synchronized and classic groups, the agent stops and asks you.
+- **Not supported:** Android, web, and Objective-C-only projects.
 
 ---
 
@@ -283,7 +304,7 @@ These are the default architecture assumptions. To override them, edit `AGENTS.m
 - MVVM and Repository: views contain no business logic. ViewModels depend on protocols, never on concrete implementations.
 - SwiftData for persistence: Domain Services have zero SwiftData imports.
 - Swift Testing: use `import Testing`, `@Suite`, `@Test`, and `#expect()` for unit and integration tests. Use XCUITest for UI tests.
-- `PBXFileSystemSynchronizedRootGroup` (Xcode 16 and later): files compile automatically when you place them in the correct directory. Never edit `project.pbxproj`.
+- `PBXFileSystemSynchronizedRootGroup` (Xcode 16 and later): files compile automatically when you place them in the correct directory. Never edit `project.pbxproj` by hand. For classic groups, see [Scope and requirements](#scope-and-requirements).
 
 To customise with the script (recommended), run:
 
@@ -301,6 +322,25 @@ To customise by hand, do these steps:
 4. Update `AGENTS.md` with your build commands, simulator target, and architecture rules. If you use Claude Code, also add a one-line `CLAUDE.md` that imports it: `@AGENTS.md`.
 5. Fill in `.claude/context/invariants.md` with your non-negotiable rules
 6. Update the Architecture Rules checklist in `/review` to match your stack
+
+---
+
+## FAQ
+
+**Does Pragma work with UIKit?**
+Yes. Set `project.ui` to `uikit` in `scripts/pipeline_lanes.json` (setup.sh detects it). `/design` uses UIKit tokens (asset catalog and `UIColor`), and `/test` uses UIKit test patterns. SwiftUI-only checks run only in SwiftUI mode.
+
+**Does it work with CocoaPods?**
+Yes. When a Podfile or `.xcworkspace` exists, all build commands use `-workspace`, and CI runs `pod install` first.
+
+**My project does not use SwiftData.**
+Set `project.persistence` to `coredata`, `realm`, or `none`. The Domain layer rule still applies: Domain Services import no persistence framework.
+
+**My app is not MVVM.**
+Set `project.architecture` to `mvc` or `viper`. The layer check (Gate 9) then uses that layout.
+
+**Can the agent edit `project.pbxproj`?**
+It never edits it by hand. For classic groups it uses the `xcodeproj` gem. For generated projects it stops and asks.
 
 ---
 

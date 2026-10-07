@@ -1,12 +1,17 @@
 #!/usr/bin/env ruby
-# Adds new .swift files to a classic-group Xcode project's Sources build phase with
-# the xcodeproj gem (a CocoaPods dependency, so any CocoaPods project has it).
+# Adds new .swift files to an Xcode project's Sources build phase when the project
+# does not use synchronized groups. Classic projects (project.pbxproj) are edited with
+# the xcodeproj gem (a CocoaPods dependency, so any CocoaPods project has it);
+# project.xcproj (Xcode 27.2 beta) is relaxed JSON and is edited as text.
 #
 # Usage: register_files.rb [--check] PROJECT_DIR APP_NAME FILE...
 #   (default)  register each FILE; already-registered files are left alone
 #   --check    register nothing; list unregistered FILEs and exit 1 if any
-# Exit codes: 0 ok, 1 --check found unregistered files, 3 stop and ask the human
-#             (stderr says why), 2 bad arguments.
+# A FILE under a directory named like a target (AppTests/...) goes to that target,
+# otherwise to the APP_NAME target.
+# Exit codes: 0 ok, 1 --check found unregistered files or the project is unparseable,
+#             3 stop and ask the human (stderr says why), 2 bad arguments.
+require 'json'
 require 'open3'
 require 'pathname'
 
@@ -15,6 +20,201 @@ ARGV.shift if check
 dir, app, *files = ARGV
 abort 'usage: register_files.rb [--check] PROJECT_DIR APP_NAME FILE...' if dir.nil? || app.nil? || files.empty?
 
+mode, reason, = Open3.capture3(File.join(__dir__, 'detect_file_registration.sh'), dir, app)
+mode = mode.strip
+root = Pathname.new(File.expand_path(dir))
+files = files.map { |f| File.expand_path(f) }
+
+unless %w[classic xcproj].include?(mode)
+  warn(mode == 'synchronized' ? 'project uses synchronized groups: new files compile without registration.' : reason.to_s.strip)
+  warn "mode is #{mode}: stop and ask the human." unless mode == 'synchronized'
+  exit 3
+end
+
+def target_for(abs, root, app, names)
+  first = Pathname.new(abs).relative_path_from(root).each_filename.first
+  names.include?(first) ? first : app
+end
+
+# Relaxed JSON (trailing commas, // comments) with source offsets, so an edit keeps
+# the rest of the file byte for byte.
+class Xcproj
+  class ParseError < StandardError; end
+  Node = Struct.new(:type, :s, :e, :value, :pairs, :items)
+
+  attr_reader :text
+
+  def initialize(text)
+    @text = text
+    reparse
+  end
+
+  def reparse
+    @i = 0
+    @root = value
+    skip
+    raise ParseError, "unexpected text at offset #{@i}" unless @i == @text.length
+    raise ParseError, 'top level is not an object' unless @root.type == :obj
+  end
+
+  def skip
+    loop do
+      if @text[@i] =~ /\s/ then @i += 1
+      elsif @text[@i, 2] == '//' then @i += 1 until @i >= @text.length || @text[@i] == "\n"
+      else break
+      end
+    end
+  end
+
+  def value
+    skip
+    c = @text[@i]
+    case c
+    when '{' then container(:obj, '}')
+    when '[' then container(:arr, ']')
+    when '"'
+      s = @i
+      @i += 1
+      @i += (@text[@i] == '\\' ? 2 : 1) while @i < @text.length && @text[@i] != '"'
+      raise ParseError, 'unterminated string' if @i >= @text.length
+      @i += 1
+      Node.new(:str, s, @i, JSON.parse(@text[s...@i]))
+    when nil then raise ParseError, 'unexpected end of file'
+    else
+      s = @i
+      @i += 1 while @i < @text.length && @text[@i] !~ /[\s,\]}]/
+      raise ParseError, "unexpected character #{c.inspect} at offset #{s}" if @i == s
+      Node.new(:lit, s, @i, @text[s...@i])
+    end
+  end
+
+  def container(type, close)
+    node = Node.new(type, @i, nil, nil, [], [])
+    @i += 1
+    loop do
+      skip
+      if @text[@i] == close
+        @i += 1
+        break
+      end
+      if type == :obj
+        key = value
+        raise ParseError, "object key expected at offset #{key.s}" unless key.type == :str
+        skip
+        raise ParseError, "':' expected at offset #{@i}" unless @text[@i] == ':'
+        @i += 1
+        node.pairs << [key.value, value]
+      else
+        node.items << value
+      end
+      skip
+      @i += 1 if @text[@i] == ','
+    end
+    node.e = @i
+    node
+  end
+
+  def get(obj, key)
+    pair = obj.pairs.find { |k, _| k == key }
+    pair && pair[1]
+  end
+
+  def str(obj, key)
+    n = get(obj, key)
+    n && n.type == :str ? n.value : nil
+  end
+
+  def files_array
+    n = get(@root, 'files')
+    raise ParseError, 'no "files" array' unless n && n.type == :arr
+    n
+  end
+
+  def target_names
+    n = get(@root, 'targets')
+    n ? n.items.map { |t| str(t, 'name') }.compact : []
+  end
+
+  def group?(item)
+    item.type == :obj && str(item, 'kind') == 'group'
+  end
+
+  # Absolute paths of every file that is in some target's compile-sources phase.
+  def registered(root, items = files_array.items, base = root, out = [])
+    items.each do |item|
+      next unless item.type == :obj
+      path = str(item, 'path')
+      if group?(item)
+        kids = get(item, 'children')
+        sub = path && !path.start_with?('<') ? base + path : base
+        registered(root, kids.items, sub, out) if kids
+      elsif path && !path.start_with?('<')
+        members = get(item, 'target-membership')
+        phases = members ? members.items.map(&:value) : []
+        out << (base + path).to_s if phases.any? { |m| m.to_s.end_with?('/compile-sources') }
+      end
+    end
+    out
+  end
+
+  # Inserts `entry` (a block of text lines) before the closing bracket of `arr`.
+  def append(arr, entry)
+    close = arr.e - 1
+    line_start = @text.rindex("\n", close - 1)
+    if line_start.nil? || @text[line_start + 1...close] !~ /\A\s*\z/
+      raise ParseError, 'array is not laid out one item per line'
+    end
+    indent = @text[line_start + 1...close]
+    block = entry.map { |l| "#{indent}  #{l}\n" }.join
+    @text = @text[0..line_start] + block + @text[line_start + 1..-1]
+    reparse
+  end
+
+  def find_group(arr, name)
+    arr.items.find { |it| group?(it) && (str(it, 'path') == name || str(it, 'name') == name) }
+  end
+
+  # The children array reached by walking the group names from the top, or nil.
+  def children_at(names)
+    arr = files_array
+    names.each do |name|
+      group = find_group(arr, name)
+      return nil unless group
+      arr = get(group, 'children')
+    end
+    arr
+  end
+
+  def add_file(abs, root, target)
+    rel = Pathname.new(abs).relative_path_from(root)
+    comps = rel.dirname.each_filename.reject { |c| c == '.' }
+    comps.each_index do |i|
+      next if children_at(comps[0..i])
+      append(children_at(comps[0...i]), ['{', '  "kind": "group",', "  \"path\": #{comps[i].to_json},", '  "children": [', '  ],', '},'])
+    end
+    append(children_at(comps), ["{ \"path\": #{rel.basename.to_s.to_json}, \"index\": true, \"target-membership\": [ #{(target + '/compile-sources').to_json} ] },"])
+  end
+end
+
+if mode == 'xcproj'
+  path = File.join(dir, "#{app}.xcodeproj", 'project.xcproj')
+  begin
+    proj = Xcproj.new(File.read(path))
+    done = proj.registered(root)
+    todo = files.reject { |f| done.include?(f) }
+    if check
+      todo.each { |f| puts f }
+      exit(todo.empty? ? 0 : 1)
+    end
+    todo.each { |abs| proj.add_file(abs, root, target_for(abs, root, app, proj.target_names)) }
+    File.write(path, proj.text) unless todo.empty?
+  rescue Xcproj::ParseError => e
+    warn "cannot use #{path}: #{e.message}"
+    exit(check ? 1 : 3)
+  end
+  exit 0
+end
+
 begin
   require 'xcodeproj'
 rescue LoadError
@@ -22,16 +222,7 @@ rescue LoadError
   exit 3
 end
 
-mode, reason, = Open3.capture3(File.join(__dir__, 'detect_file_registration.sh'), dir, app)
-mode = mode.strip
-unless mode == 'classic'
-  warn(mode == 'synchronized' ? 'project uses synchronized groups: new files compile without registration.' : reason.to_s.strip)
-  warn "mode is #{mode}: stop and ask the human." unless mode == 'synchronized'
-  exit 3
-end
-
 project = Xcodeproj::Project.open(File.join(dir, "#{app}.xcodeproj"))
-root = Pathname.new(File.expand_path(dir))
 
 registered = lambda do |path|
   project.targets.any? do |t|
@@ -39,19 +230,21 @@ registered = lambda do |path|
   end
 end
 
-todo = files.map { |f| File.expand_path(f) }.reject { |f| registered.call(f) }
+todo = files.reject { |f| registered.call(f) }
 if check
   todo.each { |f| puts f }
   exit(todo.empty? ? 0 : 1)
 end
 
-target = project.targets.find { |t| t.name == app } || project.targets.first
+names = project.targets.map(&:name)
 todo.each do |abs|
+  name = target_for(abs, root, app, names)
+  target = project.targets.find { |t| t.name == name } || project.targets.first
   group = project.main_group
-  Pathname.new(abs).relative_path_from(root).dirname.each_filename do |name|
-    next if name == '.'
-    group = group.children.find { |c| c.isa == 'PBXGroup' && (c.path == name || c.name == name) } ||
-            group.new_group(name, name)
+  Pathname.new(abs).relative_path_from(root).dirname.each_filename do |comp|
+    next if comp == '.'
+    group = group.children.find { |c| c.isa == 'PBXGroup' && (c.path == comp || c.name == comp) } ||
+            group.new_group(comp, comp)
   end
   target.add_file_references([group.new_file(abs)])
 end

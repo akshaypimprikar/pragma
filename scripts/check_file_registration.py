@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Fail when a new .swift file is not in a classic-group Xcode project.
 
-Runs plutil -lint on the project file, xcodebuild -list on the project, and checks
-every given .swift file is in a Sources build phase (via register_files.rb --check).
-Projects with synchronized groups pass without checks; stop/xcproj modes fail.
+Runs plutil -lint on a project.pbxproj (a project.xcproj is parsed by register_files.rb
+instead), xcodebuild -list on the project, and checks every given .swift file is in a
+Sources build phase (via register_files.rb --check). Projects with synchronized groups
+pass without checks; stop mode fails.
 
 Usage: check_file_registration.py --project-dir DIR --app-name NAME FILE...
 Exit codes: 0 pass, 1 gate failed, 2 stop and ask the human.
@@ -31,15 +32,16 @@ def main():
     if mode == "synchronized":
         print("synchronized groups: new files compile without registration, gate skipped")
         return 0
-    if mode != "classic":
+    if mode not in ("classic", "xcproj"):
         print(f"mode {mode}: stop and ask the human. {detect.stderr.strip()}")
         return 2
 
     bundle = os.path.join(args.project_dir, f"{args.app_name}.xcodeproj")
-    lint = subprocess.run(["plutil", "-lint", os.path.join(bundle, "project.pbxproj")], capture_output=True, text=True)
-    if lint.returncode != 0:
-        print(f"plutil -lint failed: {lint.stdout.strip()} {lint.stderr.strip()}")
-        return 1
+    if mode == "classic":
+        lint = subprocess.run(["plutil", "-lint", os.path.join(bundle, "project.pbxproj")], capture_output=True, text=True)
+        if lint.returncode != 0:
+            print(f"plutil -lint failed: {lint.stdout.strip()} {lint.stderr.strip()}")
+            return 1
     listing = subprocess.run(["xcodebuild", "-list", "-project", bundle], capture_output=True, text=True)
     if listing.returncode != 0:
         print(f"xcodebuild -list failed: {listing.stderr.strip()[-300:]}")
@@ -57,6 +59,9 @@ def main():
     if chk.returncode == 3:
         print(chk.stderr.strip())
         return 2
+    if chk.stderr.strip():
+        print(chk.stderr.strip())
+        return 1
     print("new .swift files not in any Sources build phase (run scripts/register_files.rb):")
     print(chk.stdout.strip())
     return 1

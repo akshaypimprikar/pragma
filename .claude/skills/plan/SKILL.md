@@ -50,7 +50,7 @@ The plan must be executable by a subagent with no prior context. Every task need
 - Repository Protocols: Foundation-only imports
 - <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - Simulator: see AGENTS.md/CLAUDE.md — use your project's target device and OS version
-- File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
+- File inclusion: `scripts/detect_file_registration.sh . <AppName>` says how — `synchronized` (`PBXFileSystemSynchronizedRootGroup`): no project.pbxproj edits; `classic`: register each new file with `ruby scripts/register_files.rb . <AppName> <files>`; `xcproj` or `stop`: ask the human
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
 
 ## File locations

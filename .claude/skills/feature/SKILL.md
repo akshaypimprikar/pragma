@@ -30,7 +30,7 @@ Before starting any task:
   1. **RED commit** — the new/modified test file(s) only, no production code. Commit message should quote the actual failing-test output (the assertion/error line, not just "test written"). Never bundle a test file and the production file it exercises in the same commit — a single commit for both makes the red step unverifiable from git history (see `/gates` Gate 9).
   2. **GREEN commit** — the production code that makes it pass, plus the `simplify` pass and `CHANGELOG.md` entry. Commit message should quote the passing-test output line.
 - Run the full test suite (including UI tests) after every task — do not proceed if tests fail. Use the "Full test suite" command in AGENTS.md/CLAUDE.md; never add `-skip-testing` or `-only-testing` flags.
-- Never edit `project.pbxproj` — files auto-compile via `PBXFileSystemSynchronizedRootGroup`
+- Never hand-edit `project.pbxproj`. With synchronized groups (`scripts/detect_file_registration.sh . <AppName>` prints `synchronized`) files auto-compile; with `classic` groups run `ruby scripts/register_files.rb . <AppName> <new files>` after creating each file; on `xcproj` or `stop`, ask the human
 
 ## Build commands (all run from git root — see AGENTS.md/CLAUDE.md for exact path)
 

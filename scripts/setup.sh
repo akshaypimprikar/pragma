@@ -121,6 +121,9 @@ info "Copying support scripts…"
 mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/detect_build_target.sh"   "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_file_registration.sh" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/register_files.rb"        "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_file_registration.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
@@ -237,7 +240,7 @@ xcodebuild test ${BUILD_TARGET} -scheme ${SCHEME} -destination 'platform=iOS Sim
 \`\`\`
 
 > **Simulator:** pin \`OS=\` explicitly to your installed runtime version (check with \`xcrun simctl list runtimes\`; \`xcodebuild\` requires an exact match) — a bare \`name=iPhone 17\` destination becomes ambiguous the moment a second iOS runtime is installed, since each gets its own "iPhone 17" device. If a UI test fails with \`RequestDenied ... SBMainWorkspace\`, the simulator's SpringBoard state is corrupt — \`xcrun simctl erase <device-id>\` and reboot it; killing \`Simulator.app\`/\`CoreSimulatorService\` alone won't fix it.
-> **File inclusion:** \`PBXFileSystemSynchronizedRootGroup\` (Xcode 16) — drop a \`.swift\` file in the right folder and it compiles automatically. Never edit \`project.pbxproj\`.
+> **File inclusion:** with \`PBXFileSystemSynchronizedRootGroup\` (Xcode 16) a \`.swift\` file dropped in the right folder compiles automatically. With classic groups, run \`ruby scripts/register_files.rb . ${APP_NAME} <new files>\`; \`scripts/detect_file_registration.sh . ${APP_NAME}\` says which applies (\`xcproj\` or \`stop\`: ask the human). Never hand-edit \`project.pbxproj\`.
 
 ## Architecture
 

@@ -9,7 +9,9 @@ disable-model-invocation: true
 Sync the pragma template repo so it stays consistent with your project's current conventions.
 
 ## Trigger
-Run manually after any change to AGENTS.md/CLAUDE.md, branch strategy, build commands, or agent conventions: `/sync-workflow`
+Run once a week, or before a pragma release, as one batch of every project change to AGENTS.md/CLAUDE.md, branch strategy, build commands, or agent conventions since the last sync: `/sync-workflow`
+
+Do not port a project fix to pragma by hand as its own `fix/*` PR. It waits for the batch, where the `sync` lane's `Synced from:` line stands in for a second review of a change already reviewed in the project (2026-10-05: the same 4-line Gate 0 fix was reviewed twice). The exception is a fix that breaks pragma users today: sync it as soon as the project PR merges.
 
 ## Process
 

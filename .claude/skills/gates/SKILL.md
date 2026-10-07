@@ -33,13 +33,18 @@ the SHA, because the gate summary must describe the commit that actually opens t
 
 ### Gate 0 — Build-relevant change check (runs first; determines if Gates 1–2 apply)
 ```bash
-git diff develop...HEAD --name-only -- '*.swift' '*.pbxproj' '*.xcproj' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xcscheme' '*.xctestplan'
+GATE0="$(git rev-parse --git-dir)/gate0-$(git rev-parse HEAD)"   # untracked, so the tree stays clean
+git diff develop...HEAD --name-only -- '*.swift' '*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan' | tee "$GATE0"
 ```
+This is the only copy of the build-relevance list. `$GATE0` keeps the result for the pinned SHA (the file is named
+after it, so a stale result from another commit is never read); Gates 1 and 2 are conditional on this listing, so do not repeat the list.
 If this returns **no output**, skip Gates 1 and 2 — nothing that affects the build or test suite changed. Continue from Gate 3.
 If any file is listed, run Gates 1 and 2 as normal. Project, config, plist, entitlement and
 package-manifest, scheme and test-plan changes are included on purpose (a test-plan edit changes which tests run; add any other build input your project has — asset or string catalogs, data models): a build-setting change (e.g. a default actor-isolation
 or language-mode setting in the `.pbxproj`, or in the `.xcproj` that the Xcode 27.2 beta can convert a project to) can break the build or change runtime behavior without
-touching a `.swift` file. Gates 3–11 still scope their own greps to `*.swift` where they say so.
+touching a `.swift` file.
+The project and workspace bundles are matched whole (`*.xcodeproj/**`, `*.xcworkspace/**`), not by file extension, so `project.pbxproj`, the `project.xcproj` that replaces it after `xcodebuild -convert-project xcproj`, shared schemes and workspace settings all count, and so does any file a later Xcode adds to the bundle. `scripts/tests/test_gate0_pathspec.py` fails if a second copy of this list appears or if it stops matching those files.
+Gates 3–11 still scope their own greps to `*.swift` where they say so.
 
 ### Gate 1 — Build (conditional: Gate 0 listed files)
 ```bash
@@ -51,17 +56,10 @@ xcsift < "$LOG"
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "BUILD SUCCEEDED" "$LOG" \
   && echo "GATE 1 PASS" || echo "GATE 1 FAIL (xcodebuild exit $RC, log bytes $(wc -c < "$LOG"))"
 ```
-`xcodebuild` writes to a log file and `xcsift` reads that file afterwards — there is no pipeline, so
-its own exit status is captured directly (a `| xcsift` pipeline hides it unless `pipefail`,
-`PIPESTATUS` (bash) or `pipestatus` (zsh) is used, and `2>&1 | xcsift` on an empty or crashed run
-prints a clean-looking summary). Pass: `GATE 1 PASS` — non-empty log, exit 0, and the `BUILD SUCCEEDED`
+Pass: `GATE 1 PASS` — non-empty log, exit 0, and the `BUILD SUCCEEDED`
 marker. Fail: anything else — an empty log or a non-zero exit is a failure, never "no errors seen".
-Stop immediately — a test run on a broken build is meaningless.
-
-Advisory: a compile error in SwiftUI code that built before an Xcode major-version update may be an SDK
-source-compatibility break rather than a bug in the change — see
-[`docs/xcode-27-sdk-migration.md`](https://github.com/akshaypimprikar/pragma/blob/develop/docs/xcode-27-sdk-migration.md)
-for the two known Xcode 27 patterns.
+Stop immediately — a test run on a broken build is meaningless. Why there is no `| xcsift` pipeline, and the
+Xcode 27 SDK-break advisory: `reference.md` § Gate 1.
 
 ### Gate 2 — Full test suite (conditional: Gate 0 listed files)
 ```bash
@@ -74,16 +72,7 @@ PASSED=$(grep -E "^Test [Cc]ase '.*' passed|^[✔✓] Test .*passed" "$LOG" | gr
 [ -s "$LOG" ] && [ "$RC" -eq 0 ] && grep -q "TEST SUCCEEDED" "$LOG" && [ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] \
   && echo "GATE 2 PASS ($PASSED tests executed)" || echo "GATE 2 FAIL (xcodebuild exit $RC, passed=$PASSED, failed=$FAILED)"
 ```
-Pass: `GATE 2 PASS` with an executed-test count above zero. The count is required because
-`xcodebuild test` can report `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change
-matches nothing. The count is read from per-test-case result lines: `Test Case '…' passed` / `Test case '…' passed`,
-and `✔ Test "…" passed …` for Swift Testing's own console format. On Xcode 27, `xcodebuild test` prints
-Swift Testing results in the `Test case '…' passed` form too (verified 2026-09-24 on a Swift Testing
-suite: 191 `Test case` lines, 0 `✔` lines); the `✔` alternative covers other versions and runners, and the Swift Testing run summary (`✔ Test run with N tests … passed`) is excluded so a run that executes nothing can't count as one test. Both
-symbol variants (`✔`/`✓`, `✘`/`✗`) are matched since different Xcode/terminal versions render this
-differently — this has not been confirmed against every Xcode version's exact output, so **run it once
-against a real green suite before trusting it**, and adjust the pattern if your version words or
-formats the lines differently.
+Pass: `GATE 2 PASS` with an executed-test count above zero (why zero fails, and how the count is read: `reference.md` § Gate 2).
 Fail: empty log, non-zero exit, any failed test case, or zero
 executed tests (a test that fails once and passes on `-retry-tests-on-failure` still counts as failed here — fail-closed on purpose). Report the
 executed-test count in the gate summary.
@@ -107,7 +96,7 @@ grep -A 10 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -v "^##" | grep -
 ```
 Pass: at least one non-empty line under `## [Unreleased]`.
 Fail: section missing or empty — create the section and add a one-line summary per task, using `git log develop..HEAD --oneline` to enumerate commits. `/feature`'s two-commit-per-task structure means only the GREEN (implementation) commit carries user-facing content — summarize those, skipping RED (test-only) commits, which have nothing to summarize.
-N/A: a `/release` feature-log PR that changes only `.claude/context/feature-log.md`, and only if this gate fails on it. A feature-log entry is not a user-facing change. Report `[–] N/A (feature-log only)`.
+N/A: a PR that changes only `.claude/context/feature-log.md` (a standalone feature-log correction; `/release` puts its entry in the release commit), and only if this gate fails on it. A feature-log entry is not a user-facing change. Report `[–] N/A (feature-log only)`.
 
 ### Gate 6 — Coverage (conditional: new Swift files on branch)
 ```bash
@@ -148,14 +137,7 @@ project's layer names) that has a matching test file, the script checks that the
 was added in a strictly earlier commit than the implementation — never the same commit,
 never a later one.
 
-This exists because "write a failing test first" is unverifiable from `/feature`'s
-instruction alone — nothing distinguishes an agent that watched the test fail from one that
-wrote both together and never ran it red. Git history is the only outside evidence, and only
-a RED-then-GREEN commit split preserves it. `/feature`'s per-task rules carry the discipline
-itself (self-contained — don't gate it on an external skill invocation, since a plugin's
-`enabledPlugins: true` flag doesn't guarantee its skills are actually invocable in a given
-environment); this gate is the independent, git-history-based check that the discipline
-actually happened, regardless of how it was instructed.
+(Why this is checked from git history: `reference.md` § Gate 9.)
 
 Pass: script exits 0 (no violations, or nothing in scope to check).
 Fail: script lists each violation (file, commit, reason) — fix by re-doing the task as two
@@ -303,16 +285,7 @@ Gates:
 Fix any failures before continuing.
 
 ## Autonomous gate-fixing loop
-If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
-```
-/loop Fix failing gates and re-check. Stop when all blocking gates pass (Gates 1–11, 10 blocking; Gate 8 abstraction bloat is advisory, `[i]` only, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated (or Gate 5 N/A on a feature-log-only PR), coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
-```
-Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
-
-To drive the full feature-to-PR cycle autonomously (no interval = Claude self-paces):
-```
-/loop run /feature on the next uncovered task from the plan. Then run /gates. Stop when all blocking gates pass.
-```
+If gates fail and need iterative fixes, use the `/loop` prompts in `reference.md` § Autonomous gate-fixing loop, run as a separate top-level command. Adding, renaming or removing a gate: update that loop's stop condition (gate count, advisory list) in the same commit.
 
 ## After all gates pass — open the PR
 
@@ -364,19 +337,14 @@ Exceptions: `release/*` and `hotfix/*` branches use `--base main`, except a hotf
 
 ## Guard against self-modifying guardrail files
 
-Gates 0–11 are agent-instruction checks, so an agent under pressure to make a stuck gate pass could edit a gate definition instead of fixing the violation, then report a clean summary. This is most likely in an unattended `/loop` run with no human turn in between. Two layers close that:
-
-- **Live block:** `.claude/hooks/guard_protected_paths.py`, a native `PreToolUse` hook installed by `setup.sh` and `/pragma:init` (`--no-guard-hook` opts out). On a `feature/*` branch it blocks `Write`, `Edit` and `MultiEdit`, and, best effort, `Bash` writes, to skills (`.claude/skills/*/SKILL.md`), `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/context/invariants.md`, `.claude/settings.json`, `.claude/hooks/*` and `scripts/check_*`, at the repo root or under any subdirectory (a Claude project inside a monorepo). The fix is to make that change on a `chore/*` or `fix/*` branch.
-- **CI backstop:** Gate 11's check 1 (`scripts/check_gate_integrity.py`) flags the same set of files on a `feature/*` PR, through `GUARDED_PATH_GLOBS`. The `gates` job (`.github/workflows/gates.yml`) runs on every PR, so a PR that only touches them still runs it. A step in that job runs the hook's self-test, which fails if the hook's glob list and the script's differ (it runs the PR's own copy, so it catches an honest slip, not a deliberate one). This catches a plain commit and push that never went through Claude Code.
-
-What is not covered: the hook's Bash detection is a best-effort parse, so `python -c`, interpreter heredocs, variable or glob expansion (including `cd $VAR`), `find -exec` or `-delete`, `xargs rm` fed from stdin, `git checkout <ref> -- file`, `git restore` and `rm -rf <dir that only contains a nested project>` are not detected. A symlink that already exists is followed; one created and written through in the same command is not. The hook only runs in sessions that load the project's own `.claude/settings.json`: verified 2026-09-23 that a session started from a parent directory did not fire it, so start Claude Code from the project root. The CI backstop applies either way. The hook fails open on bad input, no git repo or a detached HEAD, and it allows every edit off `feature/*`. Neither layer catches an agent that renames its branch away from `feature/*`. `.claude/settings.local.json` is not on the list. Pattern sourced from `karanb192/claude-code-hooks`'s "config-guard" hook, surfaced in the 2026-09-08 Agentic AI Intelligence Report.
+`.claude/hooks/guard_protected_paths.py` (a `PreToolUse` hook) blocks edits to the guarded files on a `feature/*` branch, and Gate 11 plus the `gates` CI job catch the same set on a plain commit and push. What each layer covers, what it misses, and where the pattern came from: `reference.md` § Guard. Known gaps, so a clean gate summary is not read as proof: the hook fails open on a detached HEAD and allows every edit off `feature/*`, it does not load in a session started from a parent directory, its Bash-write detection is best effort, a branch renamed away from `feature/*` escapes it, and `.claude/settings.local.json` (which can carry `disableAllHooks`) is not protected.
 
 ## Done when
 All 11 gates (Gates 1–11; Gate 0 only decides whether Gates 1–2 run) report: the 10 blocking gates pass and Gate 8, advisory, is listed, PR is open, and the PR URL is returned to the user.
 
 ## Tip — chain into code-review + review
-Once the PR is open, run `/pr-followup <PR>` to run `code-review` (medium)
-and then `/review`, and record both in the PR body for the `review-evidence`
+Once the PR is open, run `/pr-followup <PR>` to run `code-review` (medium, `app` lane
+only) and then `/review`, and record each in the PR body for the `review-evidence`
 check. `/test` runs before `/gates`, not after the PR opens.
 
 ## Standalone version

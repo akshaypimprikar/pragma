@@ -19,6 +19,7 @@ on:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTTests/**'
       - 'YOUR_PROJECTUITests/**'
       - 'scripts/**'

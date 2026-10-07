@@ -12,11 +12,13 @@ on:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTUITests/**'
   push:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTUITests/**'
 
 concurrency:

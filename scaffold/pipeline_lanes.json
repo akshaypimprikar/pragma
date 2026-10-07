@@ -2,6 +2,7 @@
   "release": {
     "paths": [
       "YOUR_PROJECT.xcodeproj/project.pbxproj",
+      "YOUR_PROJECT.xcodeproj/project.xcproj",
       "CHANGELOG.md",
       ".claude/context/feature-log.md"
     ],
@@ -35,13 +36,24 @@
         "CONSTRAINTS.md",
         "docs/superpowers/**"
       ],
-      "evidence": ["gate_summary", "review_verdict", "code_review", "motivating_incident"]
+      "evidence": ["gate_summary", "review_verdict", "motivating_incident"],
+      "small_pr": {
+        "max_changed_lines": 30,
+        "exclude_paths": [".claude/hooks/**", ".claude/skills/gates/**", ".claude/skills/review/**", "scripts/check_*", "scripts/review_verdict.py", "scripts/install_*", "scripts/pipeline_lanes.json", "scaffold/pipeline_lanes.json", "scaffold/.claude/hooks/**", ".github/**"],
+        "evidence": ["gate_summary", "motivating_incident"]
+      }
     }
   ],
   "default": {
     "name": "docs",
     "evidence": ["gate_summary"]
   },
+  "review_carryover_paths": [
+    "docs/*.md",
+    "docs/pipeline-review/**",
+    "CHANGELOG.md",
+    "README.md"
+  ],
   "carryover_paths": [
     ".claude/context/rejections.md",
     ".claude/context/incidents.md"

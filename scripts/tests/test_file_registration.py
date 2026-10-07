@@ -117,8 +117,10 @@ class RegisterTests(TempDirCase):
         b = add_swift(self.d)
         self.register(b)
         self.assertEqual(self.register(b).returncode, 0)
-        pbx = open(os.path.join(self.d, "App.xcodeproj", "project.pbxproj")).read()
-        self.assertEqual(pbx.count("B.swift in Sources"), 1)
+        with open(os.path.join(self.d, "App.xcodeproj", "project.pbxproj")) as f:
+            pbx = f.read()
+        build_files = [l for l in pbx.splitlines() if "B.swift in Sources" in l and "isa = PBXBuildFile" in l]
+        self.assertEqual(len(build_files), 1)
 
     def test_register_creates_missing_groups(self):
         make_project(self.d)

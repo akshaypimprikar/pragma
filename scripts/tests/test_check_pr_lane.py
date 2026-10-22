@@ -51,6 +51,12 @@ class SmallPrTests(unittest.TestCase):
         self.assertIn("review_verdict", lane.evidence_for_change(cfg, "pipeline", ["scripts/check_x.py"], 5))
         self.assertEqual(lane.evidence_for_change(cfg, "pipeline", ["scripts/other.py"], 5), ["gate_summary"])
 
+    def test_repo_config_scaffold_workflow_keeps_review(self):
+        # The scaffold workflows ship to adopters, so a small edit to one still needs /review (pragma #121).
+        cfg = lane.load_config(os.path.join(os.path.dirname(__file__), "..", "pipeline_lanes.json"))
+        self.assertIn("review_verdict", lane.evidence_for_change(
+            cfg, "pipeline", ["scaffold/.github/workflows/pr-checks.yml"], 5))
+
     def test_bool_max_changed_lines_rejected(self):
         bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr={"max_changed_lines": True})])
         with self.assertRaises(lane.ConfigError):

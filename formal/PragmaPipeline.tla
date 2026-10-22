@@ -210,8 +210,8 @@ AuditTests ==
                   relStage, relPre, relShape, relEv, tagTests, ghRel >>
 
 \* /gates pins the head SHA (.claude/skills/gates/SKILL.md:23-32). Gate 9 fails when any task
-\* bundled its test and code (SKILL.md:130). It can run again after the PR is open, when a
-\* fix changes HEAD (SKILL.md:338). A compliant agent never skips /test.
+\* bundled its test and code (SKILL.md:130-153). It can run again after the PR is open, when a
+\* fix changes HEAD (SKILL.md:334-335). A compliant agent never skips /test.
 RunGates ==
   /\ \/ stage \in { "tested", "gated", "pr_open" }
      \/ (stage = "impl" /\ AllDone /\ ~Compliant)
@@ -223,7 +223,7 @@ RunGates ==
                   relStage, relPre, relShape, relEv, tagTests, ghRel >>
 
 \* gh pr create follows a gate summary at the pinned SHA; a failed gate means "do NOT open
-\* the PR" (.claude/skills/gates/SKILL.md:21, :247-252, :291-340). The summary goes into the PR
+\* the PR" (.claude/skills/gates/SKILL.md:21, :247-252, :291-337). The summary goes into the PR
 \* body, and opening the PR fires both required checks.
 OpenPR ==
   /\ stage = "gated" /\ gateSha = head
@@ -241,7 +241,7 @@ OpenPR ==
 (* PR flow: pushes, CI, /pr-followup, /review, merge                       *)
 (***************************************************************************)
 
-\* /gates re-run after the PR is open: update the body's SHA (gates/SKILL.md:338). A
+\* /gates re-run after the PR is open: update the body's SHA (gates/SKILL.md:334-335). A
 \* non-compliant agent may write any SHA; check_review_evidence.py reads the line only
 \* (:90-96) and cannot tell whether the gates really ran there.
 EditBodyGate ==
@@ -323,7 +323,7 @@ EditBody ==
 \* CHANGES REQUESTED round 1 and can only approve, because after round 2 the remaining
 \* non-HIGH findings become issues and a remaining HIGH goes to the user
 \* (.claude/skills/review/SKILL.md:33-40). Gate verification: APPROVED needs the gate line
-\* at the head SHA and a passing `gates` job (review/SKILL.md:70-74, :96-101). The lane
+\* at the head SHA and a passing `gates` job (review/SKILL.md:70-74, :110-117). The lane
 \* decides whether /review runs at all (review/SKILL.md:28-31, pr-followup/SKILL.md:34-47).
 \* Posted as a separate review object; a compliant agent then edits the body (SKILL.md:329-331).
 PostRound(v) ==

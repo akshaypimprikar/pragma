@@ -18,6 +18,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 - **Scaffold workflows pin `setup-xcode` and get a read-only token.** `pr-checks.yml`, `ui-tests.yml`, `concurrency-advisory.yml` and `release.yml` pin `maxim-lobanov/setup-xcode` to the v1.7.0 commit SHA instead of the movable `@v1` tag, so a retagged release cannot change what runs. Their jobs now declare `permissions: contents: read` (the release job keeps `contents: write`), so they no longer inherit the repo's default token scope.
+- **A small change to a scaffold workflow skipped `/review`.** `small_pr.exclude_paths` in `scripts/pipeline_lanes.json` listed `.github/**` but not `scaffold/.github/**`, so a pipeline PR under 30 lines that edited the workflows adopters copy needed no review verdict. It now lists both; `scripts/tests/test_check_pr_lane.py` checks the repo config.
 - **Concurrency Advisory always reported 0 ThreadSanitizer reports.** TSan writes to the test process's stderr, not to `tsan.log`. The scaffold workflow now saves a result bundle and counts reports from its test output; it says "report count unavailable" when no output was captured (mirrors FinanceTracker #156).
 - **Gate 0 missed build-setting changes in an `.xcproj` project (#100).** The Xcode 27.2 beta (27B5028f) can convert a project to the `.xcproj` format, which replaces `project.pbxproj`. Gate 0 matched only `*.pbxproj`, so a build-setting change in `project.xcproj` (for example `SWIFT_VERSION`) skipped build and test. The filter now includes `*.xcproj`.
 

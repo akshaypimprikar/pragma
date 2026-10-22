@@ -1,4 +1,4 @@
-# Pragma
+# Pragma for iOS: a Claude Code skill pipeline
 
 > You approve twice. The agent ships the rest.
 
@@ -121,7 +121,7 @@ Pragma installs three layers into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| Agent skills | `.claude/skills/` | 16 Agent Skills (SKILL.md files) that cover the full software development life cycle. You start each skill in the same way as a Claude Code command. |
+| Agent skills | `.claude/skills/` | 17 Agent Skills (SKILL.md files) that cover the full software development life cycle. You start each skill in the same way as a Claude Code command. |
 | CI pipeline | `scaffold/.github/workflows/` | 3 GitHub Actions workflows: PR checks, UI tests, and release |
 | Support scripts | `scripts/` | Scripts for simulator selection, coverage enforcement, TDD-order checks, and gate-integrity checks. One optional script reduces simulator memory use in CI. |
 

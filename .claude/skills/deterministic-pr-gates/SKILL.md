@@ -1,6 +1,6 @@
 ---
 name: deterministic-pr-gates
-description: Run deterministic, scriptable pre-PR verification gates (build, full test suite, coverage threshold, branch naming, changelog presence, force-unwrap/duplication heuristics, and project-specific architecture/layer rules via grep) before a PR is opened or before a human reviewer looks at the diff. Use when a user asks whether a branch is ready for PR, wants a pre-PR checklist automated, wants CI-equivalent checks run locally and fast, or wants pre-merge verification that doesn't depend on an LLM's subjective judgment of code quality. Works standalone in any project — no other skill or pipeline required.
+description: Run deterministic, scriptable pre-PR verification gates (build, full test suite, coverage threshold, branch naming, changelog presence, force-unwrap/duplication heuristics, project-specific architecture/layer rules via grep, and gate integrity) before a PR is opened or before a human reviewer looks at the diff. Use when a user asks whether a branch is ready for a PR, what to check before opening one, whether a docs-only or config-only branch can skip the build and tests, how to report skipped checks, or wants pre-merge verification that doesn't depend on an LLM's subjective judgment. Also use when someone proposes weakening a check to get green: disabling or deleting a test, lowering a coverage threshold, or editing a gates or CI file on a feature branch. Works standalone in any project, no other skill or pipeline required.
 ---
 
 # Deterministic Pre-PR Gates

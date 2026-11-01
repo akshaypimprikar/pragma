@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared by scripts/setup.sh and .claude/commands/init.md — copies
 # .claude/skills/ into a target project, backing up any customization and
-# migrating an older .claude/commands/<name>.md install out of the way.
+# migrating an older .claude/commands/<name>.md install out of the way,
+# then links each skill into .agents/skills/ for Codex.
 # The two callers must not drift on what counts as "customized": this is
 # the single implementation both invoke.
 #
@@ -77,6 +78,38 @@ if [[ -d "$PROJECT_DIR/.claude/commands" ]]; then
     if [[ -n "$MIGRATED" ]]; then
         echo "WARN: superseded old .claude/commands/ file(s) by the new skill of the same name:${MIGRATED}"
         echo "WARN: each was backed up before removal — check ${MIGRATE_BACKUP_DIR#"$PROJECT_DIR"/} if you had customized any of them, then re-apply into the matching .claude/skills/<name>/SKILL.md"
+    fi
+fi
+
+# Codex reads skills from .agents/skills/, not .claude/skills/. Link each
+# pragma skill there so .claude/skills/ stays the only copy. Per-skill links,
+# not one directory link, so the project's own .agents/skills/ entries stay.
+# A project that already links the whole directory to .claude/skills is done.
+# The links are relative, so they only resolve from a real .agents/skills/
+# directory: if .agents or .agents/skills is a symlink elsewhere, a file or a
+# broken link, warn and skip rather than write dangling links or stop the install.
+AGENTS_DIR="$PROJECT_DIR/.agents"
+AGENTS_SKILLS="$AGENTS_DIR/skills"
+if [[ "$AGENTS_SKILLS" -ef "$PROJECT_DIR/.claude/skills" ]]; then
+    :
+elif [[ -L "$AGENTS_DIR" || -L "$AGENTS_SKILLS" || ( -e "$AGENTS_DIR" && ! -d "$AGENTS_DIR" ) || ( -e "$AGENTS_SKILLS" && ! -d "$AGENTS_SKILLS" ) ]]; then
+    echo "WARN: .agents/skills/ is not a real directory (a symlink elsewhere, a file or a broken link) — skipped linking pragma's skills for Codex"
+    echo "WARN: make .agents/skills/ a real directory, or a link to .claude/skills, and re-run to link them"
+else
+    mkdir -p "$AGENTS_SKILLS"
+    NOT_LINKED=""
+    while IFS= read -r rel; do
+        name="$(dirname "$rel")"
+        link="$AGENTS_SKILLS/$name"
+        # Already resolves to the project's copy (this link, or one by another path).
+        if [[ -L "$link" && "$link" -ef "$PROJECT_DIR/.claude/skills/$name" ]]; then continue; fi
+        # Anything else under that name is the project's own: leave it.
+        if [[ -e "$link" || -L "$link" ]]; then NOT_LINKED="$NOT_LINKED $name"; continue; fi
+        ln -s "../../.claude/skills/$name" "$link"
+    done <<< "$PRAGMA_SKILLS"
+    if [[ -n "$NOT_LINKED" ]]; then
+        echo "WARN: .agents/skills/ already has an entry that is not pragma's link, left as is:${NOT_LINKED}"
+        echo "WARN: Codex uses that entry instead of pragma's skill — remove it and re-run to link pragma's"
     fi
 fi
 

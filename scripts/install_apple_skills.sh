@@ -10,8 +10,9 @@
 #
 # The allowlist holds only skills reviewed against pragma's gates. Reviewed on
 # Xcode 27.2 (27B52), 2026-11-01; left out on purpose:
-#   - app-intents-whats-new-27: its testing recipe writes XCTestCase unit tests,
-#     which /test and Gate 7 forbid
+#   - app-intents-whats-new-27: its testing recipe writes XCTestCase unit tests;
+#     /test allows XCTest only for UI tests, and the Gate 10 framework check
+#     flags it
 #   - app-resizability: lists adding SceneDelegate.swift to .pbxproj as an
 #     auto-fix; /feature never hand-edits project.pbxproj
 #   - modernize-tests: turns XCTest skip calls into Swift Testing's disabled

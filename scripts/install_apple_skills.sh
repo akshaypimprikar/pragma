@@ -14,8 +14,8 @@
 #     which /test and Gate 7 forbid
 #   - app-resizability: lists adding SceneDelegate.swift to .pbxproj as an
 #     auto-fix; /feature never hand-edits project.pbxproj
-#   - modernize-tests: maps XCTSkipIf to @Test(.disabled(if:)), which
-#     check_gate_integrity.py flags as a new suppression marker
+#   - modernize-tests: turns XCTest skip calls into Swift Testing's disabled
+#     trait, which check_gate_integrity.py flags as a new suppression marker
 #   - device-interaction, audit-xcode-security-settings: build, run or edit
 #     build settings and entitlements outside /feature and /gates
 #   - the rest: not reviewed yet

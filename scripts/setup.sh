@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] [--apple-skills] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
 # --no-guard-hook — skip installing the PreToolUse guard hook (see below)
 # --no-review-alert — skip installing the pipeline-review alert hook (see below)
+# --apple-skills — also install Xcode 27's allowlisted Apple Agent Skills to
+#                  ~/.claude/skills (see scripts/install_apple_skills.sh)
 #
 # What it does:
 #   - Copies .claude/skills/, .claude/context/, scripts/, and
@@ -49,11 +51,13 @@ die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 # ── Args ─────────────────────────────────────────────────────────────────────
 INSTALL_GUARD_HOOK=1
 INSTALL_REVIEW_ALERT=1
+INSTALL_APPLE_SKILLS=0
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
         --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
         --no-review-alert) INSTALL_REVIEW_ALERT=0 ;;
+        --apple-skills) INSTALL_APPLE_SKILLS=1 ;;
         *) POSITIONAL+=("$arg") ;;
     esac
 done
@@ -63,7 +67,7 @@ APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] [--apple-skills] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
 # pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
@@ -273,6 +277,13 @@ CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"
     success "CLAUDE.md generated (imports AGENTS.md)"
+fi
+
+# ── 6. Apple Agent Skills (opt-in) ───────────────────────────────────────────
+# User-level, not copied into the project: Apple's files carry no license header.
+if [[ "$INSTALL_APPLE_SKILLS" -eq 1 ]]; then
+    info "Installing allowlisted Apple Agent Skills…"
+    "$SCRIPT_DIR/install_apple_skills.sh" || warn "Apple Agent Skills not installed (setup continues)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────

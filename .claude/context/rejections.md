@@ -128,3 +128,15 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/detect_project_settings.sh:19
 **Caught by:** this review
+
+## 2026-11-01 — PR#125 — .agents/skills linking wrote dangling links through a redirected directory
+**What was wrong:** When .agents/skills was a symlink to any directory other than .claude/skills, the -ef guard did not fire, and sync_skills.sh wrote the relative ../../.claude/skills/<name> links inside the redirected directory, where all 17 resolved to nothing. It printed no warning.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/sync_skills.sh:88-95
+**Caught by:** this review
+
+## 2026-11-01 — PR#125 — .agents/skills linking aborted install on an unusable .agents path
+**What was wrong:** When .agents was a regular file or .agents/skills was a dangling symlink, mkdir -p failed under set -e. setup.sh and the plugin init stopped mid-install, after the skills were copied, for a layout that installed cleanly before the PR.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/sync_skills.sh:89
+**Caught by:** this review

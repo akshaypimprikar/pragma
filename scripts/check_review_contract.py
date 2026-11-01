@@ -103,7 +103,7 @@ def check(out, schema, head=None):
         what = "evidence of the subagent" if out["isolation"]["status"] == "isolated" else "a reason"
         errors.append(f"output.isolation: {out['isolation']['status']} with no {what}")
 
-    if out["posted"]["url"] is None and blank(out["posted"]["reason"]):
+    if blank(out["posted"]["url"]) and blank(out["posted"]["reason"]):
         errors.append("output.posted: not posted and no reason given")
 
     expected = review_verdict.decide(out["findings"])["verdict"]

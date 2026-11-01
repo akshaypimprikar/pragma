@@ -140,3 +140,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/sync_skills.sh:89
 **Caught by:** this review
+
+## 2026-11-01 — PR#131 — Round 1: empty posted URL counted as posted
+**What was wrong:** `check_review_contract.py` treated only `url: null` as "not posted", so `url: ""` with an empty reason met the contract, though its docstring and the CHANGELOG say every unposted review needs a reason. Strict structured-output modes tend to emit `""` rather than null.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_review_contract.py:106
+**Caught by:** this review

@@ -86,6 +86,9 @@ class ContractTests(unittest.TestCase):
     def test_unposted_without_reason_fails(self):
         self.assertTrue(any("posted" in e for e in self.check(output(posted=dict(url=None, reason="")))))
 
+    def test_empty_url_without_reason_fails(self):
+        self.assertTrue(any("posted" in e for e in self.check(output(posted=dict(url="", reason="")))))
+
     def test_finding_without_evidence_fails(self):
         self.assertTrue(any("F1" in e for e in self.check(output(findings=[finding(evidence="")]))))
 

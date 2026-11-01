@@ -20,6 +20,9 @@
 #   - Migrates an older install: any .claude/commands/<name>.md that shares
 #     a name with a skill being installed is backed up alongside it and
 #     removed, so the old command can't shadow or collide with the new skill
+#   - Links each skill into .agents/skills/<name> (relative symlink to
+#     .claude/skills/<name>) so Codex CLI finds it, leaving the project's own
+#     entries there alone
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
 #   - Copies scaffold/pipeline_lanes.json to scripts/pipeline_lanes.json (with
 #     YOUR_PROJECT replaced, and the detected persistence and ui filled in)

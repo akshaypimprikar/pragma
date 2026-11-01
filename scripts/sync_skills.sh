@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared by scripts/setup.sh and .claude/commands/init.md — copies
 # .claude/skills/ into a target project, backing up any customization and
-# migrating an older .claude/commands/<name>.md install out of the way.
+# migrating an older .claude/commands/<name>.md install out of the way,
+# then links each skill into .agents/skills/ for Codex.
 # The two callers must not drift on what counts as "customized": this is
 # the single implementation both invoke.
 #
@@ -84,18 +85,27 @@ fi
 # pragma skill there so .claude/skills/ stays the only copy. Per-skill links,
 # not one directory link, so the project's own .agents/skills/ entries stay.
 # A project that already links the whole directory to .claude/skills is done.
-AGENTS_SKILLS="$PROJECT_DIR/.agents/skills"
-if [[ ! "$AGENTS_SKILLS" -ef "$PROJECT_DIR/.claude/skills" ]]; then
+# The links are relative, so they only resolve from a real .agents/skills/
+# directory: if .agents or .agents/skills is a symlink elsewhere, a file or a
+# broken link, warn and skip rather than write dangling links or stop the install.
+AGENTS_DIR="$PROJECT_DIR/.agents"
+AGENTS_SKILLS="$AGENTS_DIR/skills"
+if [[ "$AGENTS_SKILLS" -ef "$PROJECT_DIR/.claude/skills" ]]; then
+    :
+elif [[ -L "$AGENTS_DIR" || -L "$AGENTS_SKILLS" || ( -e "$AGENTS_DIR" && ! -d "$AGENTS_DIR" ) || ( -e "$AGENTS_SKILLS" && ! -d "$AGENTS_SKILLS" ) ]]; then
+    echo "WARN: .agents/skills/ is not a real directory (a symlink elsewhere, a file or a broken link) — skipped linking pragma's skills for Codex"
+    echo "WARN: make .agents/skills/ a real directory, or a link to .claude/skills, and re-run to link them"
+else
     mkdir -p "$AGENTS_SKILLS"
     NOT_LINKED=""
     while IFS= read -r rel; do
         name="$(dirname "$rel")"
         link="$AGENTS_SKILLS/$name"
-        target="../../.claude/skills/$name"
-        if [[ -L "$link" && "$(readlink "$link")" == "$target" ]]; then continue; fi
+        # Already resolves to the project's copy (this link, or one by another path).
+        if [[ -L "$link" && "$link" -ef "$PROJECT_DIR/.claude/skills/$name" ]]; then continue; fi
         # Anything else under that name is the project's own: leave it.
         if [[ -e "$link" || -L "$link" ]]; then NOT_LINKED="$NOT_LINKED $name"; continue; fi
-        ln -s "$target" "$link"
+        ln -s "../../.claude/skills/$name" "$link"
     done <<< "$PRAGMA_SKILLS"
     if [[ -n "$NOT_LINKED" ]]; then
         echo "WARN: .agents/skills/ already has an entry that is not pragma's link, left as is:${NOT_LINKED}"

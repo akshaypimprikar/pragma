@@ -41,21 +41,28 @@ class AgentsSkillsLinkTests(unittest.TestCase):
         self.assertFalse(os.path.islink(claude_skills))
         self.assertFalse(os.path.samefile(claude_skills, SKILLS))
 
+    def links(self):
+        return {n: (os.readlink(os.path.join(self.agents, n)), os.lstat(os.path.join(self.agents, n)).st_ino)
+                for n in os.listdir(self.agents)}
+
     def test_rerun_is_quiet_and_unchanged(self):
         self.sync()
+        before = self.links()
         out = self.sync()
-        self.assertNotIn(".agents/skills", out)
-        self.assertEqual(sorted(os.listdir(self.agents)), NAMES)
+        self.assertNotIn("WARN", out)
+        self.assertEqual(self.links(), before)
 
     def test_projects_own_entries_survive(self):
         os.makedirs(os.path.join(self.agents, "my-skill"))
         own = os.path.join(self.agents, NAMES[0])
         os.makedirs(own)
-        open(os.path.join(own, "SKILL.md"), "w").write("mine\n")
+        with open(os.path.join(own, "SKILL.md"), "w") as f:
+            f.write("mine\n")
         out = self.sync()
         self.assertTrue(os.path.isdir(os.path.join(self.agents, "my-skill")))
         self.assertFalse(os.path.islink(own))
-        self.assertEqual(open(os.path.join(own, "SKILL.md")).read(), "mine\n")
+        with open(os.path.join(own, "SKILL.md")) as f:
+            self.assertEqual(f.read(), "mine\n")
         self.assertIn(f"left as is: {NAMES[0]}", out)
         for name in NAMES[1:]:
             self.assertTrue(os.path.islink(os.path.join(self.agents, name)), name)
@@ -76,6 +83,43 @@ class AgentsSkillsLinkTests(unittest.TestCase):
         self.assertNotIn(".agents/skills", out)
         for name in NAMES:
             self.assertFalse(os.path.islink(os.path.join(self.d, ".claude", "skills", name)), name)
+
+    def test_absolute_link_to_same_skill_is_not_warned(self):
+        os.makedirs(self.agents)
+        link = os.path.join(self.agents, NAMES[0])
+        os.symlink(os.path.join(self.d, ".claude", "skills", NAMES[0]), link)
+        out = self.sync()
+        self.assertNotIn("WARN", out)
+        self.assertTrue(os.path.isabs(os.readlink(link)))
+
+    def assert_skipped(self, out):
+        self.assertIn("skipped linking pragma's skills for Codex", out)
+        self.assertIn("Skills ready", out)
+
+    def test_agents_skills_linked_elsewhere_is_skipped(self):
+        shared = os.path.join(self.d, "shared")
+        os.makedirs(shared)
+        os.makedirs(os.path.join(self.d, ".agents"))
+        os.symlink("../shared", self.agents)
+        self.assert_skipped(self.sync())
+        self.assertEqual(os.listdir(shared), [])
+
+    def test_agents_dir_linked_elsewhere_is_skipped(self):
+        other = os.path.join(self.d, "other")
+        os.makedirs(os.path.join(other, "skills"))
+        os.symlink("other", os.path.join(self.d, ".agents"))
+        self.assert_skipped(self.sync())
+        self.assertEqual(os.listdir(os.path.join(other, "skills")), [])
+
+    def test_agents_file_does_not_stop_install(self):
+        open(os.path.join(self.d, ".agents"), "w").close()
+        self.assert_skipped(self.sync())
+
+    def test_broken_agents_skills_link_does_not_stop_install(self):
+        os.makedirs(os.path.join(self.d, ".agents"))
+        os.symlink("../nowhere", self.agents)
+        self.assert_skipped(self.sync())
+        self.assertFalse(os.path.exists(os.path.join(self.d, "nowhere")))
 
 
 if __name__ == "__main__":

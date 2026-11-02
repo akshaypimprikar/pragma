@@ -141,6 +141,10 @@ cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_pr_lane.py"         "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_review_evidence.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_citations.py"       "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/review_verdict.py"         "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_finding_lines.py"    "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_review_contract.py"  "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/review.schema.json"        "$PROJECT_DIR/scripts/"
 mkdir -p "$PROJECT_DIR/scripts/tests"
 cp "$REPO_ROOT/scripts/tests/test_check_pr_lane.py" \
    "$REPO_ROOT/scripts/tests/test_check_review_evidence.py" \

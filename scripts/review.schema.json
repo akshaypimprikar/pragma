@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pragma review stage output",
+  "description": "What one /review run returns, in any agent CLI. scripts/check_review_contract.py validates it. Every object lists all its properties as required and allows no extras, so this file also works as a strict structured-output schema (codex exec --output-schema, claude -p --json-schema).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviewed_sha", "round", "lane", "runtime", "gate_verification", "isolation", "findings", "verdict", "coverage", "limitations", "posted"],
+  "properties": {
+    "reviewed_sha": {"type": "string", "description": "Full 40-character PR HEAD SHA the review read."},
+    "round": {"type": "string", "enum": ["1", "2", "confirm"]},
+    "lane": {"type": "string", "enum": ["app", "pipeline", "docs", "release", "sync"]},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cli", "cli_version", "model", "sandbox", "network"],
+      "properties": {
+        "cli": {"type": "string", "description": "Agent CLI that ran the review, e.g. claude or codex."},
+        "cli_version": {"type": "string"},
+        "model": {"type": "string"},
+        "sandbox": {"type": "string", "description": "Sandbox or permission mode, e.g. read-only."},
+        "network": {"type": "boolean"}
+      }
+    },
+    "gate_verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "result", "reason"],
+        "properties": {
+          "check": {"type": "string"},
+          "result": {"type": "string", "enum": ["PASS", "FAIL", "NOT VERIFIED", "NOT RUN"]},
+          "reason": {"type": "string", "description": "Required (non-empty) for NOT VERIFIED and NOT RUN."}
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {"type": "string", "enum": ["isolated", "NOT isolated", "N/A"]},
+        "evidence": {"type": "string", "description": "For isolated: how the fresh-context subagent was started (tool call or event id). For NOT isolated or N/A: why."}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "path", "line", "evidence", "fix", "in_diff", "depends_on_unchanged", "guard_bypass", "advisory", "dismissed"],
+        "properties": {
+          "id": {"type": "string"},
+          "severity": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"]},
+          "path": {"type": "string"},
+          "line": {"type": ["integer", "null"]},
+          "evidence": {"type": "string", "description": "Quoted code the finding rests on."},
+          "fix": {"type": "string"},
+          "in_diff": {"type": "boolean"},
+          "depends_on_unchanged": {"type": "boolean"},
+          "guard_bypass": {"type": "boolean"},
+          "advisory": {"type": "boolean"},
+          "dismissed": {"type": "boolean"}
+        }
+      }
+    },
+    "verdict": {"type": "string", "enum": ["APPROVED", "CHANGES REQUESTED"]},
+    "coverage": {"type": "array", "items": {"type": "string"}, "description": "Files the review read."},
+    "limitations": {"type": "array", "items": {"type": "string"}, "description": "Every step skipped, and why."},
+    "posted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "reason"],
+      "properties": {
+        "url": {"type": ["string", "null"], "description": "URL of the posted GitHub review, or null."},
+        "reason": {"type": "string", "description": "Required (non-empty) when url is null."}
+      }
+    }
+  }
+}

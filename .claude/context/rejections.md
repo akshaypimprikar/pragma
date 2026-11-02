@@ -146,3 +146,15 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/check_review_contract.py:106
 **Caught by:** this review
+
+## 2026-11-02 — PR#136 — Round 1: Codex apply_patch parsing missed indented headers, applypatch, and cd
+**What was wrong:** `PATCH_TARGET` anchored `*** Update File:` at column 0, but Codex 0.166.0 trims header lines, so an indented header edited CLAUDE.md unblocked. Bash detection checked only the string `apply_patch`, missing Codex's `applypatch` alias. Patch paths resolved against the payload cwd, ignoring a preceding `cd`, so `cd App && apply_patch ... ../CLAUDE.md` passed.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (PATCH_TARGET, evaluate)
+**Caught by:** this review
+
+## 2026-11-02 — PR#136 — Round 1: Codex hook entry fails open when the project is below the git root
+**What was wrong:** `CODEX_COMMAND` finds the hook at `$(git rev-parse --show-toplevel)/.claude/hooks/`, but the installer puts it in `PROJECT_DIR/.claude/hooks/`. With PROJECT_DIR a subdirectory (an `ios/` layout), the file is not found and `[ -f "$f" ] || exit 0` disables the guard silently. CHANGELOG and README claimed Codex edits are blocked.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/install_guard_hook.py (CODEX_COMMAND); CHANGELOG.md; README.md
+**Caught by:** this review

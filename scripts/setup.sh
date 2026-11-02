@@ -30,9 +30,10 @@
 #     YOUR_PROJECT replaced, and the detected persistence and ui filled in)
 #     unless the project already has one
 #   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
-#     entry into .claude/settings.json (other settings are kept; the original
-#     is backed up). The hook blocks edits to gate-definition files on
-#     feature/* branches during a Claude Code session. Skip with --no-guard-hook
+#     entry into .claude/settings.json and .codex/hooks.json (other settings
+#     are kept; originals are backed up). The hook blocks edits to
+#     gate-definition files on feature/* branches during a Claude Code or
+#     Codex CLI session. Skip with --no-guard-hook
 #   - Merges a UserPromptSubmit entry into .claude/settings.json that alerts on
 #     every prompt while a docs/pipeline-review/ report has `addressed: false`
 #     in its frontmatter. Skip with --no-review-alert

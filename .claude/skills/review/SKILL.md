@@ -121,7 +121,9 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
 
 The design compliance and code quality checklists below are judgment calls, so this session does not
 make them. Hand them to one fresh-context subagent, spawned with the Agent tool and `model: "sonnet"`
-(the default inherits the session model, and which makes each round an expensive top-model run). Give it these inputs, and nothing that carries the
+(the default inherits the session model, and which makes each round an expensive top-model run). In another
+coding agent, use its own subagent tool with no conversation history (Codex: `spawn_agent` with `fork_turns: "none"`);
+this section is the explicit request such tools ask for. Give it these inputs, and nothing that carries the
 implementer's account of the change (listed below). This PR's own entries in `rejections.md` and
 `incidents.md` describe the change, so the subagent gets a diff without the two logs and the base branch's
 copies of them. Prepare those in one shell call (`BASE` does not carry over from step 2), with the copies
@@ -239,7 +241,9 @@ Merge its output into the verdict:
 - If a subagent cannot be spawned in this runtime, run the checklists here instead, apply the same
   severity, blocking and advisory rules (rating repeats only against the base-branch log copies prepared
   above, not the working-tree logs, which hold this PR's own entries), and write `Judgment checks: NOT isolated (subagent
-  unavailable)` in the verdict.
+  unavailable)` in the verdict. Call the review isolated only when a subagent actually ran and its report is the
+  one you post; with no subagent report the verdict says `NOT isolated` (2026-11-01: a Codex run spawned no subagent
+  and still reported "the isolated review found no defects").
 
 ### Design compliance checks
 *Only applies to PRs that touch `<AppName>/Views/` or add new UI components. Read `docs/design-system.md` and `<AppName>/Theme/` before running these checks.*

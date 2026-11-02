@@ -72,7 +72,11 @@ PROTECTED_GLOBS = (
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
-PATCH_TARGET = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$", re.MULTILINE)
+# Codex trims each patch line before reading a header, so indentation must not hide one.
+PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$", re.MULTILINE)
+# Codex runs a shell-invoked patch as apply_patch or applypatch; a patch body also gives one away.
+SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
+CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+([^\s;&|()]+)")
 WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
@@ -590,9 +594,23 @@ def bash_write_targets(command, cwd, _depth=0):
     return results
 
 
-def patch_targets(patch, cwd):
-    """Every path a Codex apply_patch adds, updates, deletes or moves to; the source of a move is its Update File line."""
-    return [(resolve(p, cwd), WRITE) for p in PATCH_TARGET.findall(patch)]
+def patch_targets(patch, cwd, dirs=None):
+    """Every path a Codex apply_patch adds, updates, deletes or moves to; the source of a move is its Update File line.
+    Each path is resolved against every directory in `dirs` (default: cwd alone)."""
+    return [(resolve(p, d), WRITE) for p in PATCH_TARGET.findall(patch) for d in (dirs or [cwd])]
+
+
+def cd_dirs(command, cwd):
+    """cwd plus every directory a `cd`/`pushd` in the command could move to, in order (an over-approximation:
+    a patch path is checked against all of them, so a `cd` before a shell-run patch can't move it off the guard)."""
+    dirs, cur = [cwd], cwd
+    for arg in CD_TARGET.findall(command):
+        arg = unquote(arg)
+        if arg in ("-", "~") or arg.startswith("$"):
+            continue
+        cur = resolve(arg, cur)
+        dirs.append(cur)
+    return dirs
 
 
 def evaluate(payload):
@@ -609,8 +627,8 @@ def evaluate(payload):
         command = tool_input.get("command") or ""
         # an `apply_patch <<'EOF'` heredoc run through the shell (older Codex) is stripped by the parser
         candidates = bash_write_targets(command, cwd)
-        if "apply_patch" in command:
-            candidates += patch_targets(command, cwd)
+        if SHELL_PATCH.search(command):
+            candidates += patch_targets(command, cwd, cd_dirs(command, cwd))
     else:
         return None
 
@@ -934,6 +952,16 @@ def self_test():
             ("feature: Bash patch header text without apply_patch is data",
              bash("feat", "cat <<'EOF' > App/notes.md\n*** Update File: CLAUDE.md\nEOF"), False),
             ("feature: Write .codex/config.toml", write("Write", "feat", ".codex/config.toml"), True),
+            ("feature: apply_patch indented header", patch("feat", "  *** Update File: CLAUDE.md\n@@\n+x"), True),
+            ("feature: apply_patch tab-indented Move to", patch("feat", "*** Update File: App/A.swift\n\t*** Move to: AGENTS.md\n@@\n+x"), True),
+            ("feature: Bash applypatch alias heredoc",
+             bash("feat", "applypatch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd then apply_patch ../CLAUDE.md",
+             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd ios then apply_patch CLAUDE.md (nested)",
+             bash("feat", "cd ios; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd then apply_patch an ordinary file",
+             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: A.swift\n@@\n+x\n*** End Patch\nEOF"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

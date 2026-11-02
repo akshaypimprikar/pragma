@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 
@@ -47,10 +48,26 @@ COMMAND = (
 )
 # Codex reports file edits as apply_patch and shell commands as Bash; matcher is a regex.
 CODEX_MATCHER = "^(apply_patch|Bash)$"
-CODEX_COMMAND = (
-    'f="$(git rev-parse --show-toplevel 2>/dev/null)/.claude/hooks/guard_protected_paths.py"; '
-    '[ -f "$f" ] || exit 0; exec python3 "$f"'
-)
+
+
+def codex_command(rel="."):
+    """rel: the project's path inside its git repo. The hook lives in PROJECT_DIR/.claude/hooks/, which is
+    below the git root when the project is (an ios/ folder), so the command must say where."""
+    hook = ".claude/hooks/guard_protected_paths.py" if rel == "." else f"{rel}/.claude/hooks/guard_protected_paths.py"
+    return f'f="$(git rev-parse --show-toplevel 2>/dev/null)/{hook}"; [ -f "$f" ] || exit 0; exec python3 "$f"'
+
+
+CODEX_COMMAND = codex_command()
+
+
+def repo_relpath(project):
+    """PROJECT_DIR relative to its git root ("." at the root, or when it is not in a git repo)."""
+    try:
+        top = subprocess.run(["git", "-C", project, "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "."
+    return os.path.relpath(project, os.path.realpath(top)) if top else "."
 
 
 def unique(path):
@@ -174,7 +191,7 @@ def main(argv):
         print(f"  {'updated the' if existing else 'registered the'} PreToolUse guard in .claude/settings.json")
 
     existing = bool(guard_hooks(codex_data))
-    if not register(codex_data, CODEX_MATCHER, CODEX_COMMAND):
+    if not register(codex_data, CODEX_MATCHER, codex_command(repo_relpath(project))):
         print("  .codex/hooks.json already registers the guard hook — left unchanged")
     else:
         write_settings(codex_path, codex_data, codex_raw, stamp, project, ".codex/hooks.json")

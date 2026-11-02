@@ -105,6 +105,24 @@ class InstallGuardHookTests(unittest.TestCase):
         self.assertIn("BLOCKED", blocked.stderr)
         self.assertEqual(run("A.swift").returncode, 0)
 
+    def test_project_below_git_root_points_codex_at_its_hook(self):
+        git = ["git", "-C", self.d]
+        subprocess.run(git + ["init", "-q"], check=True)
+        proj = os.path.join(self.d, "ios")
+        os.makedirs(proj)
+        write(os.path.join(proj, "CLAUDE.md"), "# Demo\n")
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i"], check=True)
+        subprocess.run(git + ["checkout", "-q", "-b", "feature/demo"], check=True)
+        subprocess.run([sys.executable, INSTALL, ROOT, proj], capture_output=True, text=True, check=True)
+        entry = json.loads(read(os.path.join(proj, ".codex", "hooks.json")))["hooks"]["PreToolUse"][0]
+        command = entry["hooks"][0]["command"]
+        self.assertEqual(command, ig.codex_command("ios"))
+        payload = {"tool_name": "apply_patch", "cwd": proj, "hook_event_name": "PreToolUse",
+                   "tool_input": {"command": "*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\n"}}
+        proc = subprocess.run(["sh", "-c", command], cwd=proj, input=json.dumps(payload), capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

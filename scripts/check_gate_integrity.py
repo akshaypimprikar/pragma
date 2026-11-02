@@ -70,7 +70,7 @@ GATE_DEFINITION_FILES = (
 # Wider than GATE_DEFINITION_FILES, and used by check #1 only: every file the
 # PreToolUse hook (.claude/hooks/guard_protected_paths.py; scaffold/.claude/hooks/
 # in the pragma repo) blocks on a feature/* branch. The hook stops the edit live but only inside a Claude Code
-# session; a plain commit + push bypasses it, so this list is the CI-side
+# or Codex CLI session; a plain commit + push bypasses it, so this list is the CI-side
 # backstop for the same set. Keep it in step with the hook's PROTECTED_GLOBS.
 # `*` crosses `/` (fnmatch), so nested paths match, and each glob is also
 # tried under any subdirectory (`ios/CLAUDE.md`, `ios/.claude/settings.json`),
@@ -88,6 +88,8 @@ GUARDED_PATH_GLOBS = (
     ".claude/hooks/*",
     "scripts/pipeline_lanes.json",
     ".github/workflows/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
 )
 # Suppression/stub detection (checks 3 & 4) is about shipped application
 # code — a doc file describing these exact patterns in prose (this script's

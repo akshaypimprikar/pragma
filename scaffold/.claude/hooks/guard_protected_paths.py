@@ -11,6 +11,12 @@ Hook contract (Claude Code hooks reference, code.claude.com/docs/en/hooks):
   exit 2 blocks the tool call and feeds stderr back to Claude
   exit 0 allows; any other exit code is a non-blocking error (tool proceeds)
 
+Codex CLI runs the same script from .codex/hooks.json (Codex hooks docs,
+learn.chatgpt.com/docs/hooks): same stdin fields and the same exit 2. Codex
+reports shell commands as Bash, and file edits as tool_name `apply_patch` with
+the patch text in tool_input.command; its `*** Add/Update/Delete File:` and
+`*** Move to:` paths are the edit targets.
+
 PROTECTED_GLOBS must stay in step with GUARDED_PATH_GLOBS in
 scripts/check_gate_integrity.py: this hook blocks the edit live, that script
 catches the same files on a plain commit that never went through Claude Code.
@@ -61,9 +67,12 @@ PROTECTED_GLOBS = (
     "CONSTRAINTS.md",
     "scripts/pipeline_lanes.json",
     ".github/workflows/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
+PATCH_TARGET = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+?)\s*$", re.MULTILINE)
 WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
@@ -158,7 +167,7 @@ _PROTECTED_FRAGMENTS = tuple(
     frag.lower() for frag in (
         "skill.md", "/reference.md", "scripts/check_", "agents.md", "claude.md",
         "invariants.md", "settings.json", ".claude/hooks/", "constraints.md",
-        "pipeline_lanes.json", ".github/workflows/",
+        "pipeline_lanes.json", ".github/workflows/", ".codex/hooks.json", ".codex/config.toml",
     )
 )
 
@@ -581,6 +590,11 @@ def bash_write_targets(command, cwd, _depth=0):
     return results
 
 
+def patch_targets(patch, cwd):
+    """Every path a Codex apply_patch adds, updates, deletes or moves to; the source of a move is its Update File line."""
+    return [(resolve(p, cwd), WRITE) for p in PATCH_TARGET.findall(patch)]
+
+
 def evaluate(payload):
     """Return a block message, or None to allow."""
     tool = payload.get("tool_name", "")
@@ -589,8 +603,14 @@ def evaluate(payload):
 
     if tool in FILE_TOOLS:
         candidates = [(resolve(tool_input["file_path"], cwd), WRITE)] if tool_input.get("file_path") else []
+    elif tool == "apply_patch":
+        candidates = patch_targets(tool_input.get("command") or "", cwd)
     elif tool == "Bash":
-        candidates = bash_write_targets(tool_input.get("command") or "", cwd)
+        command = tool_input.get("command") or ""
+        # an `apply_patch <<'EOF'` heredoc run through the shell (older Codex) is stripped by the parser
+        candidates = bash_write_targets(command, cwd)
+        if "apply_patch" in command:
+            candidates += patch_targets(command, cwd)
     else:
         return None
 
@@ -891,6 +911,30 @@ def self_test():
         ]
         cases.append(("feature: Bash rm -rf of the directory holding the repo", bash("feat", f"rm -rf {tmp}"), True))
         cases.append(("feature: Bash `a#b` word keeps the redirect", bash("feat", "echo a#b > CLAUDE.md"), True))
+
+        def patch(repo, body):  # Codex CLI file edit
+            return {"tool_name": "apply_patch", "cwd": repos[repo], "tool_input": {"command": f"*** Begin Patch\n{body}\n*** End Patch\n"}}
+
+        cases += [
+            ("feature: apply_patch Update CLAUDE.md", patch("feat", "*** Update File: CLAUDE.md\n@@\n+Rule: none"), True),
+            ("feature: apply_patch Add a skill file", patch("feat", "*** Add File: .claude/skills/gates/reference.md\n+x"), True),
+            ("feature: apply_patch Delete AGENTS.md", patch("feat", "*** Delete File: AGENTS.md"), True),
+            ("feature: apply_patch Move an app file onto CLAUDE.md",
+             patch("feat", "*** Update File: App/A.swift\n*** Move to: CLAUDE.md\n@@\n-x\n+y"), True),
+            ("feature: apply_patch absolute path to nested CLAUDE.md",
+             patch("feat", f"*** Update File: {os.path.join(repos['feat'], 'ios/CLAUDE.md')}\n@@\n+x"), True),
+            ("feature: apply_patch Update .codex/hooks.json", patch("feat", "*** Update File: .codex/hooks.json\n@@\n+x"), True),
+            ("feature: apply_patch second file in the patch is protected",
+             patch("feat", "*** Update File: App/A.swift\n@@\n+x\n*** Update File: CONSTRAINTS.md\n@@\n+y"), True),
+            ("feature: apply_patch Update App/A.swift is ordinary", patch("feat", "*** Update File: App/A.swift\n@@\n+x"), False),
+            ("chore: apply_patch Update CLAUDE.md allowed", patch("chore", "*** Update File: CLAUDE.md\n@@\n+x"), False),
+            ("detached: apply_patch Update CLAUDE.md fails open", patch("detached", "*** Update File: CLAUDE.md\n@@\n+x"), False),
+            ("feature: Bash apply_patch heredoc to CLAUDE.md",
+             bash("feat", "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash patch header text without apply_patch is data",
+             bash("feat", "cat <<'EOF' > App/notes.md\n*** Update File: CLAUDE.md\nEOF"), False),
+            ("feature: Write .codex/config.toml", write("Write", "feat", ".codex/config.toml"), True),
+        ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(
                 [sys.executable, os.path.abspath(__file__)],

@@ -158,3 +158,21 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/install_guard_hook.py (CODEX_COMMAND); CHANGELOG.md; README.md
 **Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: decoy inline header skips the shell apply_patch fail-closed
+**What was wrong:** `evaluate` fails closed only when no inline patch header is found anywhere in the command, so `echo '*** Update File: x.txt' >/dev/null; apply_patch < real.patch` (or a trailing decoy) is allowed on `feature/*` and `real.patch` can change CLAUDE.md.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:669
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: shell apply_patch fail-closed reads the branch from cwd, not the cd target
+**What was wrong:** The new block reads the branch with `git(cwd, ...)`, so from a `develop` checkout `cd <feature worktree> && apply_patch < p.patch` is allowed; the path-based check reads the target repo's branch.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:672
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: runs_shell_patch misses non-literal apply_patch invocations
+**What was wrong:** Only a literal command word counts, so `p=apply_patch; $p < f`, `alias ap=apply_patch; ap < f`, `find . -exec apply_patch {} \;`, `parallel apply_patch ::: f` and `bash p.sh` run a patch without a block, while the CHANGELOG says shell-run patches are covered.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:606
+**Caught by:** this review

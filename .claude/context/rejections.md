@@ -176,3 +176,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py:606
 **Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 2: inline-argument trust and dropped literal-\n parsing reopen the bypass
+**What was wrong:** `opaque_shell_patch` trusts any operand containing `Begin Patch` as an inline patch, and the round-1 fix dropped `replace("\\n", "\n")`, so on `feature/*` `apply_patch '*** Begin Patch\n*** Update File: CLAUDE.md\n...'` (literal `\n`), `apply_patch '*** Begin Patch' < real.patch` and `apply_patch "$(cat real.patch)" '*** Begin Patch'` are allowed. Regression of PR#140 round-1 F1 and of FT PR#198 F1.
+**Rule violated:** no formal rule, caught in review (regression of the PR#140 Round 1 decoy-header entry)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:630
+**Caught by:** this review

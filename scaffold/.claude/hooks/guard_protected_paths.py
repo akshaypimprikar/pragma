@@ -603,14 +603,14 @@ def patch_targets(patch, cwd, dirs=None):
 PATCH_COMMANDS = ("apply_patch", "applypatch")
 
 
-def opaque_shell_patch(command, _depth=0):
-    """True if the command runs apply_patch/applypatch with a patch the guard can't read: one call whose input is
-    not an inline heredoc (`<<`) or an inline `*** Begin Patch` argument (a pipe, `<`, `<<<`, `$( )`, a file).
-    Each call is judged on its own, so an inline header elsewhere in the command can't vouch for it. Merely
-    naming the tool (`grep apply_patch`) is not a run. Calls hidden behind a `$var` command word, an `alias`,
-    `find -exec` or `parallel` count as unreadable; a script file or another language calling it is not seen.
-    A command with an open quote can't be parsed, so naming the tool is enough."""
-    if not re.search(r"apply_?patch", command):
+def runs_shell_patch(command, _depth=0):
+    """True if the command runs apply_patch/applypatch through the shell, or might: as a command word (also behind
+    wrappers, a pipe, `xargs`, `$( )`, `bash -c` or `eval`), through a `$var`/`${var}` command word, an `alias`,
+    `find -exec` or `parallel`. Which files such a patch touches is not checked: on a feature branch the shell
+    route is blocked outright (pragma #140 round 2: two rounds of deciding which shell forms were readable each
+    left a bypass). Merely naming the tool (`grep apply_patch`) is not a run. Quotes and backslashes are removed
+    before the name check (`ap''ply_patch`). A script file or another language calling it is not seen."""
+    if not re.search(r"apply_?patch", re.sub(r"[\\'\"]", "", command)):
         return False
     tokens = tokenize(command)
     if tokens is None:
@@ -619,29 +619,26 @@ def opaque_shell_patch(command, _depth=0):
         if item[0] != "cmd":
             continue
         words = item[1]
-        if _depth < 3 and any(opaque_shell_patch(b, _depth + 1) for w in words for b in command_substitutions(w)):
+        if _depth < 3 and any(runs_shell_patch(b, _depth + 1) for w in words for b in command_substitutions(w)):
             return True
         idx = real_command_index(words)
         if idx is None:
             continue
-        cmd = os.path.basename(unquote(words[idx]))
+        cmd = os.path.basename(re.sub(r"\\", "", unquote(words[idx])))
         operands = command_operands(words[idx + 1 :])
-        if cmd in PATCH_COMMANDS:
-            if "<<" not in words and not any("Begin Patch" in w for w in operands):
-                return True
-        elif cmd.startswith("$"):
-            return True  # `p=apply_patch; $p < f`
-        elif cmd == "alias" and any(re.search(r"apply_?patch", w) for w in operands):
+        if cmd in PATCH_COMMANDS or "$" in cmd:
             return True
-        elif cmd in ("find", "parallel") and any(os.path.basename(w) in PATCH_COMMANDS for w in operands):
-            return True  # `find . -exec apply_patch {} \;`, `parallel apply_patch ::: f`
-        elif _depth < 3 and cmd in ("bash", "sh", "zsh", "dash", "ksh"):
+        if cmd == "alias" and any(re.search(r"apply_?patch", w) for w in operands):
+            return True
+        if cmd in ("find", "parallel") and any(os.path.basename(w) in PATCH_COMMANDS for w in operands):
+            return True  # `find . -exec apply_patch {} \\;`, `parallel apply_patch ::: f`
+        if _depth < 3 and cmd in ("bash", "sh", "zsh", "dash", "ksh"):
             for j, w in enumerate(operands):
                 if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w):
-                    if j + 1 < len(operands) and opaque_shell_patch(operands[j + 1], _depth + 1):
+                    if j + 1 < len(operands) and runs_shell_patch(operands[j + 1], _depth + 1):
                         return True
                     break
-        elif _depth < 3 and cmd == "eval" and opaque_shell_patch(" ".join(operands), _depth + 1):
+        elif _depth < 3 and cmd == "eval" and runs_shell_patch(" ".join(operands), _depth + 1):
             return True
     return False
 
@@ -675,18 +672,19 @@ def evaluate(payload):
         candidates = bash_write_targets(command, cwd)
         dirs = cd_dirs(command, cwd)
         if SHELL_PATCH.search(command):
-            candidates += patch_targets(command, cwd, dirs)
-        if opaque_shell_patch(command):
-            # a patch from a file, a pipe, a variable or a command substitution: its targets can't be read
-            # here, so fail closed if the session or any directory the command cds into is on a feature branch
+            # headers joined by a literal \n (`printf '...\n*** Update File: X'`) are read too; this still
+            # catches an absolute path into another repo that is on a feature branch
+            candidates += patch_targets(command.replace("\\n", "\n"), cwd, dirs)
+        if runs_shell_patch(command):
+            # fail closed if the session or any directory the command cds into is on a feature branch
             for d in dirs:
                 branch = git(d, "branch", "--show-current")
                 if branch and GUARDED_BRANCH.match(branch):
                     return (
-                        f"BLOCKED: this command runs apply_patch, but its patch text is not inline, so the guard "
-                        f"can't tell which files it changes, and `{d}` is on `{branch}` (feature/*). "
-                        "Remedy: use the apply_patch tool directly, or pass the patch as an inline heredoc "
-                        "(`apply_patch <<'EOF'`), so the guard can read its `*** Update File:` lines."
+                        f"BLOCKED: this command runs apply_patch through the shell and `{d}` is on `{branch}` "
+                        "(feature/*). The guard can't reliably tell which files a shell-run patch changes, so "
+                        "that route is closed on feature branches. Remedy: use the apply_patch tool directly "
+                        "(its file list is checked), or make the change on a chore/* or fix/* branch."
                     )
     else:
         return None
@@ -1021,8 +1019,8 @@ def self_test():
              bash("feat", "cd ios; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
             ("feature: Bash cd -P then apply_patch ../CLAUDE.md",
              bash("feat", "cd -P App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
-            ("feature: Bash cd then apply_patch an ordinary file",
-             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: A.swift\n@@\n+x\n*** End Patch\nEOF"), False),
+            ("feature: Bash cd then shell apply_patch of an ordinary file is blocked (shell route closed)",
+             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: A.swift\n@@\n+x\n*** End Patch\nEOF"), True),
             ("feature: Bash printf literal \\n patch piped to apply_patch (CLAUDE.md)",
              bash("feat", r"printf '*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\n' | apply_patch"), True),
             ("feature: Bash printf literal \\n patch piped to apply_patch fails closed (ordinary file)",
@@ -1046,8 +1044,17 @@ def self_test():
             ("feature: Bash parallel apply_patch fails closed", bash("feat", "parallel apply_patch ::: a.patch"), True),
             ("feature: Bash apply_patch <<< herestring fails closed", bash("feat", 'apply_patch <<< "$(cat p.patch)"'), True),
             ("feature: Bash find -name apply_patch.md is not a patch run", bash("feat", "find . -name apply_patch.md"), False),
-            ("feature: Bash inline apply_patch argument to an ordinary file",
-             bash("feat", "apply_patch '*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch'"), False),
+            ("feature: Bash inline apply_patch argument to an ordinary file is blocked (shell route closed)",
+             bash("feat", "apply_patch '*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch'"), True),
+            ("chore: Bash heredoc apply_patch of an ordinary file allowed",
+             bash("chore", "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch\nEOF"), False),
+            ("feature: Bash stray Begin Patch argument with < file", bash("feat", "apply_patch '*** Begin Patch' < real.patch"), True),
+            ("feature: Bash literal \\n inline argument to CLAUDE.md",
+             bash("feat", r"apply_patch '*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch'"), True),
+            ("feature: Bash unquoted heredoc expanding $(cat file)", bash("feat", "apply_patch <<EOF\n$(cat real.patch)\nEOF"), True),
+            ("feature: Bash ${var} command word", bash("feat", "p=apply_patch; ${p} < f"), True),
+            ("feature: Bash quote-split tool name", bash("feat", "ap''ply_patch < f"), True),
+            ("feature: Bash backslash-split tool name", bash("feat", "apply\\_patch < f"), True),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

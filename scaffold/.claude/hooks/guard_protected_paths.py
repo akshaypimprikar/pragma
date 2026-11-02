@@ -76,7 +76,7 @@ FILE_TOOLS = ("Write", "Edit", "MultiEdit")
 PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$", re.MULTILINE)
 # Codex runs a shell-invoked patch as apply_patch or applypatch; a patch body also gives one away.
 SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
-CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+([^\s;&|()]+)")
+CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+(?:-[A-Za-z]+\s+|--\s+)*([^\s;&|()]+)")  # skips -P/-L/--
 WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
@@ -960,6 +960,8 @@ def self_test():
              bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
             ("feature: Bash cd ios then apply_patch CLAUDE.md (nested)",
              bash("feat", "cd ios; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd -P then apply_patch ../CLAUDE.md",
+             bash("feat", "cd -P App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
             ("feature: Bash cd then apply_patch an ordinary file",
              bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: A.swift\n@@\n+x\n*** End Patch\nEOF"), False),
         ]

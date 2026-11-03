@@ -630,7 +630,7 @@ SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `
 # Expansions that evaluate a value as code: `$(( ))`, `(( ))`, `$[ ]`, and any `${...}` other than a plain
 # `${name}` (`${a[...]}`, `${a@P}`, `${v:off:len}` offsets are arithmetic).
 EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\[|\$\{(?![A-Za-z_]\w*\})")
-BRACE_LIMIT = 4096  # words one brace-expanded chunk may make before the guard stops expanding and fails closed
+BRACE_SEPARATORS = "{},"  # an unquoted one of these sits next to every piece of text brace expansion leaves out
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
 FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
@@ -651,66 +651,44 @@ def names_patch(command):
     dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", defaulted)
     if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
         return True
-    for chunk in brace_chunks(dropped):  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`: every brace expansion
-        words = brace_expand(chunk)
-        if words is None or any(PATCH_NAME.search(w) for w in words):
-            return True  # too many words to check counts as naming the tool
+    if has_brace_group(flat) and any(spells_through_braces(t) for t in [flat, expanded, defaulted, dropped]):
+        return True  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`, `apply_{'{',pa}tch`
     return builds_command_name(command)
 
 
-def brace_chunks(text):
-    """The whitespace-separated pieces of `text` that contain a `{`, splitting only outside braces, so an
-    alternative with a (formerly quoted) space stays in one piece."""
-    chunks, cur, depth = [], [], 0
-    for c in text:
-        if c.isspace() and depth == 0:
-            chunks.append("".join(cur))
-            cur = []
-            continue
-        depth += (c == "{") - (c == "}" and depth > 0)
-        cur.append(c)
-    return [c for c in chunks + ["".join(cur)] if "{" in c]
+def has_brace_group(text):
+    """True if `text` has a `{` followed by a `,` or `..` and then a `}`: a possible brace expansion, quoted or not.
+    One left-to-right pass: the first `{` is the earliest start any group could have."""
+    i = text.find("{")
+    if i < 0:
+        return False
+    seps = [j for j in (text.find(",", i), text.find("..", i)) if j >= 0]
+    return bool(seps) and text.find("}", min(seps)) >= 0
 
 
-def brace_expand(word, limit=BRACE_LIMIT, depth=0):
-    """Every word bash brace expansion makes from `word`: nested `{a,{b,c}}`, `{x..y[..step]}` character ranges,
-    and integer ranges (kept as one `0`: digits never spell the tool's name). None past `limit` words or 64
-    nested expansions, so the caller fails closed instead of the hook failing open on an error."""
-    if depth > 64:
-        return None
-    for i, c in enumerate(word):
-        if c != "{" or (i and word[i - 1] == "$"):
-            continue
-        level, commas, j = 0, [], i
-        while j < len(word):
-            level += (word[j] == "{") - (word[j] == "}")
-            if level == 0:
-                break
-            if word[j] == "," and level == 1:
-                commas.append(j)
-            j += 1
-        if j == len(word):
-            continue  # no matching `}`: a literal brace
-        body = word[i + 1 : j]
-        num = re.fullmatch(r"-?\d+\.\.-?\d+(?:\.\.-?\d+)?", body)
-        char = re.fullmatch(r"([^{}])\.\.([^{}])(?:\.\.(-?\d+))?", body)
-        if commas:
-            alts = [word[a + 1 : b] for a, b in zip([i] + commas, commas + [j])]
-        elif num:
-            alts = ["0"]
-        elif char:
-            lo, hi, step = ord(char.group(1)), ord(char.group(2)), abs(int(char.group(3) or 1)) or 1
-            alts = [chr(k) for k in range(lo, hi + 1, step)] if lo <= hi else [chr(k) for k in range(lo, hi - 1, -step)]
-        else:
-            continue  # `{x}`, `{}`: not an expansion
-        out = []
-        for alt in alts:
-            sub = brace_expand(word[:i] + alt + word[j + 1 :], limit - len(out), depth + 1)
-            if sub is None or len(out) + len(sub) > limit:
-                return None
-            out += sub
-        return out
-    return [word]
+BRACE_RANGE = re.compile(r"\{(?:[^{},]|-?\d+)\.\.(?:[^{},]|-?\d+)(?:\.\.-?\d+)?\}")  # `{a..z}`, `{1..9..2}`
+
+
+def spells_through_braces(text, name="applypatch"):
+    """True if brace expansion could turn `text` (quotes already removed) into a word containing the name.
+    Brace expansion keeps text in order and only leaves out the alternatives it did not pick, and a left-out piece
+    always starts and ends at an unquoted `{`, `,` or `}`. So the name's letters must appear in order, and each gap
+    between two letters must be empty or start and end with one of those characters. A `{a..z}` range stands for
+    any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
+    bash without parsing quotes, in one pass per letter."""
+    text = BRACE_RANGE.sub("\0", text.lower().replace("_", ""))
+    sep = [c in BRACE_SEPARATORS for c in text]
+    reach = [c == name[0] or c == "\0" for c in text]
+    for letter in name[1:]:
+        nxt, opened = [False] * len(text), False
+        for q, c in enumerate(text):
+            if q >= 2 and reach[q - 2] and sep[q - 1]:
+                opened = True  # a candidate p <= q - 2 whose gap starts with a separator
+            nxt[q] = (c == letter or c == "\0") and q > 0 and (reach[q - 1] or (opened and sep[q - 1]))
+        reach = nxt
+        if not any(reach):
+            return False
+    return True
 
 
 def split_quoted(command):
@@ -816,7 +794,7 @@ def runs_shell_patch(command):
     plain, quoted = split_quoted(command)
     if any(re.search(r"\$\(|`", v) for v in quoted + [v for _, v in ASSIGNMENT.findall(command)]):
         return True  # a stored `$( )` or backtick can be run later (eval, @P, an indirect expansion)
-    if any(brace_expand(chunk) != [chunk] for chunk in brace_chunks(plain)):
+    if has_brace_group(plain):
         return True  # an unquoted `{x,y}` or `{a..b}` can add words, flags or scripts the parser never sees
 
     def all_read_only(text, depth=0):
@@ -1363,7 +1341,12 @@ def self_test():
             ("feature: Bash name split by a brace range", bash("feat", "apply_pa{s..t}ch < f"), True),
             ("feature: Bash name split by a stepped brace range", bash("feat", "apply_pa{a..z..19}ch < f"), True),
             ("feature: Bash brace alternative with a quoted space", bash("feat", "apply_{'x y',pa}tch < f"), True),
-            ("feature: Bash too many brace words fails closed", bash("feat", "x" + "{a,b}" * 13 + " < f"), True),
+            ("feature: Bash many brace groups not spelling the tool are readable", bash("feat", "x" + "{a,b}" * 13 + " < f"), False),
+            ("feature: Bash quoted brace shifts the pairing", bash("feat", "apply_{'{',pa}tch < f"), True),
+            ("feature: Bash quoted close brace shifts the pairing", bash("feat", "apply_{x'}'yyy,pa}tch < f"), True),
+            ("feature: Bash name split across a heredoc apostrophe", bash("feat", "cat <<E\n'\nE\napply_{'x y',pa}tch < f"), True),
+            ("feature: Bash 64k unmatched braces after the name", bash("feat", "apply_patch_x " + "{" * 65536), True),
+            ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),
             ("feature: Bash unquoted braces in a read-only command naming the tool", bash("feat", "rg {--pre=sh,apply_patch} f"), True),
             ("feature: Bash $[ ] arithmetic", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; echo $[a]"), True),
             ("feature: Bash ${v:off:len} offset", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; v=abc; echo ${v:a:1}"), True),

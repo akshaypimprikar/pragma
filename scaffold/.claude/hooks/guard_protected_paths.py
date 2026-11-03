@@ -687,14 +687,36 @@ def names_patch(command):
     return builds_command_name(command)
 
 
-GLOB_BRACKET = re.compile(r"\[[!^]?(?:\[:[a-z]+:\]|[^\[\]])*\]")  # one bracket expression; the alternatives are disjoint
-
-
 def posix_glob(word):
-    """`word` with bash-only glob syntax turned into what fnmatch reads the same way: `[^x]` as `[!x]`, and any
-    bracket holding a POSIX class (`[[:alpha:]]`, `[^[:digit:][:upper:]]`) as `?`, which over-approximates it."""
-    word = GLOB_BRACKET.sub(lambda m: "?" if "[:" in m.group() else m.group(), word)
-    return word.replace("[^", "[!")
+    """`word` with every bash bracket expression replaced by `?` (any one character, an over-approximation), read
+    the way bash reads it: an optional `!`/`^`, a leading `]` kept as a member, `[:class:]`, `[.sym.]` and `[=eq=]`
+    members and a literal `[` inside (`[][:alpha:]]`, `[[a[:alpha:]]`). One pass: the `:]`, `.]` and `=]`
+    positions are found up front. An unterminated `[` and the rest of the word stay as text."""
+    n = len(word)
+    member_close = {c: [-1] * (n + 2) for c in ":.="}
+    for c, close in member_close.items():
+        nxt = -1
+        for k in range(n - 2, -1, -1):
+            nxt = k if word[k] == c and word[k + 1] == "]" else nxt
+            close[k] = nxt
+    out, i = [], 0
+    while i < n:
+        if word[i] != "[":
+            out.append(word[i])
+            i += 1
+            continue
+        j = i + 1
+        j += j < n and word[j] in "!^"
+        j += j < n and word[j] == "]"
+        while j < n and word[j] != "]":
+            k = member_close[word[j + 1]][j + 2] if word[j] == "[" and j + 2 < n and word[j + 1] in ":.=" else -1
+            j = k + 2 if k >= 0 else j + 1
+        if j >= n:
+            out.append(word[i:])
+            break
+        out.append("?")
+        i = j + 1
+    return "".join(out)
 
 
 def glob_min_length(word):
@@ -1481,6 +1503,9 @@ def self_test():
             ("feature: Bash negated POSIX glob class", bash("feat", "apply_pa[^[:digit:]]ch < f"), True),
             ("feature: Bash multi-class glob bracket", bash("feat", "apply_pa[[:alpha:][:digit:]]ch < f"), True),
             ("feature: Bash mixed glob bracket", bash("feat", "apply[[:punct:]_]patch < f"), True),
+            ("feature: Bash glob bracket with a leading ] member", bash("feat", "apply_pa[][:alpha:]]ch < f"), True),
+            ("feature: Bash glob bracket with a literal [ member", bash("feat", "apply_pa[[a[:alpha:]]ch < f"), True),
+            ("feature: Bash collating and equivalence glob members", bash("feat", "apply_pa[[.t.]]ch < f; apply_pa[[=t=]]ch < f"), True),
             ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
             ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),

@@ -188,3 +188,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py:352, :606; CHANGELOG.md
 **Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 4: shell reading /dev/stdin, xargs-fed scripts and unlisted wrappers bypass the shell apply_patch block
+**What was wrong:** At 7eca76a, on `feature/*`, `echo 'apply_patch < f' | bash /dev/stdin` (`shell_input` returns `file` and only `source` checked `STDIN_FILES`), `echo 'apply_patch < f' | xargs -I{} sh -c {}`, and wrappers/shells missing from the lists (`flock`, `xcrun`, `doas`, `arch`, `csh -c`, `tmux new`) ran apply_patch without a block.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:743, :706, :80, :619
+**Caught by:** this review

@@ -713,16 +713,18 @@ def runs_shell_patch(command, _depth=0):
         if any(nested(b) for w in words for b in command_substitutions(w)):
             return True
         bases = [os.path.basename(unquote(w)) for w in words]
-        if "env" in bases:  # `env -S 'apply_patch < f'` splits its argument into the command
-            plain = [unquote(w) for w in words[bases.index("env") + 1 :]]
-            for j, w in enumerate(plain):
-                m = re.fullmatch(r"(?:-S|--split-string=?)(.*)", w)
-                if m and nested(m.group(1) or (plain[j + 1] if j + 1 < len(plain) else "")):
-                    return True
+        for wrapper, risky in (("env", r"-[A-Za-z]*S.*|--sp.*"), ("sudo", r"-[A-Za-z]*[si][A-Za-z]*|--shell|--login")):
+            # Fail closed on `env -S`/`-iS`/`--split...` (splits a string into the command) and on
+            # `sudo -s`/`-i`/`-su root` (runs a shell, which may read stdin), in a command that names the tool.
+            if wrapper in bases:
+                for w in words[bases.index(wrapper) + 1 :]:
+                    w = unquote(w)
+                    if not w.startswith("-"):
+                        break
+                    if re.fullmatch(risky, w):
+                        return True
         idx = real_command_index(words)
         if idx is None:
-            if "sudo" in bases and any(re.fullmatch(r"-[A-Za-z]*[si][A-Za-z]*|--shell|--login", w) for w in words):
-                return True  # `sudo -s` / `sudo -i` with no command reads a shell script from stdin
             continue
         cmd = os.path.basename(re.sub(r"\\", "", unquote(words[idx])))
         operands = command_operands(words[idx + 1 :])
@@ -741,7 +743,7 @@ def runs_shell_patch(command, _depth=0):
                 return True  # `su` with no -c runs a shell that reads stdin
         elif cmd in SHELLS:
             kind, text = shell_input(operands)
-            if kind == "stdin" or (kind == "c" and nested(text)):
+            if kind == "stdin" or (kind == "file" and STDIN_FILES.match(text)) or (kind == "c" and nested(text)):
                 return True
         elif cmd in ("source", "."):
             if not operands or STDIN_FILES.match(operands[0]):
@@ -1205,6 +1207,12 @@ def self_test():
             ("feature: Bash env -S", bash("feat", "env -S 'apply_patch < f'"), True),
             ("feature: Bash env --split-string=", bash("feat", "/usr/bin/env '--split-string=apply_patch < f'"), True),
             ("feature: Bash sudo -s from stdin", bash("feat", "echo 'apply_patch < f' | sudo -s"), True),
+            ("feature: Bash bash /dev/stdin", bash("feat", "echo 'apply_patch < f' | bash /dev/stdin"), True),
+            ("feature: Bash sh -- /dev/fd/0", bash("feat", "echo 'apply_patch < f' | sh -- /dev/fd/0"), True),
+            ("feature: Bash sudo -su cluster", bash("feat", "echo 'apply_patch < f' | sudo -su root"), True),
+            ("feature: Bash env -iS cluster", bash("feat", "env -iS 'apply_patch < f'"), True),
+            ("feature: Bash env --split prefix", bash("feat", "env --split 'apply_patch < f'"), True),
+            ("feature: Bash sudo -u with a grep naming the tool", bash("feat", "sudo -u me grep -c apply_patch log"), False),
             ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
             ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),
         ]

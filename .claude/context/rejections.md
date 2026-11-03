@@ -182,3 +182,9 @@
 **Rule violated:** no formal rule, caught in review (regression of the PR#140 Round 1 decoy-header entry)
 **File:** scaffold/.claude/hooks/guard_protected_paths.py:630
 **Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 3: block-all shell apply_patch still misses wrapped, nested and stdin-fed runs
+**What was wrong:** At dfc69e4, `runs_shell_patch` allowed these forms on `feature/*`: path-qualified wrappers (`/usr/bin/env apply_patch`, since wrappers matched by literal word); `function f { apply_patch; }; f`, `coproc` and `builtin command`; a shell fed the script on stdin (`echo 'apply_patch < f' | bash`, `bash <<<`, `cat <<EOF | sh`); `eval $a`; `bash -c -- '...'` and a quoted `parallel 'apply_patch {}'`; and `watch`, `ssh`, `script`, `busybox`, a name split across variables (`a=apply_; ${a}patch`) and `source <(...)`. `command -v apply_patch` was falsely blocked, and the CHANGELOG overclaimed wrapper/`eval`/`bash -c` coverage and said one flipped case where there were two.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:352, :606; CHANGELOG.md
+**Caught by:** this review

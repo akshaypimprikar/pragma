@@ -158,3 +158,81 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/install_guard_hook.py (CODEX_COMMAND); CHANGELOG.md; README.md
 **Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: decoy inline header skips the shell apply_patch fail-closed
+**What was wrong:** `evaluate` fails closed only when no inline patch header is found anywhere in the command, so `echo '*** Update File: x.txt' >/dev/null; apply_patch < real.patch` (or a trailing decoy) is allowed on `feature/*` and `real.patch` can change CLAUDE.md.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:669
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: shell apply_patch fail-closed reads the branch from cwd, not the cd target
+**What was wrong:** The new block reads the branch with `git(cwd, ...)`, so from a `develop` checkout `cd <feature worktree> && apply_patch < p.patch` is allowed; the path-based check reads the target repo's branch.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:672
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 1: runs_shell_patch misses non-literal apply_patch invocations
+**What was wrong:** Only a literal command word counts, so `p=apply_patch; $p < f`, `alias ap=apply_patch; ap < f`, `find . -exec apply_patch {} \;`, `parallel apply_patch ::: f` and `bash p.sh` run a patch without a block, while the CHANGELOG says shell-run patches are covered.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:606
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 2: inline-argument trust and dropped literal-\n parsing reopen the bypass
+**What was wrong:** `opaque_shell_patch` trusts any operand containing `Begin Patch` as an inline patch, and the round-1 fix dropped `replace("\\n", "\n")`, so on `feature/*` `apply_patch '*** Begin Patch\n*** Update File: CLAUDE.md\n...'` (literal `\n`), `apply_patch '*** Begin Patch' < real.patch` and `apply_patch "$(cat real.patch)" '*** Begin Patch'` are allowed. Regression of PR#140 round-1 F1 and of FT PR#198 F1.
+**Rule violated:** no formal rule, caught in review (regression of the PR#140 Round 1 decoy-header entry)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:630
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 3: block-all shell apply_patch still misses wrapped, nested and stdin-fed runs
+**What was wrong:** At dfc69e4, `runs_shell_patch` allowed these forms on `feature/*`: path-qualified wrappers (`/usr/bin/env apply_patch`, since wrappers matched by literal word); `function f { apply_patch; }; f`, `coproc` and `builtin command`; a shell fed the script on stdin (`echo 'apply_patch < f' | bash`, `bash <<<`, `cat <<EOF | sh`); `eval $a`; `bash -c -- '...'` and a quoted `parallel 'apply_patch {}'`; and `watch`, `ssh`, `script`, `busybox`, a name split across variables (`a=apply_; ${a}patch`) and `source <(...)`. `command -v apply_patch` was falsely blocked, and the CHANGELOG overclaimed wrapper/`eval`/`bash -c` coverage and said one flipped case where there were two.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:352, :606; CHANGELOG.md
+**Caught by:** this review
+
+## 2026-11-02 — PR#140 — Round 4: shell reading /dev/stdin, xargs-fed scripts and unlisted wrappers bypass the shell apply_patch block
+**What was wrong:** At 7eca76a, on `feature/*`, `echo 'apply_patch < f' | bash /dev/stdin` (`shell_input` returns `file` and only `source` checked `STDIN_FILES`), `echo 'apply_patch < f' | xargs -I{} sh -c {}`, and wrappers/shells missing from the lists (`flock`, `xcrun`, `doas`, `arch`, `csh -c`, `tmux new`) ran apply_patch without a block.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:743, :706, :80, :619
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 5: allowlist misses heredoc and nested-backtick substitutions, @P and a case-changed name
+**What was wrong:** At 32f1a6b, on `feature/*`, these were allowed: `$(apply_patch < f)` inside an unquoted `cat <<EOF` heredoc (the parser drops heredoc bodies), nested escaped backticks, `a='$(apply_patch < f)'; echo ${a@P}`, and `APPLY_PATCH < f` (`names_patch` was case-sensitive). The CHANGELOG claimed `$( )` and backtick bodies are all checked.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (runs_shell_patch, names_patch); CHANGELOG.md
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: CHANGELOG overclaims name detection (repeat of PR#110 CHANGELOG-claims entry)
+**What was wrong:** At 0041092 the CHANGELOG said a name split by backslashes is found and that detection is linear; `apply\<NL>patch` is not found, and the glob branch, `builds_command_name`, `${x:-` runs and heredoc markers are super-linear.
+**Rule violated:** repeats "2026-10-07 PR#110 CHANGELOG claimed behavior the plugin init path did not implement"
+**File:** CHANGELOG.md; scaffold/.claude/hooks/guard_protected_paths.py (names_patch)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: backslash-newline and glob-plus-brace names bypass names_patch
+**What was wrong:** At 0041092, on `feature/*`, `apply\<NL>patch < f` (line continuation) and `ap?lypatc{h,} < f` (a glob inside a brace expansion) were allowed.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: super-linear name detection lets a hook timeout fail open
+**What was wrong:** At 0041092 `names_patch('[' * 25000)` took 5.5 s (fnmatch on unmatched `[`), and `builds_command_name`, repeated `${x:-` and repeated heredoc markers take more than 8 s at 40k-200k characters; a timed-out hook fails open.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch, builds_command_name)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 7: size cap ran after the quadratic write-target parse
+**What was wrong:** At fd0133b the 32 KB cap was inside `runs_shell_patch`, but `evaluate()` ran `bash_write_targets` first, which is quadratic on repeated `<<E\n` (52 s at 200k characters), so a timed-out hook still failed open and the CHANGELOG's "blocked without being analyzed" was untrue.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate, runs_shell_patch); CHANGELOG.md
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 7: bash-only glob classes bypass the glob name check
+**What was wrong:** At fd0133b `apply_pa[^x]ch < f` and `apply_pa[[:alpha:]]ch < f` were allowed on `feature/*`; Python's fnmatch reads `[^` and POSIX classes differently from bash.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch glob branch)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 8: negated and multi-class POSIX glob brackets still bypass the glob check
+**What was wrong:** At 39d9280 `apply_pa[^[:digit:]]ch`, `apply_pa[[:alpha:][:digit:]]ch` and `apply[[:punct:]_]patch` were allowed on `feature/*`: `posix_glob` rewrote `[:cls:]` to `!-~`, which fnmatch then read as a negation (28 of 102 class patterns bash matches were missed).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (posix_glob)
+**Caught by:** this review

@@ -218,3 +218,15 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch, builds_command_name)
 **Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 7: size cap ran after the quadratic write-target parse
+**What was wrong:** At fd0133b the 32 KB cap was inside `runs_shell_patch`, but `evaluate()` ran `bash_write_targets` first, which is quadratic on repeated `<<E\n` (52 s at 200k characters), so a timed-out hook still failed open and the CHANGELOG's "blocked without being analyzed" was untrue.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate, runs_shell_patch); CHANGELOG.md
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 7: bash-only glob classes bypass the glob name check
+**What was wrong:** At fd0133b `apply_pa[^x]ch < f` and `apply_pa[[:alpha:]]ch < f` were allowed on `feature/*`; Python's fnmatch reads `[^` and POSIX classes differently from bash.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch glob branch)
+**Caught by:** this review

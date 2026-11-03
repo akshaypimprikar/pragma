@@ -646,7 +646,8 @@ def names_patch(command):
     (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or with
     unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
     `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
-    word (`apply_pat?h`). A name built at run time (`printf -v`, `read`, `base64 -d`, `$(echo pa)`) is not seen."""
+    word (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is not seen; one assembled with `printf -v` or `read` and
+    then run as `$a` is caught by builds_command_name()."""
     if "\\\n" in command:  # `apply\<NL>patch`: a line continuation joins the word; check both forms
         joined = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", command)
         if joined != command and names_patch(joined):
@@ -671,8 +672,8 @@ def names_patch(command):
         idx = real_command_index(item[1]) if item[0] == "cmd" else None
         if idx is not None:
             commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
-    globs = [re.sub(r"\*+", "*", w.rsplit("/", 1)[-1].lower()) for w in dropped.split() if re.search(r"[*?\[]", w)]
-    globs += [c for c in commands if re.search(r"[*?\[]", c)]
+    globs = [re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower())) for w in dropped.split() if re.search(r"[*?\[]", w)]
+    globs += [posix_glob(c) for c in commands if re.search(r"[*?\[]", c)]
     globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
            and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
@@ -684,6 +685,12 @@ def names_patch(command):
     if re.search(r"\$\(|`", flat) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in [flat, expanded, defaulted]):
         return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
     return builds_command_name(command)
+
+
+def posix_glob(word):
+    """`word` with bash-only glob syntax turned into what fnmatch reads the same way: `[^x]` as `[!x]`, and a POSIX
+    class (`[[:alpha:]]`) as any printable character, which over-approximates it."""
+    return re.sub(r"\[:[a-z]+:\]", "!-~", word.replace("[^", "[!"))
 
 
 def glob_min_length(word):
@@ -766,7 +773,7 @@ def spells_through_braces(text, separators=BRACE_SEPARATORS, name="applypatch"):
     any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
     bash without parsing quotes, in one pass per letter."""
     text = BRACE_GROUP.sub(lambda m: "\0" if ".." in m.group() else m.group(), text.lower().replace("_", ""))
-    text = re.sub(r"\[[^\[\]{},]*\]|[?*]", "\0", text)  # `ap?ly`, `pat[c]h`: a glob character stands for a letter
+    text = re.sub(r"\[[^\[\]{},]*\]|[?*]", "\0", re.sub(r"\[:[a-z]+:\]", "x", text))  # `ap?ly`, `pat[c]h`: a glob character stands for a letter
     sep = [c in separators for c in text]
     reach = [c == name[0] or c == "\0" for c in text]
     for letter in name[1:]:
@@ -873,8 +880,6 @@ def runs_shell_patch(command):
     (read_only_segment()). Anything else, from `apply_patch < f` to `bash`, `xargs`, `sudo` or an unknown command,
     counts as a possible run, so it is blocked on a feature branch. A command that does not name the tool (a name
     decoded at run time, a script file) is not seen."""
-    if len(command) > MAX_ANALYZED_COMMAND:
-        return True  # parsing is not linear everywhere and a timed-out hook fails open, so a huge command is blocked
     if not names_patch(command):
         return False
     if any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
@@ -930,6 +935,11 @@ def evaluate(payload):
         candidates = patch_targets(tool_input.get("command") or "", cwd)
     elif tool == "Bash":
         command = tool_input.get("command") or ""
+        if len(command) > MAX_ANALYZED_COMMAND:  # parsing is not linear everywhere and a timed-out hook fails open
+            return (
+                f"BLOCKED: this Bash command is {len(command)} characters, over the guard's {MAX_ANALYZED_COMMAND}-character "
+                "limit, so it was not analyzed. Split it, or write long content to a file with the Write tool."
+            )
         # an `apply_patch <<'EOF'` heredoc run through the shell (older Codex) is stripped by the parser
         candidates = bash_write_targets(command, cwd)
         dirs = cd_dirs(command, cwd)
@@ -1461,6 +1471,9 @@ def self_test():
             ("feature: Bash 25k open brackets stay fast", bash("feat", "apply_patch < f; echo a" + "[" * 25000), True),
             ("feature: Bash long subscript word is not a glob name", bash("feat", "d['k']['s']=" + "x" * 400 + "; make"), False),
             ("feature: Bash command over the size cap", bash("feat", "echo " + "x" * 40000), True),
+            ("feature: Bash [^x] glob class", bash("feat", "apply_pa[^x]ch < f"), True),
+            ("feature: Bash POSIX glob class", bash("feat", "apply_pa[[:alpha:]]ch < f"), True),
+            ("chore: Bash command over the size cap", bash("chore", "echo " + "x" * 40000), True),
             ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
             ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),

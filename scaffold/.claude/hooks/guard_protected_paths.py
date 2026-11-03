@@ -78,7 +78,7 @@ PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Mov
 SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
 CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+(?:-[A-Za-z]+\s+|--\s+)*([^\s;&|()]+)")  # skips -P/-L/--
 WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid",
-                 "builtin", "busybox")
+                 "builtin", "busybox", "flock", "chroot", "arch", "caffeinate", "doas", "xcrun", "strace", "runuser")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
 SHELL_KEYWORDS = ("if", "then", "elif", "else", "while", "until", "do", "!", "{")
@@ -100,9 +100,14 @@ WRAPPER_ARG_FLAGS = {
     "nice": {"-n", "--adjustment"},
     "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
+    "doas": {"-u", "-C"},
+    "xcrun": {"-sdk", "--sdk", "--toolchain"},
+    "strace": {"-o", "-e", "-p", "-s", "-u", "-E"},
+    "runuser": {"-u", "-g", "-G", "--user", "--group"},
 }
 # Wrappers whose first non-flag argument is not the command (`timeout 5 rm x`: 5 is a duration).
-WRAPPER_LEADING_OPERAND = ("timeout",)
+WRAPPER_LEADING_OPERAND = ("timeout", "flock", "chroot")  # a duration, a lock file, a new root
 # Global `git` options that take a separate argument token.
 GIT_ARG_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
@@ -616,12 +621,13 @@ def patch_targets(patch, cwd, dirs=None):
 
 PATCH_COMMANDS = ("apply_patch", "applypatch")
 PATCH_NAME = re.compile(r"apply_?patch")
-SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh", "fish")
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh", "fish", "csh", "tcsh", "rbash", "pwsh")
+STDIN_READERS = ("at", "batch")  # run the commands they read on stdin
 SHELL_ARG_OPTS = ("--rcfile", "--init-file")
 # Commands that run their operands as a command or a shell string: each operand is checked as a command line.
-COMMAND_RUNNERS = ("parallel", "watch", "ssh", "script", "su")
+COMMAND_RUNNERS = ("parallel", "watch", "ssh", "script", "su", "tmux", "screen")
 FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
-STDIN_FILES = re.compile(r"^/dev/(?:stdin|fd/\d+)$|^/proc/self/fd/\d+$")
+STDIN_FILES = re.compile(r"^/(?:dev|proc)/|\$")  # fail closed: any /dev or /proc path, or one built from a variable
 ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|readonly)\s+(?:-\w+\s+)*)?"
                         r"([A-Za-z_]\w*)=('[^']*'|\"[^\"]*\"|[^\s;&|()]*)")
 
@@ -713,23 +719,25 @@ def runs_shell_patch(command, _depth=0):
         if any(nested(b) for w in words for b in command_substitutions(w)):
             return True
         bases = [os.path.basename(unquote(w)) for w in words]
-        for wrapper, risky in (("env", r"-[A-Za-z]*S.*|--sp.*"), ("sudo", r"-[A-Za-z]*[si][A-Za-z]*|--shell|--login")):
-            # Fail closed on `env -S`/`-iS`/`--split...` (splits a string into the command) and on
-            # `sudo -s`/`-i`/`-su root` (runs a shell, which may read stdin), in a command that names the tool.
-            if wrapper in bases:
-                for w in words[bases.index(wrapper) + 1 :]:
-                    w = unquote(w)
-                    if not w.startswith("-"):
-                        break
-                    if re.fullmatch(risky, w):
-                        return True
         idx = real_command_index(words)
+        # Fail closed on `env -S`/`-iS`/`--s...` (splits a string into the command) and on `sudo -s`/`-i`/
+        # `--sh...`/`--lo...` (runs a shell, which may read stdin), anywhere between a wrapper and the real command.
+        for j, b in enumerate(bases[: idx if idx is not None else len(words)]):
+            risky = {"env": r"-[A-Za-z]*S.*|--s.*", "sudo": r"-[A-Za-z]*[si][A-Za-z]*|--s.*|--lo.*"}.get(b)
+            if risky and any(re.fullmatch(risky, unquote(w)) for w in words[j + 1 : idx]):
+                return True
         if idx is None:
             continue
         cmd = os.path.basename(re.sub(r"\\", "", unquote(words[idx])))
         operands = command_operands(words[idx + 1 :])
-        if cmd in PATCH_COMMANDS or "$" in cmd:
+        if cmd in PATCH_COMMANDS or "$" in cmd or cmd in STDIN_READERS:
             return True
+        if "xargs" in bases[:idx]:  # xargs builds the command from stdin: `xargs -I{} sh -c {}`, `xargs -I{} {}`
+            x = bases.index("xargs")
+            marks = {"{}"} | {unquote(words[k + 1]) for k in range(x, idx) if words[k] in ("-I", "-i") and k + 1 < idx}
+            marks |= {unquote(w)[2:] for w in words[x:idx] if re.fullmatch(r"-I.+", unquote(w))}
+            if cmd in SHELLS or any(m and m in unquote(words[idx]) for m in marks):
+                return True
         if cmd == "alias" and any(PATCH_NAME.search(w) for w in operands):
             return True
         if cmd == "find":
@@ -1212,6 +1220,27 @@ def self_test():
             ("feature: Bash sudo -su cluster", bash("feat", "echo 'apply_patch < f' | sudo -su root"), True),
             ("feature: Bash env -iS cluster", bash("feat", "env -iS 'apply_patch < f'"), True),
             ("feature: Bash env --split prefix", bash("feat", "env --split 'apply_patch < f'"), True),
+            # PR #140 round 4 + security scan of b772ccf
+            ("feature: Bash xargs-fed sh -c", bash("feat", "echo 'apply_patch < f' | xargs -I{} sh -c {}"), True),
+            ("feature: Bash xargs placeholder command", bash("feat", "echo apply_patch | xargs -I{} {} < f"), True),
+            ("feature: Bash xargs -I custom placeholder", bash("feat", "echo apply_patch | xargs -I CMD CMD < f"), True),
+            ("feature: Bash flock wrapper", bash("feat", "flock /tmp/l apply_patch < f"), True),
+            ("feature: Bash arch wrapper", bash("feat", "arch -arm64 apply_patch < f"), True),
+            ("feature: Bash xcrun wrapper", bash("feat", "xcrun apply_patch < f"), True),
+            ("feature: Bash doas wrapper", bash("feat", "doas -u root apply_patch < f"), True),
+            ("feature: Bash chroot wrapper", bash("feat", "chroot / apply_patch < f"), True),
+            ("feature: Bash csh -c", bash("feat", "csh -c 'apply_patch < f'"), True),
+            ("feature: Bash tmux new", bash("feat", "tmux new 'apply_patch < f'"), True),
+            ("feature: Bash at reads stdin", bash("feat", "echo 'apply_patch < f' | at now"), True),
+            ("feature: Bash sudo -u root -s", bash("feat", "echo 'apply_patch < f' | sudo -u root -s"), True),
+            ("feature: Bash env -u X -S", bash("feat", "env -u X -S 'apply_patch < f'"), True),
+            ("feature: Bash env A=1 env -S", bash("feat", "env A=1 env -S 'apply_patch < f'"), True),
+            ("feature: Bash env --s prefix", bash("feat", "env --s 'apply_patch < f'"), True),
+            ("feature: Bash sudo --sh prefix", bash("feat", "echo 'apply_patch < f' | sudo --sh"), True),
+            ("feature: Bash bash /dev/./stdin", bash("feat", "echo 'apply_patch < f' | bash /dev/./stdin"), True),
+            ("feature: Bash bash /proc/PID/fd/0", bash("feat", "echo 'apply_patch < f' | bash /proc/123/fd/0"), True),
+            ("feature: Bash bash $path script", bash("feat", "p=/dev/stdin; echo 'apply_patch < f' | bash $p"), True),
+            ("feature: Bash xargs grep naming the tool", bash("feat", "ls | xargs grep -l apply_patch"), False),
             ("feature: Bash sudo -u with a grep naming the tool", bash("feat", "sudo -u me grep -c apply_patch log"), False),
             ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
             ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),

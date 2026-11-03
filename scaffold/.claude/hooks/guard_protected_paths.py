@@ -633,6 +633,7 @@ SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `
 EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\[|\$\{(?![A-Za-z_]\w*\})")
 GLOB_MIN_LETTERS = 5  # a glob word needs this many literal letters to count: `*` alone matches any name
 BRACE_SEPARATORS = "{},"  # an unquoted one of these sits next to every piece of text brace expansion leaves out
+SUBSTITUTION_SEPARATORS = BRACE_SEPARATORS + "$()`"  # a `$( )`/backtick span starts with `$`/`` ` `` and ends with `)`/`` ` ``
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
 FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
@@ -646,6 +647,9 @@ def names_patch(command):
     `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
     word (`apply_pat?h`). A name built at run time (`printf -v`, `read`, `base64 -d`, `$(echo pa)`) is not seen."""
     if "$'" in command or '$"' in command:
+        bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
+        if any(ansi_c_decode(b) is None for b in bodies):
+            return True  # an escape bash reads differently (`\\u61`, `\\x6`): fail closed
         decoded = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: ansi_c_decode(m.group(1)), command).replace('$"', '"')
         if decoded != command and names_patch(decoded):
             return True
@@ -657,23 +661,32 @@ def names_patch(command):
                           lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
     defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
     dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\[[^\]]*\]|\$[@*#?$!0-9-]", "", drop_substitutions(defaulted))
+    commands = set()
+    for item in split_segments(tokenize(command) or []):
+        idx = real_command_index(item[1]) if item[0] == "cmd" else None
+        if idx is not None:
+            commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
     globs = [w.rsplit("/", 1)[-1].lower() for w in dropped.split() if re.search(r"[*?\[]", w)]
-    if any(len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS
-           and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
-        return True  # `apply_pat?h` runs the tool when the glob matches a file of that name
+    if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
+           and fnmatch.fnmatchcase(n, w) for w in globs + [c for c in commands if re.search(r"[*?\[]", c)]
+           for n in ("apply_patch", "applypatch")):
+        return True  # `apply_pat?h`, `a*` as a command: the glob runs the tool when it matches a file of that name
     if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
         return True
     if has_brace_group(flat) and any(spells_through_braces(t) for t in [flat, expanded, defaulted, dropped]):
         return True  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`, `apply_{'{',pa}tch`
+    if re.search(r"\$\(|`", flat) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in [flat, expanded, defaulted]):
+        return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
     return builds_command_name(command)
 
 
 def ansi_c_decode(body):
-    """The text bash makes of a `$'...'` body: `\\x61`, `\\141`, `\\u0061` and the other C escapes decoded."""
+    """The text bash makes of a `$'...'` body: `\\x61`, `\\141`, `\\u0061` and the other C escapes decoded, or None
+    when Python's decoder rejects it (bash accepts shorter `\\x`/`\\u`/`\\U` forms), so the caller fails closed."""
     try:
         return codecs.decode(body, "unicode_escape")
     except (UnicodeDecodeError, ValueError):
-        return body.replace("\\", "")
+        return None
 
 
 def drop_substitutions(text):
@@ -717,7 +730,7 @@ def has_brace_group(text):
 BRACE_GROUP = re.compile(r"\{[^{},]*\}")
 
 
-def spells_through_braces(text, name="applypatch"):
+def spells_through_braces(text, separators=BRACE_SEPARATORS, name="applypatch"):
     """True if brace expansion could turn `text` (quotes already removed) into a word containing the name.
     Brace expansion keeps text in order and only leaves out the alternatives it did not pick, and a left-out piece
     always starts and ends at an unquoted `{`, `,` or `}`. So the name's letters must appear in order, and each gap
@@ -725,7 +738,7 @@ def spells_through_braces(text, name="applypatch"):
     any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
     bash without parsing quotes, in one pass per letter."""
     text = BRACE_GROUP.sub(lambda m: "\0" if ".." in m.group() else m.group(), text.lower().replace("_", ""))
-    sep = [c in BRACE_SEPARATORS for c in text]
+    sep = [c in separators for c in text]
     reach = [c == name[0] or c == "\0" for c in text]
     for letter in name[1:]:
         nxt, opened = [False] * len(text), False
@@ -1405,6 +1418,11 @@ def self_test():
             ("feature: Bash glob class command word", bash("feat", "apply_pat[c]h < f"), True),
             ("feature: Bash star glob alone is not a name", bash("feat", "ls * | xargs wc -l"), False),
             ("feature: Bash 100k unterminated $( stay fast", bash("feat", "apply_patch_x " + "$(" * 100000), True),
+            ("feature: Bash empty $( ) with a quoted paren", bash("feat", "apply_p$(: \")\")atch < f"), True),
+            ("feature: Bash empty $( ) with quoted paren and text", bash("feat", "apply_p$(: \")x\")atch < f"), True),
+            ("feature: Bash ANSI-C short \\u escape fails closed", bash("feat", "$'\\u61'pply_patch < f"), True),
+            ("feature: Bash short glob as the command word", bash("feat", "a* < f"), True),
+            ("feature: Bash short glob behind sudo", bash("feat", "sudo /tmp/a* < f"), True),
             ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
             ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),

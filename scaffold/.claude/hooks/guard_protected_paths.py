@@ -666,7 +666,7 @@ def has_brace_group(text):
     return bool(seps) and text.find("}", min(seps)) >= 0
 
 
-BRACE_RANGE = re.compile(r"\{(?:[^{},]|-?\d+)\.\.(?:[^{},]|-?\d+)(?:\.\.-?\d+)?\}")  # `{a..z}`, `{1..9..2}`
+BRACE_RANGE = re.compile(r"\{[^{},]*\.\.[^{},]*\}")  # any `{x..y...}` without a comma: bash range grammar varies by version
 
 
 def spells_through_braces(text, name="applypatch"):
@@ -1340,6 +1340,7 @@ def self_test():
             ("feature: Bash name split by nested braces", bash("feat", "apply_{{p,q}a,x}tch < f"), True),
             ("feature: Bash name split by a brace range", bash("feat", "apply_pa{s..t}ch < f"), True),
             ("feature: Bash name split by a stepped brace range", bash("feat", "apply_pa{a..z..19}ch < f"), True),
+            ("feature: Bash name split by a +step brace range (bash 4+)", bash("feat", "apply_pa{s..t..+1}ch < f"), True),
             ("feature: Bash brace alternative with a quoted space", bash("feat", "apply_{'x y',pa}tch < f"), True),
             ("feature: Bash many brace groups not spelling the tool are readable", bash("feat", "x" + "{a,b}" * 13 + " < f"), False),
             ("feature: Bash quoted brace shifts the pairing", bash("feat", "apply_{'{',pa}tch < f"), True),

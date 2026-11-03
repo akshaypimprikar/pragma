@@ -647,8 +647,10 @@ def names_patch(command):
     unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
     `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
     word (`apply_pat?h`). A name built at run time (`printf -v`, `read`, `base64 -d`, `$(echo pa)`) is not seen."""
-    if "\\\n" in command:
-        return names_patch(command.replace("\\\n", ""))  # `apply\<NL>patch`: a line continuation joins the word
+    if "\\\n" in command:  # `apply\<NL>patch`: a line continuation joins the word; check both forms
+        joined = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", command)
+        if joined != command and names_patch(joined):
+            return True
     if "$'" in command or '$"' in command:
         bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
         if any(ansi_c_decode(b) is None for b in bodies):

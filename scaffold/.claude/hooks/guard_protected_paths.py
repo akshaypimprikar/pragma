@@ -666,7 +666,9 @@ def has_brace_group(text):
     return bool(seps) and text.find("}", min(seps)) >= 0
 
 
-BRACE_RANGE = re.compile(r"\{[^{},]*\.\.[^{},]*\}")  # any `{x..y...}` without a comma: bash range grammar varies by version
+# A comma-free `{...}` group; one with a `..` is a possible range (bash range grammar varies by version). Each match
+# stops at the next brace or comma, so matching is linear, unlike a pattern with `..` between two open runs.
+BRACE_GROUP = re.compile(r"\{[^{},]*\}")
 
 
 def spells_through_braces(text, name="applypatch"):
@@ -676,7 +678,7 @@ def spells_through_braces(text, name="applypatch"):
     between two letters must be empty or start and end with one of those characters. A `{a..z}` range stands for
     any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
     bash without parsing quotes, in one pass per letter."""
-    text = BRACE_RANGE.sub("\0", text.lower().replace("_", ""))
+    text = BRACE_GROUP.sub(lambda m: "\0" if ".." in m.group() else m.group(), text.lower().replace("_", ""))
     sep = [c in BRACE_SEPARATORS for c in text]
     reach = [c == name[0] or c == "\0" for c in text]
     for letter in name[1:]:
@@ -1347,6 +1349,7 @@ def self_test():
             ("feature: Bash quoted close brace shifts the pairing", bash("feat", "apply_{x'}'yyy,pa}tch < f"), True),
             ("feature: Bash name split across a heredoc apostrophe", bash("feat", "cat <<E\n'\nE\napply_{'x y',pa}tch < f"), True),
             ("feature: Bash 64k unmatched braces after the name", bash("feat", "apply_patch_x " + "{" * 65536), True),
+            ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),
             ("feature: Bash unquoted braces in a read-only command naming the tool", bash("feat", "rg {--pre=sh,apply_patch} f"), True),
             ("feature: Bash $[ ] arithmetic", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; echo $[a]"), True),

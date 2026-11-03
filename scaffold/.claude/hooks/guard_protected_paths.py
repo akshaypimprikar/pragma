@@ -619,7 +619,7 @@ def patch_targets(patch, cwd, dirs=None):
     return [(resolve(p, d), WRITE) for p in PATCH_TARGET.findall(patch) for d in (dirs or [cwd])]
 
 
-PATCH_NAME = re.compile(r"apply_?patch")
+PATCH_NAME = re.compile(r"apply_?patch", re.IGNORECASE)  # macOS paths are case-insensitive
 ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|readonly)\s+(?:-\w+\s+)*)?"
                         r"([A-Za-z_]\w*)=('[^']*'|\"[^\"]*\"|[^\s;&|()]*)")
 # Read-only tools a command that names apply_patch may run on a feature branch (pragma #140: a denylist of ways to
@@ -627,6 +627,10 @@ ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|reado
 READ_ONLY_TOOLS = ("grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "type", "which", "sed", "find", "git", "command")
 FIND_ACTIONS = re.compile(r"-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)")
 SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `5p`, `1,9p`, `/re/p`: no e or w command
+# Expansions that evaluate a value as code: `$(( ))`, `(( ))`, `${a[...]}`, `${a@P}`.
+EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\{[^}]*[\[@]")
+# Allowlisted tools whose options can run code or write files, so their arguments must be literal.
+FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
                "select", "in", "time")
 
@@ -641,8 +645,12 @@ def names_patch(command):
     for _ in range(3):  # a value may itself name another variable
         expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
                           lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
-    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", expanded)
-    return any(PATCH_NAME.search(s) for s in (flat, expanded, dropped)) or builds_command_name(command)
+    defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
+    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", defaulted)
+    braced = [re.sub(r"(?<!\$)\{([^{}]*,[^{}]*)\}", lambda m, k=k: (m.group(1).split(",") + [""] * k)[k], dropped)
+              for k in range(4)]  # `apply_{pa,xx}tch`: try each of the first alternatives
+    return any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped] + braced) \
+        or builds_command_name(command)
 
 
 def builds_command_name(command):
@@ -688,6 +696,9 @@ def read_only_segment(words):
     cmd, args = unquote(words[i]), command_operands(words[i + 1 :])
     if cmd not in READ_ONLY_TOOLS:
         return False
+    if cmd in FLAG_SENSITIVE and any(re.search(r"[$`{}]", w) or (not re.search(r"['\"]", w) and re.search(r"[*?\[]", w))
+                                     for w in words[i + 1 :]):
+        return False  # `git log $opt`, `sed -n {e x,1p}`: an expansion could become a flag or script that runs code
     if cmd == "sed":
         flags = [a for a in args if a.startswith("-")]
         scripts = [a for a in args if not a.startswith("-")][:1]
@@ -701,6 +712,8 @@ def read_only_segment(words):
             a.startswith(("--output", "--ext-diff", "--textconv", "--template")) for a in args)
     if cmd == "command":
         return bool(args) and re.fullmatch(r"-p?[vV]p?", args[0]) is not None
+    if cmd == "printf":
+        return not any(a.startswith("-v") for a in args)  # `printf -v 'a[$(...)]'` evaluates the subscript
     if cmd == "rg":
         return not any(a.startswith("--pre") for a in args)
     return True
@@ -714,6 +727,12 @@ def runs_shell_patch(command):
     decoded at run time, a script file) is not seen."""
     if not names_patch(command):
         return False
+    if any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
+        return True  # an unquoted heredoc body expands `$( )` and backticks, and the parser drops heredoc bodies
+    if "\\`" in command:
+        return True  # nested, escaped backticks are not parsed
+    if EVAL_EXPANSION.search(command) or any(PATCH_NAME.search(v) for _, v in ASSIGNMENT.findall(command)):
+        return True  # arithmetic, subscripts and @P evaluate text as code; an assigned name may be run later
 
     def all_read_only(text, depth=0):
         tokens = tokenize(text)
@@ -1206,6 +1225,18 @@ def self_test():
             ("feature: Bash find -exec", bash("feat", "find . -name x -exec apply_patch {} +"), True),
             ("feature: Bash path-qualified grep is not allowlisted", bash("feat", "./grep apply_patch < f"), True),
             ("feature: Bash git -c then commit", bash("feat", "git -c alias.x='!apply_patch < f' x"), True),
+            ("feature: Bash unquoted heredoc body with $( )", bash("feat", "cat <<EOF\n$(apply_patch < f)\nEOF"), True),
+            ("feature: Bash quoted heredoc body is data", bash("feat", "cat <<'EOF'\n$(apply_patch < f)\nEOF"), False),
+            ("feature: Bash arithmetic subscript", bash("feat", "a='x[$(apply_patch < f)]'; echo $((a))"), True),
+            ("feature: Bash printf -v subscript", bash("feat", "printf -v 'a[$(apply_patch < f)]' x"), True),
+            ("feature: Bash name in an assignment value", bash("feat", "p=apply_patch; echo ok"), True),
+            ("feature: Bash nested escaped backticks", bash("feat", "echo `echo \\`apply_patch < f\\``"), True),
+            ("feature: Bash @P prompt expansion", bash("feat", "a='$(apply_patch < f)'; echo ${a@P}"), True),
+            ("feature: Bash upper-case name", bash("feat", "APPLY_PATCH < f"), True),
+            ("feature: Bash name split by a default", bash("feat", "apply_pat${x:-ch} < f"), True),
+            ("feature: Bash name split by brace expansion", bash("feat", "apply_{pa,xx}tch < f"), True),
+            ("feature: Bash git log with a $var argument", bash("feat", "o=--output=CLAUDE.md; git log $o --grep apply_patch"), True),
+            ("feature: Bash sed brace-expanded script", bash("feat", "sed -n {'e apply_patch < f',1p} x"), True),
             ("feature: Bash sed second -e script", bash("feat", "sed -n 1p -e 'e apply_patch < f' x"), True),
             ("feature: Bash sed -f script file", bash("feat", "sed -n -f s.sed apply_patch.md"), True),
             ("feature: Bash GIT_PAGER prefix", bash("feat", "GIT_PAGER='apply_patch < f' git log"), True),

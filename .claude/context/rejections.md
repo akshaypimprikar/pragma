@@ -194,3 +194,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py:743, :706, :80, :619
 **Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 5: allowlist misses heredoc and nested-backtick substitutions, @P and a case-changed name
+**What was wrong:** At 32f1a6b, on `feature/*`, these were allowed: `$(apply_patch < f)` inside an unquoted `cat <<EOF` heredoc (the parser drops heredoc bodies), nested escaped backticks, `a='$(apply_patch < f)'; echo ${a@P}`, and `APPLY_PATCH < f` (`names_patch` was case-sensitive). The CHANGELOG claimed `$( )` and backtick bodies are all checked.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (runs_shell_patch, names_patch); CHANGELOG.md
+**Caught by:** this review

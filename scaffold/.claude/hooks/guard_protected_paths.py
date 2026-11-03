@@ -77,7 +77,8 @@ PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Mov
 # Codex runs a shell-invoked patch as apply_patch or applypatch; a patch body also gives one away.
 SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
 CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+(?:-[A-Za-z]+\s+|--\s+)*([^\s;&|()]+)")  # skips -P/-L/--
-WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid")
+WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid",
+                 "builtin", "busybox")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
 SHELL_KEYWORDS = ("if", "then", "elif", "else", "while", "until", "do", "!", "{")
@@ -361,6 +362,13 @@ def real_command_index(words):
     i, n = 0, len(words)
     while i < n:
         w = words[i]
+        base = os.path.basename(unquote(w))  # `/usr/bin/env` is the env wrapper
+        if w in ("function", "coproc"):
+            # `function f { ...`: skip the name too. `coproc NAME { ...`: NAME only when a `{` follows.
+            i += 2 if w == "function" or (i + 2 < n and words[i + 2] == "{") else 1
+            continue
+        if base == "command" and any(re.fullmatch(r"-[pvV]*[vV][pvV]*", x) for x in words[i + 1 : i + 3]):
+            return None  # `command -v x` / `command -V x` look a command up, they do not run it
         if w in REDIRECT_OPS:
             i += 2  # a leading redirection: `>/dev/null rm x`, `</dev/null sed -i ...`
             continue
@@ -373,14 +381,14 @@ def real_command_index(words):
         if w in SHELL_KEYWORDS:
             i += 1
             continue
-        if w in WRAPPER_WORDS:
-            arg_flags = WRAPPER_ARG_FLAGS.get(w, set())
+        if base in WRAPPER_WORDS:
+            arg_flags = WRAPPER_ARG_FLAGS.get(base, set())
             i += 1
             while i < n and (words[i].startswith("-") or "=" in words[i]):
                 if words[i] in arg_flags:
                     i += 1  # also skip this flag's own argument token
                 i += 1
-            if w in WRAPPER_LEADING_OPERAND and i < n:
+            if base in WRAPPER_LEADING_OPERAND and i < n:
                 i += 1  # `timeout 5 rm x`: 5 is the duration, not the command
             continue
         return i
@@ -601,25 +609,83 @@ def patch_targets(patch, cwd, dirs=None):
 
 
 PATCH_COMMANDS = ("apply_patch", "applypatch")
+PATCH_NAME = re.compile(r"apply_?patch")
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh", "fish")
+SHELL_ARG_OPTS = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+# Commands that run their operands as a command or a shell string: each operand is checked as a command line.
+COMMAND_RUNNERS = ("parallel", "watch", "ssh", "script", "su")
+FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
+STDIN_FILES = re.compile(r"^/dev/(?:stdin|fd/\d+)$|^/proc/self/fd/\d+$")
+ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|readonly)\s+(?:-\w+\s+)*)?"
+                        r"([A-Za-z_]\w*)=('[^']*'|\"[^\"]*\"|[^\s;&|()]*)")
+
+
+def names_patch(command):
+    """True if apply_patch/applypatch is named anywhere in the command: after removing quotes and backslashes
+    (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or with
+    unset ones dropped (`apply${x}_patch`). A name built at run time (`printf -v`, `read`, `base64 -d`) is not seen."""
+    flat = re.sub(r"[\\'\"]", "", command)
+    values = {name: unquote(value) for name, value in ASSIGNMENT.findall(command)}
+    expanded = flat
+    for _ in range(3):  # a value may itself name another variable
+        expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
+                          lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
+    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", expanded)
+    return any(PATCH_NAME.search(s) for s in (flat, expanded, dropped))
+
+
+def shell_input(operands):
+    """What a `bash`/`sh`/... call runs: ("c", the -c string), ("stdin", None) when it reads its script from stdin
+    (no script operand, or -s), or ("file", the script path). Options come first: `bash -o pipefail -c -- 'x'`."""
+    c = s = False
+    i = 0
+    while i < len(operands):
+        w = operands[i]
+        if w in ("--", "-"):
+            i += 1
+            break
+        if w in SHELL_ARG_OPTS or re.fullmatch(r"[-+][A-Za-z]*[oO]", w):
+            i += 2  # the option takes the next word (`-o pipefail`, `--rcfile f`)
+        elif w.startswith("--"):
+            i += 1
+        elif re.fullmatch(r"[-+][A-Za-z]+", w):
+            c = c or (w[0] == "-" and "c" in w)
+            s = s or (w[0] == "-" and "s" in w)
+            i += 1
+        else:
+            break
+    rest = operands[i:]
+    if c:
+        return "c", rest[0] if rest else ""
+    if s or not rest:
+        return "stdin", None
+    return "file", rest[0]
 
 
 def runs_shell_patch(command, _depth=0):
     """True if the command runs apply_patch/applypatch through the shell, or might: as a command word (also behind
-    wrappers, a pipe, `xargs`, `$( )`, `bash -c` or `eval`), through a `$var`/`${var}` command word, an `alias`,
-    `find -exec` or `parallel`. Which files such a patch touches is not checked: on a feature branch the shell
-    route is blocked outright (pragma #140 round 2: two rounds of deciding which shell forms were readable each
-    left a bypass). Merely naming the tool (`grep apply_patch`) is not a run. Quotes and backslashes are removed
-    before the name check (`ap''ply_patch`). A script file or another language calling it is not seen."""
-    if not re.search(r"apply_?patch", re.sub(r"[\\'\"]", "", command)):
-        return False
+    wrappers, path-qualified ones too, `builtin`, `coproc`, a `function` body, a pipe, `xargs`, `$( )`, `bash -c`
+    or `eval`), through a `$var`/`${var}` command word, an `alias`, `find -exec`, or a command runner (`parallel`,
+    `watch`, `ssh`, `script`, `su`), or when a shell reads its script from stdin (`echo ... | bash`, `bash <<<`,
+    `source <(...)`) in a command that names the tool. Which files such a patch touches is not checked: on a
+    feature branch the shell route is blocked outright (pragma #140 round 2: two rounds of deciding which shell
+    forms were readable each left a bypass). Merely naming the tool (`grep apply_patch`, `command -v apply_patch`)
+    is not a run. See names_patch() for how the name is found. A script file, another language calling the tool,
+    or a name built at run time is not seen. Nesting deeper than 3 levels fails closed."""
+    if _depth == 0 and not names_patch(command):
+        return False  # nested calls skip this: the outer command named the tool, `eval $a` may run it
     tokens = tokenize(command)
     if tokens is None:
         return True
+
+    def nested(text):
+        return _depth >= 3 or runs_shell_patch(text, _depth + 1)
+
     for item in split_segments(tokens):
         if item[0] != "cmd":
             continue
         words = item[1]
-        if _depth < 3 and any(runs_shell_patch(b, _depth + 1) for w in words for b in command_substitutions(w)):
+        if any(nested(b) for w in words for b in command_substitutions(w)):
             return True
         idx = real_command_index(words)
         if idx is None:
@@ -628,17 +694,23 @@ def runs_shell_patch(command, _depth=0):
         operands = command_operands(words[idx + 1 :])
         if cmd in PATCH_COMMANDS or "$" in cmd:
             return True
-        if cmd == "alias" and any(re.search(r"apply_?patch", w) for w in operands):
+        if cmd == "alias" and any(PATCH_NAME.search(w) for w in operands):
             return True
-        if cmd in ("find", "parallel") and any(os.path.basename(w) in PATCH_COMMANDS for w in operands):
-            return True  # `find . -exec apply_patch {} \\;`, `parallel apply_patch ::: f`
-        if _depth < 3 and cmd in ("bash", "sh", "zsh", "dash", "ksh"):
-            for j, w in enumerate(operands):
-                if re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w):
-                    if j + 1 < len(operands) and runs_shell_patch(operands[j + 1], _depth + 1):
-                        return True
-                    break
-        elif _depth < 3 and cmd == "eval" and runs_shell_patch(" ".join(operands), _depth + 1):
+        if cmd == "find":
+            execs = [j for j, w in enumerate(operands) if w in FIND_EXEC]
+            if execs and any(nested(w) for w in operands[execs[0] + 1 :] if w not in (";", "+")):
+                return True  # `find . -exec apply_patch {} \\;`, `-exec sh -c 'apply_patch < "$0"' {} \\;`
+        elif cmd in COMMAND_RUNNERS:
+            if any(nested(w) for w in operands):
+                return True  # `parallel 'apply_patch < {}' ::: f`, `watch 'apply_patch < f'`
+        elif cmd in SHELLS:
+            kind, text = shell_input(operands)
+            if kind == "stdin" or (kind == "c" and nested(text)):
+                return True
+        elif cmd in ("source", "."):
+            if not operands or STDIN_FILES.match(operands[0]):
+                return True  # `source <(...)`, `. /dev/stdin`
+        elif cmd == "eval" and nested(" ".join(operands)):
             return True
     return False
 
@@ -1055,6 +1127,39 @@ def self_test():
             ("feature: Bash ${var} command word", bash("feat", "p=apply_patch; ${p} < f"), True),
             ("feature: Bash quote-split tool name", bash("feat", "ap''ply_patch < f"), True),
             ("feature: Bash backslash-split tool name", bash("feat", "apply\\_patch < f"), True),
+            # PR #140 round 3
+            ("feature: Bash path-qualified env wrapper", bash("feat", "/usr/bin/env apply_patch < f"), True),
+            ("feature: Bash path-qualified sudo wrapper", bash("feat", "/usr/bin/sudo -u x apply_patch < f"), True),
+            ("feature: Bash function keyword body", bash("feat", "function f { apply_patch < p; }; f"), True),
+            ("feature: Bash coproc", bash("feat", "coproc apply_patch < f"), True),
+            ("feature: Bash named coproc", bash("feat", "coproc P { apply_patch < f; }"), True),
+            ("feature: Bash builtin command wrapper", bash("feat", "builtin command apply_patch < f"), True),
+            ("feature: Bash echo piped to bash", bash("feat", "echo 'apply_patch < f' | bash"), True),
+            ("feature: Bash here-string to bash", bash("feat", "bash <<< 'apply_patch < f'"), True),
+            ("feature: Bash heredoc piped to sh", bash("feat", "cat <<EOF | sh\napply_patch < f\nEOF"), True),
+            ("feature: Bash bash -s reading stdin", bash("feat", "echo 'apply_patch < f' | bash -s"), True),
+            ("feature: Bash eval $var", bash("feat", "a='apply_patch < f'; eval $a"), True),
+            ("feature: Bash bash -c \"$var\"", bash("feat", "a='apply_patch < f'; bash -c \"$a\""), True),
+            ("feature: Bash bash -c -- string", bash("feat", "bash -c -- 'apply_patch < f'"), True),
+            ("feature: Bash bash -o pipefail -c string", bash("feat", "bash -o pipefail -c 'apply_patch < f'"), True),
+            ("feature: Bash quoted parallel template", bash("feat", "parallel 'apply_patch < {}' ::: a.patch"), True),
+            ("feature: Bash find -exec sh -c", bash("feat", "find . -name '*.patch' -exec sh -c 'apply_patch < \"$0\"' {} \\;"), True),
+            ("feature: Bash four nested bash -c fails closed",
+             bash("feat", "bash -c \"bash -c 'bash -c \\\"bash -c apply_patch\\\"'\""), True),
+            ("feature: Bash watch", bash("feat", "watch -n 1 'apply_patch < f'"), True),
+            ("feature: Bash ssh remote command", bash("feat", "ssh localhost 'apply_patch < f'"), True),
+            ("feature: Bash script -c", bash("feat", "script -q -c 'apply_patch < f' /dev/null"), True),
+            ("feature: Bash busybox sh", bash("feat", "echo 'apply_patch < f' | busybox sh"), True),
+            ("feature: Bash split name across a variable", bash("feat", "a=apply_; ${a}patch < f"), True),
+            ("feature: Bash split name across two variables", bash("feat", "a=app; b=ly_patch; $a$b < f"), True),
+            ("feature: Bash exported split name", bash("feat", "export a=apply_; \"${a}patch\" < f"), True),
+            ("feature: Bash source process substitution", bash("feat", "source <(echo 'apply_patch < f')"), True),
+            ("feature: Bash dot /dev/stdin", bash("feat", "echo 'apply_patch < f' | . /dev/stdin"), True),
+            ("feature: Bash command -v apply_patch is a lookup", bash("feat", "command -v apply_patch"), False),
+            ("feature: Bash command -V applypatch is a lookup", bash("feat", "command -V applypatch"), False),
+            ("feature: Bash bash -c naming apply_patch in echo", bash("feat", "bash -c 'echo apply_patch'"), False),
+            ("feature: Bash bash script file plus a grep", bash("feat", "grep -c apply_patch log.txt; bash build.sh"), False),
+            ("feature: Bash unrelated variable assignment", bash("feat", "a=1; grep -rn apply_patch $a"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

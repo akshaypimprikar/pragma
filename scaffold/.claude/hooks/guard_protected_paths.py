@@ -627,8 +627,10 @@ ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|reado
 READ_ONLY_TOOLS = ("grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "type", "which", "sed", "find", "git", "command")
 FIND_ACTIONS = re.compile(r"-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)")
 SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `5p`, `1,9p`, `/re/p`: no e or w command
-# Expansions that evaluate a value as code: `$(( ))`, `(( ))`, `${a[...]}`, `${a@P}`.
-EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\{[^}]*[\[@]")
+# Expansions that evaluate a value as code: `$(( ))`, `(( ))`, `$[ ]`, and any `${...}` other than a plain
+# `${name}` (`${a[...]}`, `${a@P}`, `${v:off:len}` offsets are arithmetic).
+EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\[|\$\{(?![A-Za-z_]\w*\})")
+BRACE_LIMIT = 4096  # words one brace-expanded chunk may make before the guard stops expanding and fails closed
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
 FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
@@ -647,10 +649,88 @@ def names_patch(command):
                           lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
     defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
     dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", defaulted)
-    braced = [re.sub(r"(?<!\$)\{([^{}]*,[^{}]*)\}", lambda m, k=k: (m.group(1).split(",") + [""] * k)[k], dropped)
-              for k in range(4)]  # `apply_{pa,xx}tch`: try each of the first alternatives
-    return any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped] + braced) \
-        or builds_command_name(command)
+    if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
+        return True
+    for chunk in brace_chunks(dropped):  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`: every brace expansion
+        words = brace_expand(chunk)
+        if words is None or any(PATCH_NAME.search(w) for w in words):
+            return True  # too many words to check counts as naming the tool
+    return builds_command_name(command)
+
+
+def brace_chunks(text):
+    """The whitespace-separated pieces of `text` that contain a `{`, splitting only outside braces, so an
+    alternative with a (formerly quoted) space stays in one piece."""
+    chunks, cur, depth = [], [], 0
+    for c in text:
+        if c.isspace() and depth == 0:
+            chunks.append("".join(cur))
+            cur = []
+            continue
+        depth += (c == "{") - (c == "}" and depth > 0)
+        cur.append(c)
+    return [c for c in chunks + ["".join(cur)] if "{" in c]
+
+
+def brace_expand(word, limit=BRACE_LIMIT, depth=0):
+    """Every word bash brace expansion makes from `word`: nested `{a,{b,c}}`, `{x..y[..step]}` character ranges,
+    and integer ranges (kept as one `0`: digits never spell the tool's name). None past `limit` words or 64
+    nested expansions, so the caller fails closed instead of the hook failing open on an error."""
+    if depth > 64:
+        return None
+    for i, c in enumerate(word):
+        if c != "{" or (i and word[i - 1] == "$"):
+            continue
+        level, commas, j = 0, [], i
+        while j < len(word):
+            level += (word[j] == "{") - (word[j] == "}")
+            if level == 0:
+                break
+            if word[j] == "," and level == 1:
+                commas.append(j)
+            j += 1
+        if j == len(word):
+            continue  # no matching `}`: a literal brace
+        body = word[i + 1 : j]
+        num = re.fullmatch(r"-?\d+\.\.-?\d+(?:\.\.-?\d+)?", body)
+        char = re.fullmatch(r"([^{}])\.\.([^{}])(?:\.\.(-?\d+))?", body)
+        if commas:
+            alts = [word[a + 1 : b] for a, b in zip([i] + commas, commas + [j])]
+        elif num:
+            alts = ["0"]
+        elif char:
+            lo, hi, step = ord(char.group(1)), ord(char.group(2)), abs(int(char.group(3) or 1)) or 1
+            alts = [chr(k) for k in range(lo, hi + 1, step)] if lo <= hi else [chr(k) for k in range(lo, hi - 1, -step)]
+        else:
+            continue  # `{x}`, `{}`: not an expansion
+        out = []
+        for alt in alts:
+            sub = brace_expand(word[:i] + alt + word[j + 1 :], limit - len(out), depth + 1)
+            if sub is None or len(out) + len(sub) > limit:
+                return None
+            out += sub
+        return out
+    return [word]
+
+
+def split_quoted(command):
+    """(the command with every quoted string removed, the contents of each `'...'`/`"..."` string)."""
+    plain, quoted, i = [], [], 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\":
+            plain.append(command[i : i + 2])
+            i += 2
+        elif c in "'\"":
+            j = i + 1
+            while j < len(command) and command[j] != c:
+                j += 2 if c == '"' and command[j] == "\\" else 1
+            quoted.append(command[i + 1 : j])
+            i = j + 1
+        else:
+            plain.append(c)
+            i += 1
+    return "".join(plain), quoted
 
 
 def builds_command_name(command):
@@ -733,6 +813,11 @@ def runs_shell_patch(command):
         return True  # nested, escaped backticks are not parsed
     if EVAL_EXPANSION.search(command) or any(PATCH_NAME.search(v) for _, v in ASSIGNMENT.findall(command)):
         return True  # arithmetic, subscripts and @P evaluate text as code; an assigned name may be run later
+    plain, quoted = split_quoted(command)
+    if any(re.search(r"\$\(|`", v) for v in quoted + [v for _, v in ASSIGNMENT.findall(command)]):
+        return True  # a stored `$( )` or backtick can be run later (eval, @P, an indirect expansion)
+    if any(brace_expand(chunk) != [chunk] for chunk in brace_chunks(plain)):
+        return True  # an unquoted `{x,y}` or `{a..b}` can add words, flags or scripts the parser never sees
 
     def all_read_only(text, depth=0):
         tokens = tokenize(text)
@@ -1273,6 +1358,18 @@ def self_test():
             ("feature: Bash sudo -u with a grep naming the tool (sudo not allowlisted)", bash("feat", "sudo -u me grep -c apply_patch log"), True),
             ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
             ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),
+            # PR #140 security scan of fcbef38
+            ("feature: Bash name split by nested braces", bash("feat", "apply_{{p,q}a,x}tch < f"), True),
+            ("feature: Bash name split by a brace range", bash("feat", "apply_pa{s..t}ch < f"), True),
+            ("feature: Bash name split by a stepped brace range", bash("feat", "apply_pa{a..z..19}ch < f"), True),
+            ("feature: Bash brace alternative with a quoted space", bash("feat", "apply_{'x y',pa}tch < f"), True),
+            ("feature: Bash too many brace words fails closed", bash("feat", "x" + "{a,b}" * 13 + " < f"), True),
+            ("feature: Bash unquoted braces in a read-only command naming the tool", bash("feat", "rg {--pre=sh,apply_patch} f"), True),
+            ("feature: Bash $[ ] arithmetic", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; echo $[a]"), True),
+            ("feature: Bash ${v:off:len} offset", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; v=abc; echo ${v:a:1}"), True),
+            ("feature: Bash quoted $( ) naming the tool", bash("feat", "grep -c apply_patch \"$(echo f)\""), True),
+            ("feature: Bash integer brace range not naming the tool is readable", bash("feat", "for i in {1..99999}; do make t$i; done"), False),
+            ("feature: Bash allowlist: grep with quoted braces", bash("feat", "grep -E 'apply_patch{1,2}' f"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

@@ -367,8 +367,14 @@ def real_command_index(words):
             # `function f { ...`: skip the name too. `coproc NAME { ...`: NAME only when a `{` follows.
             i += 2 if w == "function" or (i + 2 < n and words[i + 2] == "{") else 1
             continue
-        if base == "command" and any(re.fullmatch(r"-[pvV]*[vV][pvV]*", x) for x in words[i + 1 : i + 3]):
-            return None  # `command -v x` / `command -V x` look a command up, they do not run it
+        if base == "command":
+            opts = []
+            for x in words[i + 1 :]:
+                if x == "--" or not x.startswith("-"):
+                    break
+                opts.append(x)
+            if any(re.search(r"[vV]", x) for x in opts):
+                return None  # `command -v x` / `command -V x` look a command up, they do not run it
         if w in REDIRECT_OPS:
             i += 2  # a leading redirection: `>/dev/null rm x`, `</dev/null sed -i ...`
             continue
@@ -611,7 +617,7 @@ def patch_targets(patch, cwd, dirs=None):
 PATCH_COMMANDS = ("apply_patch", "applypatch")
 PATCH_NAME = re.compile(r"apply_?patch")
 SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh", "fish")
-SHELL_ARG_OPTS = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+SHELL_ARG_OPTS = ("--rcfile", "--init-file")
 # Commands that run their operands as a command or a shell string: each operand is checked as a command line.
 COMMAND_RUNNERS = ("parallel", "watch", "ssh", "script", "su")
 FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
@@ -631,7 +637,26 @@ def names_patch(command):
         expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
                           lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
     dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*", "", expanded)
-    return any(PATCH_NAME.search(s) for s in (flat, expanded, dropped))
+    return any(PATCH_NAME.search(s) for s in (flat, expanded, dropped)) or builds_command_name(command)
+
+
+def builds_command_name(command):
+    """True if a `$var` command word uses a variable the same command sets (`a=app; a+=ly_patch; $a`,
+    `printf -v a ...; $a`, `read a; $a`), or positional parameters after a `set`: the name it runs is built
+    in the command, so it can't be read. `$EDITOR f` or `"$HOME/bin/x"` (set elsewhere) stay readable."""
+    tokens = tokenize(command)
+    for item in split_segments(tokens or []):
+        if item[0] != "cmd":
+            continue
+        idx = real_command_index(item[1])
+        word = item[1][idx] if idx is not None else ""
+        for name in re.findall(r"\$\{?!?([A-Za-z_]\w*|[0-9@*])", word):
+            if not name[0].isalpha() and name[0] != "_":
+                if re.search(r"(?:^|[\s;&|(])set\s", command):
+                    return True
+            elif re.search(rf"(?<![$\w{{!]){name}\b", command):
+                return True
+    return False
 
 
 def shell_input(operands):
@@ -644,14 +669,14 @@ def shell_input(operands):
         if w in ("--", "-"):
             i += 1
             break
-        if w in SHELL_ARG_OPTS or re.fullmatch(r"[-+][A-Za-z]*[oO]", w):
-            i += 2  # the option takes the next word (`-o pipefail`, `--rcfile f`)
+        if w in SHELL_ARG_OPTS:
+            i += 2  # the option takes the next word (`--rcfile f`)
         elif w.startswith("--"):
             i += 1
         elif re.fullmatch(r"[-+][A-Za-z]+", w):
             c = c or (w[0] == "-" and "c" in w)
             s = s or (w[0] == "-" and "s" in w)
-            i += 1
+            i += 1 + len(re.findall(r"[oO]", w))  # each o/O in a cluster takes a word: `-eo pipefail`, `-oc x 'cmd'`
         else:
             break
     rest = operands[i:]
@@ -687,8 +712,17 @@ def runs_shell_patch(command, _depth=0):
         words = item[1]
         if any(nested(b) for w in words for b in command_substitutions(w)):
             return True
+        bases = [os.path.basename(unquote(w)) for w in words]
+        if "env" in bases:  # `env -S 'apply_patch < f'` splits its argument into the command
+            plain = [unquote(w) for w in words[bases.index("env") + 1 :]]
+            for j, w in enumerate(plain):
+                m = re.fullmatch(r"(?:-S|--split-string=?)(.*)", w)
+                if m and nested(m.group(1) or (plain[j + 1] if j + 1 < len(plain) else "")):
+                    return True
         idx = real_command_index(words)
         if idx is None:
+            if "sudo" in bases and any(re.fullmatch(r"-[A-Za-z]*[si][A-Za-z]*|--shell|--login", w) for w in words):
+                return True  # `sudo -s` / `sudo -i` with no command reads a shell script from stdin
             continue
         cmd = os.path.basename(re.sub(r"\\", "", unquote(words[idx])))
         operands = command_operands(words[idx + 1 :])
@@ -703,6 +737,8 @@ def runs_shell_patch(command, _depth=0):
         elif cmd in COMMAND_RUNNERS:
             if any(nested(w) for w in operands):
                 return True  # `parallel 'apply_patch < {}' ::: f`, `watch 'apply_patch < f'`
+            if cmd == "su" and not any(re.fullmatch(r"-[A-Za-z]*c|--command(=.*)?", w) for w in operands):
+                return True  # `su` with no -c runs a shell that reads stdin
         elif cmd in SHELLS:
             kind, text = shell_input(operands)
             if kind == "stdin" or (kind == "c" and nested(text)):
@@ -753,7 +789,7 @@ def evaluate(payload):
                 branch = git(d, "branch", "--show-current")
                 if branch and GUARDED_BRANCH.match(branch):
                     return (
-                        f"BLOCKED: this command runs apply_patch through the shell and `{d}` is on `{branch}` "
+                        f"BLOCKED: this command runs, or may run, apply_patch through the shell and `{d}` is on `{branch}` "
                         "(feature/*). The guard can't reliably tell which files a shell-run patch changes, so "
                         "that route is closed on feature branches. Remedy: use the apply_patch tool directly "
                         "(its file list is checked), or make the change on a chore/* or fix/* branch."
@@ -1160,6 +1196,17 @@ def self_test():
             ("feature: Bash bash -c naming apply_patch in echo", bash("feat", "bash -c 'echo apply_patch'"), False),
             ("feature: Bash bash script file plus a grep", bash("feat", "grep -c apply_patch log.txt; bash build.sh"), False),
             ("feature: Bash unrelated variable assignment", bash("feat", "a=1; grep -rn apply_patch $a"), False),
+            ("feature: Bash command -v after the tool name is not a lookup", bash("feat", "command apply_patch -v < f"), True),
+            ("feature: Bash bash -co cluster", bash("feat", "bash -co pipefail 'apply_patch < f'"), True),
+            ("feature: Bash bash -oc cluster", bash("feat", "bash -oc pipefail 'apply_patch < f'"), True),
+            ("feature: Bash split name built with +=", bash("feat", "a=app; a+=ly_patch; $a < f"), True),
+            ("feature: Bash split name built with printf -v", bash("feat", "printf -v a '%s%s' app ly_patch; $a < f"), True),
+            ("feature: Bash positional parameters after set", bash("feat", "set -- app ly_patch; \"$1$2\" < f"), True),
+            ("feature: Bash env -S", bash("feat", "env -S 'apply_patch < f'"), True),
+            ("feature: Bash env --split-string=", bash("feat", "/usr/bin/env '--split-string=apply_patch < f'"), True),
+            ("feature: Bash sudo -s from stdin", bash("feat", "echo 'apply_patch < f' | sudo -s"), True),
+            ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
+            ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

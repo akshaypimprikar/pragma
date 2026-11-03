@@ -668,30 +668,37 @@ def read_only_segment(words):
     """True if one `;`/`|`-separated command only reads: no command at all (assignments, keywords), or an
     allowlisted tool used read-only (`sed` only to print, `find` with no action, `git commit`/`git log` with no
     global options, `command -v`, `rg` without `--pre`). Leading assignments and redirections are skipped."""
-    i = 0
+    i, assigned = 0, False
     while i < len(words):
         w = words[i]
         if w in REDIRECT_OPS:
             i += 2
         elif re.fullmatch(r"\d+", w) and i + 1 < len(words) and words[i + 1] in REDIRECT_OPS:
             i += 1
-        elif w in SHELL_WORDS or re.fullmatch(r"[A-Za-z_]\w*=.*", w):
+        elif w in SHELL_WORDS:
             i += 1
+        elif re.fullmatch(r"[A-Za-z_]\w*=.*", w):
+            assigned, i = True, i + 1
         else:
             break
     if i >= len(words) or words[0] in ("for", "case", "select"):
         return True  # nothing runs here: `a=1`, `fi`, `done`, or a for/case word list
+    if assigned:
+        return False  # `GIT_PAGER=... git log`, `GREP_OPTIONS=...`: an environment prefix can make a tool run commands
     cmd, args = unquote(words[i]), command_operands(words[i + 1 :])
     if cmd not in READ_ONLY_TOOLS:
         return False
     if cmd == "sed":
+        flags = [a for a in args if a.startswith("-")]
         scripts = [a for a in args if not a.startswith("-")][:1]
-        return all(not re.match(r"-[A-Za-z]*i|--in-place", a) for a in args) and "-n" in args \
-            and all(SED_PRINT.fullmatch(x) for x in scripts)
+        # only `sed -n SCRIPT [file...]` (plus -E/-r): -e/-f/-i and long options could add an e or w command
+        return "-n" in flags and all(a in ("-n", "-E", "-r") for a in flags) \
+            and bool(scripts) and SED_PRINT.fullmatch(scripts[0]) is not None
     if cmd == "find":
         return not any(FIND_ACTIONS.fullmatch(a) for a in args)
     if cmd == "git":
-        return bool(args) and args[0] in ("commit", "log")
+        return bool(args) and args[0] in ("commit", "log") and not any(
+            a.startswith(("--output", "--ext-diff", "--textconv", "--template")) for a in args)
     if cmd == "command":
         return bool(args) and re.fullmatch(r"-p?[vV]p?", args[0]) is not None
     if cmd == "rg":
@@ -1199,6 +1206,10 @@ def self_test():
             ("feature: Bash find -exec", bash("feat", "find . -name x -exec apply_patch {} +"), True),
             ("feature: Bash path-qualified grep is not allowlisted", bash("feat", "./grep apply_patch < f"), True),
             ("feature: Bash git -c then commit", bash("feat", "git -c alias.x='!apply_patch < f' x"), True),
+            ("feature: Bash sed second -e script", bash("feat", "sed -n 1p -e 'e apply_patch < f' x"), True),
+            ("feature: Bash sed -f script file", bash("feat", "sed -n -f s.sed apply_patch.md"), True),
+            ("feature: Bash GIT_PAGER prefix", bash("feat", "GIT_PAGER='apply_patch < f' git log"), True),
+            ("feature: Bash git log --output", bash("feat", "git log --output=CLAUDE.md --grep apply_patch"), True),
             ("feature: Bash allowlist: sed -n print", bash("feat", "sed -n '/apply_patch/p' f"), False),
             ("feature: Bash allowlist: rg", bash("feat", "rg -n 'apply_?patch' scaffold"), False),
             ("feature: Bash allowlist: git log --grep", bash("feat", "git log --oneline --grep apply_patch"), False),

@@ -230,3 +230,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch glob branch)
 **Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 8: negated and multi-class POSIX glob brackets still bypass the glob check
+**What was wrong:** At 39d9280 `apply_pa[^[:digit:]]ch`, `apply_pa[[:alpha:][:digit:]]ch` and `apply[[:punct:]_]patch` were allowed on `feature/*`: `posix_glob` rewrote `[:cls:]` to `!-~`, which fnmatch then read as a negation (28 of 102 class patterns bash matches were missed).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (posix_glob)
+**Caught by:** this review

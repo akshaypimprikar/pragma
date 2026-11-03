@@ -646,8 +646,8 @@ def names_patch(command):
     (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or with
     unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
     `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
-    word (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is not seen; one assembled with `printf -v` or `read` and
-    then run as `$a` is caught by builds_command_name()."""
+    word (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is not seen; one assembled
+    with `printf -v` or `read` and then run as `$a` is caught by builds_command_name()."""
     if "\\\n" in command:  # `apply\<NL>patch`: a line continuation joins the word; check both forms
         joined = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", command)
         if joined != command and names_patch(joined):
@@ -687,10 +687,14 @@ def names_patch(command):
     return builds_command_name(command)
 
 
+GLOB_BRACKET = re.compile(r"\[[!^]?(?:\[:[a-z]+:\]|[^\[\]])*\]")  # one bracket expression; the alternatives are disjoint
+
+
 def posix_glob(word):
-    """`word` with bash-only glob syntax turned into what fnmatch reads the same way: `[^x]` as `[!x]`, and a POSIX
-    class (`[[:alpha:]]`) as any printable character, which over-approximates it."""
-    return re.sub(r"\[:[a-z]+:\]", "!-~", word.replace("[^", "[!"))
+    """`word` with bash-only glob syntax turned into what fnmatch reads the same way: `[^x]` as `[!x]`, and any
+    bracket holding a POSIX class (`[[:alpha:]]`, `[^[:digit:][:upper:]]`) as `?`, which over-approximates it."""
+    word = GLOB_BRACKET.sub(lambda m: "?" if "[:" in m.group() else m.group(), word)
+    return word.replace("[^", "[!")
 
 
 def glob_min_length(word):
@@ -1474,6 +1478,9 @@ def self_test():
             ("feature: Bash [^x] glob class", bash("feat", "apply_pa[^x]ch < f"), True),
             ("feature: Bash POSIX glob class", bash("feat", "apply_pa[[:alpha:]]ch < f"), True),
             ("chore: Bash command over the size cap", bash("chore", "echo " + "x" * 40000), True),
+            ("feature: Bash negated POSIX glob class", bash("feat", "apply_pa[^[:digit:]]ch < f"), True),
+            ("feature: Bash multi-class glob bracket", bash("feat", "apply_pa[[:alpha:][:digit:]]ch < f"), True),
+            ("feature: Bash mixed glob bracket", bash("feat", "apply[[:punct:]_]patch < f"), True),
             ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
             ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),

@@ -200,3 +200,21 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (runs_shell_patch, names_patch); CHANGELOG.md
 **Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: CHANGELOG overclaims name detection (repeat of PR#110 CHANGELOG-claims entry)
+**What was wrong:** At 0041092 the CHANGELOG said a name split by backslashes is found and that detection is linear; `apply\<NL>patch` is not found, and the glob branch, `builds_command_name`, `${x:-` runs and heredoc markers are super-linear.
+**Rule violated:** repeats "2026-10-07 PR#110 CHANGELOG claimed behavior the plugin init path did not implement"
+**File:** CHANGELOG.md; scaffold/.claude/hooks/guard_protected_paths.py (names_patch)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: backslash-newline and glob-plus-brace names bypass names_patch
+**What was wrong:** At 0041092, on `feature/*`, `apply\<NL>patch < f` (line continuation) and `ap?lypatc{h,} < f` (a glob inside a brace expansion) were allowed.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch)
+**Caught by:** this review
+
+## 2026-11-03 — PR#140 — Round 6: super-linear name detection lets a hook timeout fail open
+**What was wrong:** At 0041092 `names_patch('[' * 25000)` took 5.5 s (fnmatch on unmatched `[`), and `builds_command_name`, repeated `${x:-` and repeated heredoc markers take more than 8 s at 40k-200k characters; a timed-out hook fails open.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch, builds_command_name)
+**Caught by:** this review

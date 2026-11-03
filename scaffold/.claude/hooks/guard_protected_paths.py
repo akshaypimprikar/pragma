@@ -632,6 +632,7 @@ SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `
 # `${name}` (`${a[...]}`, `${a@P}`, `${v:off:len}` offsets are arithmetic).
 EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\[|\$\{(?![A-Za-z_]\w*\})")
 GLOB_MIN_LETTERS = 5  # a glob word needs this many literal letters to count: `*` alone matches any name
+MAX_ANALYZED_COMMAND = 32768  # characters; none of ~4,800 real session commands exceeded 20k (2026-11-03)
 BRACE_SEPARATORS = "{},"  # an unquoted one of these sits next to every piece of text brace expansion leaves out
 SUBSTITUTION_SEPARATORS = BRACE_SEPARATORS + "$()`"  # a `$( )`/backtick span starts with `$`/`` ` `` and ends with `)`/`` ` ``
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
@@ -646,6 +647,8 @@ def names_patch(command):
     unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
     `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
     word (`apply_pat?h`). A name built at run time (`printf -v`, `read`, `base64 -d`, `$(echo pa)`) is not seen."""
+    if "\\\n" in command:
+        return names_patch(command.replace("\\\n", ""))  # `apply\<NL>patch`: a line continuation joins the word
     if "$'" in command or '$"' in command:
         bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
         if any(ansi_c_decode(b) is None for b in bodies):
@@ -666,10 +669,11 @@ def names_patch(command):
         idx = real_command_index(item[1]) if item[0] == "cmd" else None
         if idx is not None:
             commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
-    globs = [w.rsplit("/", 1)[-1].lower() for w in dropped.split() if re.search(r"[*?\[]", w)]
+    globs = [re.sub(r"\*+", "*", w.rsplit("/", 1)[-1].lower()) for w in dropped.split() if re.search(r"[*?\[]", w)]
+    globs += [c for c in commands if re.search(r"[*?\[]", c)]
+    globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
-           and fnmatch.fnmatchcase(n, w) for w in globs + [c for c in commands if re.search(r"[*?\[]", c)]
-           for n in ("apply_patch", "applypatch")):
+           and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
         return True  # `apply_pat?h`, `a*` as a command: the glob runs the tool when it matches a file of that name
     if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
         return True
@@ -678,6 +682,28 @@ def names_patch(command):
     if re.search(r"\$\(|`", flat) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in [flat, expanded, defaulted]):
         return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
     return builds_command_name(command)
+
+
+def glob_min_length(word):
+    """The fewest characters a glob word can match (`*` matches none, `?` and a `[...]` class one each), in one pass,
+    so a word too long to match the name is skipped before fnmatch, which is quadratic on unmatched `[`."""
+    close, last = [-1] * (len(word) + 2), -1
+    for k in range(len(word) - 1, -1, -1):
+        last = k if word[k] == "]" else last
+        close[k] = last
+    n, i = 0, 0
+    while i < len(word):
+        if word[i] == "[":
+            k = i + 1 + (word[i + 1 : i + 2] in ("!", "^"))
+            k += word[k : k + 1] == "]"  # `[]a]`: a leading `]` is part of the class
+            j = close[k] if k < len(word) else -1
+            i = j + 1 if j >= 0 else i + 1
+        else:
+            i += 1
+            if word[i - 1] == "*":
+                continue
+        n += 1
+    return n
 
 
 def ansi_c_decode(body):
@@ -738,6 +764,7 @@ def spells_through_braces(text, separators=BRACE_SEPARATORS, name="applypatch"):
     any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
     bash without parsing quotes, in one pass per letter."""
     text = BRACE_GROUP.sub(lambda m: "\0" if ".." in m.group() else m.group(), text.lower().replace("_", ""))
+    text = re.sub(r"\[[^\[\]{},]*\]|[?*]", "\0", text)  # `ap?ly`, `pat[c]h`: a glob character stands for a letter
     sep = [c in separators for c in text]
     reach = [c == name[0] or c == "\0" for c in text]
     for letter in name[1:]:
@@ -844,6 +871,8 @@ def runs_shell_patch(command):
     (read_only_segment()). Anything else, from `apply_patch < f` to `bash`, `xargs`, `sudo` or an unknown command,
     counts as a possible run, so it is blocked on a feature branch. A command that does not name the tool (a name
     decoded at run time, a script file) is not seen."""
+    if len(command) > MAX_ANALYZED_COMMAND:
+        return True  # parsing is not linear everywhere and a timed-out hook fails open, so a huge command is blocked
     if not names_patch(command):
         return False
     if any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
@@ -1423,6 +1452,13 @@ def self_test():
             ("feature: Bash ANSI-C short \\u escape fails closed", bash("feat", "$'\\u61'pply_patch < f"), True),
             ("feature: Bash short glob as the command word", bash("feat", "a* < f"), True),
             ("feature: Bash short glob behind sudo", bash("feat", "sudo /tmp/a* < f"), True),
+            ("feature: Bash backslash-newline join", bash("feat", "apply\\\npatch < f"), True),
+            ("feature: Bash backslash-newline join with underscore", bash("feat", "apply_pa\\\ntch < f"), True),
+            ("feature: Bash glob inside a brace group", bash("feat", "ap?lypatc{h,} < f"), True),
+            ("feature: Bash brace group around a glob", bash("feat", "{apply_pat?h,} < f"), True),
+            ("feature: Bash 25k open brackets stay fast", bash("feat", "apply_patch < f; echo a" + "[" * 25000), True),
+            ("feature: Bash long subscript word is not a glob name", bash("feat", "d['k']['s']=" + "x" * 400 + "; make"), False),
+            ("feature: Bash command over the size cap", bash("feat", "echo " + "x" * 40000), True),
             ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
             ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
             ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),

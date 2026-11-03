@@ -619,17 +619,16 @@ def patch_targets(patch, cwd, dirs=None):
     return [(resolve(p, d), WRITE) for p in PATCH_TARGET.findall(patch) for d in (dirs or [cwd])]
 
 
-PATCH_COMMANDS = ("apply_patch", "applypatch")
 PATCH_NAME = re.compile(r"apply_?patch")
-SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "ash", "mksh", "fish", "csh", "tcsh", "rbash", "pwsh")
-STDIN_READERS = ("at", "batch")  # run the commands they read on stdin
-SHELL_ARG_OPTS = ("--rcfile", "--init-file")
-# Commands that run their operands as a command or a shell string: each operand is checked as a command line.
-COMMAND_RUNNERS = ("parallel", "watch", "ssh", "script", "su", "tmux", "screen")
-FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
-STDIN_FILES = re.compile(r"^/(?:dev|proc)/|\$")  # fail closed: any /dev or /proc path, or one built from a variable
 ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|readonly)\s+(?:-\w+\s+)*)?"
                         r"([A-Za-z_]\w*)=('[^']*'|\"[^\"]*\"|[^\s;&|()]*)")
+# Read-only tools a command that names apply_patch may run on a feature branch (pragma #140: a denylist of ways to
+# run it kept leaking, so anything not listed here is blocked). Matched by exact name: `./grep` or `$g` is not grep.
+READ_ONLY_TOOLS = ("grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "type", "which", "sed", "find", "git", "command")
+FIND_ACTIONS = re.compile(r"-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)")
+SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `5p`, `1,9p`, `/re/p`: no e or w command
+SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
+               "select", "in", "time")
 
 
 def names_patch(command):
@@ -665,100 +664,64 @@ def builds_command_name(command):
     return False
 
 
-def shell_input(operands):
-    """What a `bash`/`sh`/... call runs: ("c", the -c string), ("stdin", None) when it reads its script from stdin
-    (no script operand, or -s), or ("file", the script path). Options come first: `bash -o pipefail -c -- 'x'`."""
-    c = s = False
+def read_only_segment(words):
+    """True if one `;`/`|`-separated command only reads: no command at all (assignments, keywords), or an
+    allowlisted tool used read-only (`sed` only to print, `find` with no action, `git commit`/`git log` with no
+    global options, `command -v`, `rg` without `--pre`). Leading assignments and redirections are skipped."""
     i = 0
-    while i < len(operands):
-        w = operands[i]
-        if w in ("--", "-"):
+    while i < len(words):
+        w = words[i]
+        if w in REDIRECT_OPS:
+            i += 2
+        elif re.fullmatch(r"\d+", w) and i + 1 < len(words) and words[i + 1] in REDIRECT_OPS:
             i += 1
-            break
-        if w in SHELL_ARG_OPTS:
-            i += 2  # the option takes the next word (`--rcfile f`)
-        elif w.startswith("--"):
+        elif w in SHELL_WORDS or re.fullmatch(r"[A-Za-z_]\w*=.*", w):
             i += 1
-        elif re.fullmatch(r"[-+][A-Za-z]+", w):
-            c = c or (w[0] == "-" and "c" in w)
-            s = s or (w[0] == "-" and "s" in w)
-            i += 1 + len(re.findall(r"[oO]", w))  # each o/O in a cluster takes a word: `-eo pipefail`, `-oc x 'cmd'`
         else:
             break
-    rest = operands[i:]
-    if c:
-        return "c", rest[0] if rest else ""
-    if s or not rest:
-        return "stdin", None
-    return "file", rest[0]
+    if i >= len(words) or words[0] in ("for", "case", "select"):
+        return True  # nothing runs here: `a=1`, `fi`, `done`, or a for/case word list
+    cmd, args = unquote(words[i]), command_operands(words[i + 1 :])
+    if cmd not in READ_ONLY_TOOLS:
+        return False
+    if cmd == "sed":
+        scripts = [a for a in args if not a.startswith("-")][:1]
+        return all(not re.match(r"-[A-Za-z]*i|--in-place", a) for a in args) and "-n" in args \
+            and all(SED_PRINT.fullmatch(x) for x in scripts)
+    if cmd == "find":
+        return not any(FIND_ACTIONS.fullmatch(a) for a in args)
+    if cmd == "git":
+        return bool(args) and args[0] in ("commit", "log")
+    if cmd == "command":
+        return bool(args) and re.fullmatch(r"-p?[vV]p?", args[0]) is not None
+    if cmd == "rg":
+        return not any(a.startswith("--pre") for a in args)
+    return True
 
 
-def runs_shell_patch(command, _depth=0):
-    """True if the command runs apply_patch/applypatch through the shell, or might: as a command word (also behind
-    wrappers, path-qualified ones too, `builtin`, `coproc`, a `function` body, a pipe, `xargs`, `$( )`, `bash -c`
-    or `eval`), through a `$var`/`${var}` command word, an `alias`, `find -exec`, or a command runner (`parallel`,
-    `watch`, `ssh`, `script`, `su`), or when a shell reads its script from stdin (`echo ... | bash`, `bash <<<`,
-    `source <(...)`) in a command that names the tool. Which files such a patch touches is not checked: on a
-    feature branch the shell route is blocked outright (pragma #140 round 2: two rounds of deciding which shell
-    forms were readable each left a bypass). Merely naming the tool (`grep apply_patch`, `command -v apply_patch`)
-    is not a run. See names_patch() for how the name is found. A script file, another language calling the tool,
-    or a name built at run time is not seen. Nesting deeper than 3 levels fails closed."""
-    if _depth == 0 and not names_patch(command):
-        return False  # nested calls skip this: the outer command named the tool, `eval $a` may run it
-    tokens = tokenize(command)
-    if tokens is None:
+def runs_shell_patch(command):
+    """True if a Bash command names apply_patch/applypatch (see names_patch()) and does anything other than read:
+    every command in it, including inside `$( )` and backticks, must be a read-only allowlisted tool
+    (read_only_segment()). Anything else, from `apply_patch < f` to `bash`, `xargs`, `sudo` or an unknown command,
+    counts as a possible run, so it is blocked on a feature branch. A command that does not name the tool (a name
+    decoded at run time, a script file) is not seen."""
+    if not names_patch(command):
+        return False
+
+    def all_read_only(text, depth=0):
+        tokens = tokenize(text)
+        if tokens is None or depth > 3:
+            return False
+        for item in split_segments(tokens):
+            if item[0] != "cmd":
+                continue
+            if not read_only_segment(item[1]):
+                return False
+            if any(not all_read_only(b, depth + 1) for w in item[1] for b in command_substitutions(w)):
+                return False
         return True
 
-    def nested(text):
-        return _depth >= 3 or runs_shell_patch(text, _depth + 1)
-
-    for item in split_segments(tokens):
-        if item[0] != "cmd":
-            continue
-        words = item[1]
-        if any(nested(b) for w in words for b in command_substitutions(w)):
-            return True
-        bases = [os.path.basename(unquote(w)) for w in words]
-        idx = real_command_index(words)
-        # Fail closed on `env -S`/`-iS`/`--s...` (splits a string into the command) and on `sudo -s`/`-i`/
-        # `--sh...`/`--lo...` (runs a shell, which may read stdin), anywhere between a wrapper and the real command.
-        for j, b in enumerate(bases[: idx if idx is not None else len(words)]):
-            risky = {"env": r"-[A-Za-z]*S.*|--s.*", "sudo": r"-[A-Za-z]*[si][A-Za-z]*|--s.*|--lo.*"}.get(b)
-            if risky and any(re.fullmatch(risky, unquote(w)) for w in words[j + 1 : idx]):
-                return True
-        if idx is None:
-            continue
-        cmd = os.path.basename(re.sub(r"\\", "", unquote(words[idx])))
-        operands = command_operands(words[idx + 1 :])
-        if cmd in PATCH_COMMANDS or "$" in cmd or cmd in STDIN_READERS:
-            return True
-        if "xargs" in bases[:idx]:  # xargs builds the command from stdin: `xargs -I{} sh -c {}`, `xargs -I{} {}`
-            x = bases.index("xargs")
-            marks = {"{}"} | {unquote(words[k + 1]) for k in range(x, idx) if words[k] in ("-I", "-i") and k + 1 < idx}
-            marks |= {unquote(w)[2:] for w in words[x:idx] if re.fullmatch(r"-I.+", unquote(w))}
-            if cmd in SHELLS or any(m and m in unquote(words[idx]) for m in marks):
-                return True
-        if cmd == "alias" and any(PATCH_NAME.search(w) for w in operands):
-            return True
-        if cmd == "find":
-            execs = [j for j, w in enumerate(operands) if w in FIND_EXEC]
-            if execs and any(nested(w) for w in operands[execs[0] + 1 :] if w not in (";", "+")):
-                return True  # `find . -exec apply_patch {} \\;`, `-exec sh -c 'apply_patch < "$0"' {} \\;`
-        elif cmd in COMMAND_RUNNERS:
-            if any(nested(w) for w in operands):
-                return True  # `parallel 'apply_patch < {}' ::: f`, `watch 'apply_patch < f'`
-            if cmd == "su" and not any(re.fullmatch(r"-[A-Za-z]*c|--command(=.*)?", w) for w in operands):
-                return True  # `su` with no -c runs a shell that reads stdin
-        elif cmd in SHELLS:
-            kind, text = shell_input(operands)
-            if kind == "stdin" or (kind == "file" and STDIN_FILES.match(text)) or (kind == "c" and nested(text)):
-                return True
-        elif cmd in ("source", "."):
-            if not operands or STDIN_FILES.match(operands[0]):
-                return True  # `source <(...)`, `. /dev/stdin`
-        elif cmd == "eval" and nested(" ".join(operands)):
-            return True
-    return False
+    return not all_read_only(command)
 
 
 def cd_dirs(command, cwd):
@@ -1203,8 +1166,8 @@ def self_test():
             ("feature: Bash dot /dev/stdin", bash("feat", "echo 'apply_patch < f' | . /dev/stdin"), True),
             ("feature: Bash command -v apply_patch is a lookup", bash("feat", "command -v apply_patch"), False),
             ("feature: Bash command -V applypatch is a lookup", bash("feat", "command -V applypatch"), False),
-            ("feature: Bash bash -c naming apply_patch in echo", bash("feat", "bash -c 'echo apply_patch'"), False),
-            ("feature: Bash bash script file plus a grep", bash("feat", "grep -c apply_patch log.txt; bash build.sh"), False),
+            ("feature: Bash bash -c naming apply_patch in echo (bash not allowlisted)", bash("feat", "bash -c 'echo apply_patch'"), True),
+            ("feature: Bash bash script file plus a grep (bash not allowlisted)", bash("feat", "grep -c apply_patch log.txt; bash build.sh"), True),
             ("feature: Bash unrelated variable assignment", bash("feat", "a=1; grep -rn apply_patch $a"), False),
             ("feature: Bash command -v after the tool name is not a lookup", bash("feat", "command apply_patch -v < f"), True),
             ("feature: Bash bash -co cluster", bash("feat", "bash -co pipefail 'apply_patch < f'"), True),
@@ -1220,6 +1183,30 @@ def self_test():
             ("feature: Bash sudo -su cluster", bash("feat", "echo 'apply_patch < f' | sudo -su root"), True),
             ("feature: Bash env -iS cluster", bash("feat", "env -iS 'apply_patch < f'"), True),
             ("feature: Bash env --split prefix", bash("feat", "env --split 'apply_patch < f'"), True),
+            # PR #140 allowlist redesign: round-5 forms must block, read-only tools stay allowed
+            ("feature: Bash flock -c", bash("feat", "flock /tmp/l -c 'apply_patch < f'"), True),
+            ("feature: Bash runuser -l -c", bash("feat", "runuser -l me -c 'apply_patch < f'"), True),
+            ("feature: Bash caffeinate -t", bash("feat", "caffeinate -t 5 apply_patch < f"), True),
+            ("feature: Bash arch -arch", bash("feat", "arch -arch arm64 apply_patch < f"), True),
+            ("feature: Bash chroot --userspec", bash("feat", "chroot --userspec u:g / apply_patch < f"), True),
+            ("feature: Bash bash /./dev/stdin", bash("feat", "echo 'apply_patch < f' | bash /./dev/stdin"), True),
+            ("feature: Bash cd /dev then bash stdin", bash("feat", "cd /dev && echo 'apply_patch < f' | bash stdin"), True),
+            ("feature: Bash xargs env", bash("feat", "echo apply_patch | xargs env"), True),
+            ("feature: Bash xargs -J env", bash("feat", "echo apply_patch | xargs -J % env %"), True),
+            ("feature: Bash doas -s from stdin", bash("feat", "echo 'apply_patch < f' | doas -s"), True),
+            ("feature: Bash sed e command", bash("feat", "echo x | sed 'e apply_patch < f'"), True),
+            ("feature: Bash rg --pre", bash("feat", "rg --pre apply_patch x ."), True),
+            ("feature: Bash find -exec", bash("feat", "find . -name x -exec apply_patch {} +"), True),
+            ("feature: Bash path-qualified grep is not allowlisted", bash("feat", "./grep apply_patch < f"), True),
+            ("feature: Bash git -c then commit", bash("feat", "git -c alias.x='!apply_patch < f' x"), True),
+            ("feature: Bash allowlist: sed -n print", bash("feat", "sed -n '/apply_patch/p' f"), False),
+            ("feature: Bash allowlist: rg", bash("feat", "rg -n 'apply_?patch' scaffold"), False),
+            ("feature: Bash allowlist: git log --grep", bash("feat", "git log --oneline --grep apply_patch"), False),
+            ("feature: Bash allowlist: git commit -m", bash("feat", "git commit -m 'block shell apply_patch'"), False),
+            ("feature: Bash allowlist: pipe of grep and cat", bash("feat", "cat CHANGELOG.md | grep -c apply_patch"), False),
+            ("feature: Bash allowlist: which and type", bash("feat", "which apply_patch; type applypatch"), False),
+            ("feature: Bash allowlist: grep with $( ) of an allowed command", bash("feat", "grep -c apply_patch $(echo f)"), False),
+            ("feature: Bash allowlist: $( ) running the tool", bash("feat", "echo $(apply_patch < f)"), True),
             # PR #140 round 4 + security scan of b772ccf
             ("feature: Bash xargs-fed sh -c", bash("feat", "echo 'apply_patch < f' | xargs -I{} sh -c {}"), True),
             ("feature: Bash xargs placeholder command", bash("feat", "echo apply_patch | xargs -I{} {} < f"), True),
@@ -1240,8 +1227,8 @@ def self_test():
             ("feature: Bash bash /dev/./stdin", bash("feat", "echo 'apply_patch < f' | bash /dev/./stdin"), True),
             ("feature: Bash bash /proc/PID/fd/0", bash("feat", "echo 'apply_patch < f' | bash /proc/123/fd/0"), True),
             ("feature: Bash bash $path script", bash("feat", "p=/dev/stdin; echo 'apply_patch < f' | bash $p"), True),
-            ("feature: Bash xargs grep naming the tool", bash("feat", "ls | xargs grep -l apply_patch"), False),
-            ("feature: Bash sudo -u with a grep naming the tool", bash("feat", "sudo -u me grep -c apply_patch log"), False),
+            ("feature: Bash xargs grep naming the tool (ls/xargs not allowlisted)", bash("feat", "ls | xargs grep -l apply_patch"), True),
+            ("feature: Bash sudo -u with a grep naming the tool (sudo not allowlisted)", bash("feat", "sudo -u me grep -c apply_patch log"), True),
             ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
             ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),
         ]

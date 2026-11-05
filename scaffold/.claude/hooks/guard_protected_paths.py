@@ -638,7 +638,8 @@ SUBSTITUTION_SEPARATORS = BRACE_SEPARATORS + "$()`"  # a `$( )`/backtick span st
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
 FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
 # rg options that run another program (rg 15 `--help`): a preprocessor, a hostname command, decompressors.
-# A short-option cluster with `z` (`-nz`) is -z/--search-zip. rg takes no abbreviated long options.
+# Any short-option word containing `z` (`-nz`, `-zA3`) counts as -z/--search-zip: a cluster can end in an attached
+# value, so this fails closed (`-ez` is blocked too). rg takes no abbreviated long options.
 RG_RUNS_PROGRAM = ("--pre", "--hostname-bin", "--search-zip")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
                "select", "in", "time")
@@ -918,7 +919,7 @@ def read_only_segment(words):
     if cmd == "printf":
         return not any(a.startswith("-v") for a in args)  # `printf -v 'a[$(...)]'` evaluates the subscript
     if cmd == "rg":
-        return not any(a.startswith(RG_RUNS_PROGRAM) or re.fullmatch(r"-[A-Za-z]*z[A-Za-z]*", a) for a in args)
+        return not any(a.startswith(RG_RUNS_PROGRAM) or re.match(r"-[^-]*z", a) for a in args)
     return True
 
 
@@ -1550,6 +1551,7 @@ def self_test():
             ("feature: Bash rg -z", bash("feat", "rg -z apply_patch f.gz"), True),
             ("feature: Bash rg --search-zip", bash("feat", "rg --search-zip apply_patch f.gz"), True),
             ("feature: Bash rg -z in a short-option cluster", bash("feat", "rg -nz apply_patch f.gz"), True),
+            ("feature: Bash rg -z in a cluster with an attached value", bash("feat", "rg -zA3 apply_patch f.gz"), True),
             ("feature: Bash allowlist: redirects to /dev/null and fd dups", bash("feat", "rg apply_patch f 2>/dev/null >/dev/null; grep -c apply_patch f 2>&1 >&2 &>/dev/null"), False),
             ("feature: Bash allowlist: input redirect and here-string", bash("feat", "grep -c apply_patch < f; grep apply_patch <<< 'x'"), False),
             ("feature: Bash allowlist: rg --no-search-zip and -n", bash("feat", "rg -n --no-search-zip apply_patch f"), False),

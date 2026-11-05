@@ -637,6 +637,9 @@ BRACE_SEPARATORS = "{},"  # an unquoted one of these sits next to every piece of
 SUBSTITUTION_SEPARATORS = BRACE_SEPARATORS + "$()`"  # a `$( )`/backtick span starts with `$`/`` ` `` and ends with `)`/`` ` ``
 # Allowlisted tools whose options can run code or write files, so their arguments must be literal.
 FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
+# rg options that run another program (rg 15 `--help`): a preprocessor, a hostname command, decompressors.
+# A short-option cluster with `z` (`-nz`) is -z/--search-zip. rg takes no abbreviated long options.
+RG_RUNS_PROGRAM = ("--pre", "--hostname-bin", "--search-zip")
 SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
                "select", "in", "time")
 
@@ -853,10 +856,29 @@ def builds_command_name(command):
     return False
 
 
+def redirects_read_only(words):
+    """True if every redirection in one command only reads or duplicates a descriptor: input (`<`, `<<`, `<<<`,
+    `<&`), `>&N`/`>&-`, or output to /dev/null. Any other output target (`>`, `>>`, `>|`, `&>`, `&>>`, `<>`,
+    `>& file`) writes a file, and a file written here can be run by the same command (pragma #146)."""
+    for i, w in enumerate(words):
+        if w not in REDIRECT_OPS or w in ("<", "<<", "<<<", "<&"):
+            continue
+        target = unquote(words[i + 1]) if i + 1 < len(words) else ""
+        if w == ">&" and re.fullmatch(r"\d+-?|-", target):
+            continue  # `2>&1`, `>&2`, `>&-`: a descriptor, not a file
+        if target != "/dev/null":
+            return False
+    return True
+
+
 def read_only_segment(words):
     """True if one `;`/`|`-separated command only reads: no command at all (assignments, keywords), or an
     allowlisted tool used read-only (`sed` only to print, `find` with no action, `git commit`/`git log` with no
-    global options, `command -v`, `rg` without `--pre`). Leading assignments and redirections are skipped."""
+    global options, `command -v`, `rg` without an option that runs a program). Leading assignments are skipped.
+    An output redirection to anything but /dev/null is a write, so the command is not read-only (pragma #146:
+    `echo apply_patch > tool.sh; rg --hostname-bin=./tool.sh ...` and `... >> .git/hooks/pre-commit; git commit`)."""
+    if not redirects_read_only(words):
+        return False
     i, assigned = 0, False
     while i < len(words):
         w = words[i]
@@ -896,7 +918,7 @@ def read_only_segment(words):
     if cmd == "printf":
         return not any(a.startswith("-v") for a in args)  # `printf -v 'a[$(...)]'` evaluates the subscript
     if cmd == "rg":
-        return not any(a.startswith("--pre") for a in args)
+        return not any(a.startswith(RG_RUNS_PROGRAM) or re.fullmatch(r"-[A-Za-z]*z[A-Za-z]*", a) for a in args)
     return True
 
 
@@ -1515,6 +1537,22 @@ def self_test():
             ("feature: Bash quoted $( ) naming the tool", bash("feat", "grep -c apply_patch \"$(echo f)\""), True),
             ("feature: Bash integer brace range not naming the tool is readable", bash("feat", "for i in {1..99999}; do make t$i; done"), False),
             ("feature: Bash allowlist: grep with quoted braces", bash("feat", "grep -E 'apply_patch{1,2}' f"), False),
+            # pragma #146: output redirects and rg options that run a program
+            ("feature: Bash redirect writes a script rg --hostname-bin runs", bash("feat", "echo apply_patch > tool.sh; rg --hostname-bin=./tool.sh --hyperlink-format=default apply_patch f"), True),
+            ("feature: Bash append to a git hook then commit", bash("feat", "printf 'apply_patch < p\\n' >> .git/hooks/pre-commit; git commit -m x"), True),
+            ("feature: Bash output redirect forms", bash("feat", "echo apply_patch >| t; echo apply_patch &> t; echo apply_patch &>> t"), True),
+            ("feature: Bash read-write and >& file redirects", bash("feat", "cat <> t apply_patch.md; echo apply_patch >& t"), True),
+            ("feature: Bash fd-numbered output redirect", bash("feat", "grep apply_patch f 2> err.log"), True),
+            ("feature: Bash leading output redirect", bash("feat", "> t echo apply_patch"), True),
+            ("feature: Bash quoted redirect target", bash("feat", "echo apply_patch > 'tool.sh'"), True),
+            ("feature: Bash output process substitution", bash("feat", "echo apply_patch > >(sh)"), True),
+            ("feature: Bash rg --hostname-bin alone", bash("feat", "rg --hostname-bin ./t --hyperlink-format=default apply_patch f"), True),
+            ("feature: Bash rg -z", bash("feat", "rg -z apply_patch f.gz"), True),
+            ("feature: Bash rg --search-zip", bash("feat", "rg --search-zip apply_patch f.gz"), True),
+            ("feature: Bash rg -z in a short-option cluster", bash("feat", "rg -nz apply_patch f.gz"), True),
+            ("feature: Bash allowlist: redirects to /dev/null and fd dups", bash("feat", "rg apply_patch f 2>/dev/null >/dev/null; grep -c apply_patch f 2>&1 >&2 &>/dev/null"), False),
+            ("feature: Bash allowlist: input redirect and here-string", bash("feat", "grep -c apply_patch < f; grep apply_patch <<< 'x'"), False),
+            ("feature: Bash allowlist: rg --no-search-zip and -n", bash("feat", "rg -n --no-search-zip apply_patch f"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

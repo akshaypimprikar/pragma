@@ -660,17 +660,14 @@ def names_patch(command):
         bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
         if any(ansi_c_decode(b) is None for b in bodies):
             return True  # an escape bash reads differently (`\\u61`, `\\x6`): fail closed
-        decoded = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: ansi_c_decode(m.group(1)), command).replace('$"', '"')
+        decoded = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: "'" + ansi_c_decode(m.group(1)).replace("'", "'\\''") + "'", command).replace('$"', '"')
         if decoded != command and names_patch(decoded):
             return True
     flat = re.sub(r"[\\'\"]", "", command)
     values = {name: unquote(value) for name, value in ASSIGNMENT.findall(command)}
-    expanded = flat
-    for _ in range(3):  # a value may itself name another variable
-        expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
-                          lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
-    defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
-    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\[[^\]]*\]|\$[@*#?$!0-9-]", "", drop_substitutions(defaulted))
+    expanded, defaulted, dropped = expand_words(flat, values)
+    # #145: the same text with quoted glob characters kept as placeholders, so a quoted `]` stays a bracket member
+    q_dropped = expand_words(mark_quoted(command), values)[2].replace(QUOTE_BOUNDARY, "")
     commands = set()
     for item in split_segments(tokenize(command) or []):
         idx = real_command_index(item[1]) if item[0] == "cmd" else None
@@ -678,14 +675,17 @@ def names_patch(command):
             commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
     globs = [re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower())) for w in dropped.split() if re.search(r"[*?\[]", w)]
     globs += [posix_glob(c) for c in commands if re.search(r"[*?\[]", c)]
-    for item in split_segments(tokenize(command) or []):  # #145: a quoted `]` is a member, not the closer
-        idx = real_command_index(item[1]) if item[0] == "cmd" else None
-        for k, w in enumerate(item[1] if item[0] == "cmd" else []):
-            if "[" in w and re.search(r"[\\'\"]", w):
-                g = quoted_posix_glob(w).rsplit("/", 1)[-1].lower()
-                globs.append(g)
-                if k == idx:
-                    commands.add(g)
+    q_words = [w for w in q_dropped.split() if re.search(r"[*?\[]", w)]
+    q_commands = [item[1][real_command_index(item[1])] for item in split_segments(tokenize(q_dropped) or [])
+                  if item[0] == "cmd" and real_command_index(item[1]) is not None]
+
+    def q_globs(words):  # with `{...}` groups dropped or opened as well: `apply_pa{,}[x']'t]ch`
+        words = words + [v for w in words if "{" in w for v in (re.sub(r"\{[^{}]*\}", "", w), re.sub(r"[{},]", "", w))]
+        return [unmark(re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower()))) for w in words]
+
+    globs += q_globs(q_words) + q_globs(q_commands)
+    commands.update(q_globs(q_commands))
+    commands |= {posix_glob(c) for c in commands}  # compare a command glob in the same form as `globs` (`./a[p]*h`)
     globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
            and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
@@ -734,32 +734,48 @@ def posix_glob(word):
 # A quoted or escaped glob character is literal, so it stands in as one of these while posix_glob() runs, then
 # goes back as text fnmatch reads literally.
 QUOTED_GLOB_CHARS = {c: chr(0xE000 + n) for n, c in enumerate("[]!^:.=*?")}
+QUOTE_BOUNDARY = "\ue0ff"  # where a quote opened or closed: it ends a variable name (`"$u"x` is `$u` then `x`)
 QUOTED_GLOB_LITERAL = {v: {"[": "[[]", "*": "[*]", "?": "[?]"}.get(c, c) for c, v in QUOTED_GLOB_CHARS.items()}
 
 
-def quoted_posix_glob(word):
-    """posix_glob() of one shell word read with its quotes and backslashes still in place: a quoted or escaped
-    character is literal, so a quoted `]` inside a bracket is a member, not the closer (`apply_pa[x\\]t]ch`,
-    `apply_pa[x']'t]ch`, `apply_pa['t]']ch`, #145). The quotes are removed. Linear, like posix_glob()."""
+def mark_quoted(text):
+    """`text` with its quotes and backslashes removed, and each quoted or escaped glob character replaced by a
+    placeholder posix_glob() does not read, so a quoted `]` inside a bracket is a member, not the closer
+    (`apply_pa[x\\]t]ch`, `apply_pa[x']'t]ch`, #145). A QUOTE_BOUNDARY marks each quote and escape, so a variable
+    name ends there as it does in the shell; names_patch() removes it after expanding. Linear."""
     out, quote, i = [], None, 0
-    while i < len(word):
-        c = word[i]
+    while i < len(text):
+        c = text[i]
         if quote and c == quote:
             quote = None
-        elif quote == '"' and c == "\\" and i + 1 < len(word) and word[i + 1] in '\\"$`':
-            i += 1
-            out.append(QUOTED_GLOB_CHARS.get(word[i], word[i]))
-        elif quote:
-            out.append(QUOTED_GLOB_CHARS.get(c, c))
-        elif c in "'\"":
+            out.append(QUOTE_BOUNDARY)
+        elif not quote and c in "'\"":
             quote = c
-        elif c == "\\" and i + 1 < len(word):
+            out.append(QUOTE_BOUNDARY)
+        elif c == "\\" and quote != "'" and i + 1 < len(text) and (not quote or text[i + 1] in '\\"$`'):
             i += 1
-            out.append(QUOTED_GLOB_CHARS.get(word[i], word[i]))
+            out += [QUOTE_BOUNDARY, QUOTED_GLOB_CHARS.get(text[i], text[i])]
         else:
-            out.append(c)
+            out.append(QUOTED_GLOB_CHARS.get(c, c) if quote else c)
         i += 1
-    return "".join(QUOTED_GLOB_LITERAL.get(c, c) for c in posix_glob("".join(out)))
+    return "".join(out)
+
+
+def unmark(word):
+    """A posix_glob() result with mark_quoted() placeholders turned back into text fnmatch reads literally."""
+    return "".join(QUOTED_GLOB_LITERAL.get(c, c) for c in word)
+
+
+def expand_words(text, values):
+    """(expanded, defaulted, dropped) forms of `text` for names_patch(): variables the command sets expanded,
+    `${x:-...}` defaults kept, then `$( )`, backticks, unset variables and special parameters dropped."""
+    expanded = text
+    for _ in range(3):  # a value may itself name another variable
+        expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
+                          lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
+    defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
+    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\[[^\]]*\]|\$[@*#?$!0-9-]", "", drop_substitutions(defaulted))
+    return expanded, defaulted, dropped
 
 
 def glob_min_length(word):
@@ -1600,6 +1616,14 @@ def self_test():
             ("feature: Bash double-quoted ] in a glob bracket", bash("feat", "./apply_pa[x\"]\"t]ch"), True),
             ("feature: Bash quoted member run ending in ]", bash("feat", "./apply_pa['t]']ch"), True),
             ("feature: Bash quoted ] glob as an argument", bash("feat", "bash apply_pa[x']'t]ch"), True),
+            # PR #148 round 1: quoted brackets mixed with expansions, and an unquoted bracket glob as the command
+            ("feature: Bash quoted ] glob with an unset variable", bash("feat", "./apply_p${u}a[x']'t]ch"), True),
+            ("feature: Bash quoted ] glob with $'...' members", bash("feat", "./apply$'_'pa[x$']'t]ch"), True),
+            ("feature: Bash quoted ] glob with an empty $( )", bash("feat", "./apply_p$(:)a[x']'t]ch"), True),
+            ("feature: Bash quoted ] glob after a quoted variable", bash("feat", "./apply_pa\"$u\"[x']'t]ch"), True),
+            ("feature: Bash quoted variable ends before the next letter", bash("feat", "./app\"$u\"\\ly_pa\\tc[\"$u\"]'h'x-]"), True),
+            ("feature: Bash quoted ] glob after an empty brace expansion", bash("feat", "./apply_pa{,}[x']'t]ch"), True),
+            ("feature: Bash short bracket glob as the command", bash("feat", "./a[p]*h; ./?p[[p]*y_???ch"), True),
             ("feature: Bash 24k quoted brackets stay fast", bash("feat", "echo " + "['['" * 6000 + "; ./apply_pa[x']'t]ch"), True),
             ("feature: Bash allowlist: grep for a quoted bracket pattern", bash("feat", "grep -c 'apply_pa[x]t]ch' f; echo apply_pa'[t]'ch"), False),
         ]

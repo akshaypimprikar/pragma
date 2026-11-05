@@ -254,3 +254,15 @@
 **Rule violated:** no formal rule, caught in review
 **File:** CHANGELOG.md:26
 **Caught by:** this review
+
+## 2026-11-05 — PR#148 — Round 2: brace alternatives beside a quoted-bracket glob are not tried
+**What was wrong:** At 31f2232 `q_globs` only dropped or opened a brace group, so `./apply_p{a,b}[x']'t]ch` and `./apply_pa[x']'t]c{h,i}` ran `apply_patch` in bash 3.2 and zsh 5.9 while `names_patch` returned False. Fixed in d425768 by reading each group as `*` (Akshay chose fail closed).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch q_globs)
+**Caught by:** this review
+
+## 2026-11-05 — PR#148 — quoted space inside a glob bracket split the marked word
+**What was wrong:** At 31f2232 a quoted space in a bracket (`./apply_pa[x' ]'t]ch`) split the quote-marked text into two words, so the glob was missed. Fixed in aadf990 by holding quoted whitespace, quotes and operators as placeholders.
+**Rule violated:** no formal rule, caught before this review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (mark_quoted)
+**Caught by:** commit-time security review of 31f2232 (from the PR body)

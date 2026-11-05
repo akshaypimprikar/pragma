@@ -678,6 +678,14 @@ def names_patch(command):
             commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
     globs = [re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower())) for w in dropped.split() if re.search(r"[*?\[]", w)]
     globs += [posix_glob(c) for c in commands if re.search(r"[*?\[]", c)]
+    for item in split_segments(tokenize(command) or []):  # #145: a quoted `]` is a member, not the closer
+        idx = real_command_index(item[1]) if item[0] == "cmd" else None
+        for k, w in enumerate(item[1] if item[0] == "cmd" else []):
+            if "[" in w and re.search(r"[\\'\"]", w):
+                g = quoted_posix_glob(w).rsplit("/", 1)[-1].lower()
+                globs.append(g)
+                if k == idx:
+                    commands.add(g)
     globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
            and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
@@ -721,6 +729,37 @@ def posix_glob(word):
         out.append("?")
         i = j + 1
     return "".join(out)
+
+
+# A quoted or escaped glob character is literal, so it stands in as one of these while posix_glob() runs, then
+# goes back as text fnmatch reads literally.
+QUOTED_GLOB_CHARS = {c: chr(0xE000 + n) for n, c in enumerate("[]!^:.=*?")}
+QUOTED_GLOB_LITERAL = {v: {"[": "[[]", "*": "[*]", "?": "[?]"}.get(c, c) for c, v in QUOTED_GLOB_CHARS.items()}
+
+
+def quoted_posix_glob(word):
+    """posix_glob() of one shell word read with its quotes and backslashes still in place: a quoted or escaped
+    character is literal, so a quoted `]` inside a bracket is a member, not the closer (`apply_pa[x\\]t]ch`,
+    `apply_pa[x']'t]ch`, `apply_pa['t]']ch`, #145). The quotes are removed. Linear, like posix_glob()."""
+    out, quote, i = [], None, 0
+    while i < len(word):
+        c = word[i]
+        if quote and c == quote:
+            quote = None
+        elif quote == '"' and c == "\\" and i + 1 < len(word) and word[i + 1] in '\\"$`':
+            i += 1
+            out.append(QUOTED_GLOB_CHARS.get(word[i], word[i]))
+        elif quote:
+            out.append(QUOTED_GLOB_CHARS.get(c, c))
+        elif c in "'\"":
+            quote = c
+        elif c == "\\" and i + 1 < len(word):
+            i += 1
+            out.append(QUOTED_GLOB_CHARS.get(word[i], word[i]))
+        else:
+            out.append(c)
+        i += 1
+    return "".join(QUOTED_GLOB_LITERAL.get(c, c) for c in posix_glob("".join(out)))
 
 
 def glob_min_length(word):
@@ -1555,6 +1594,14 @@ def self_test():
             ("feature: Bash allowlist: redirects to /dev/null and fd dups", bash("feat", "rg apply_patch f 2>/dev/null >/dev/null; grep -c apply_patch f 2>&1 >&2 &>/dev/null"), False),
             ("feature: Bash allowlist: input redirect and here-string", bash("feat", "grep -c apply_patch < f; grep apply_patch <<< 'x'"), False),
             ("feature: Bash allowlist: rg --no-search-zip and -n", bash("feat", "rg -n --no-search-zip apply_patch f"), False),
+            # pragma #145: a quoted or escaped `]` inside a glob bracket is a member, not the closer
+            ("feature: Bash escaped ] in a glob bracket", bash("feat", "./apply_pa[x\\]t]ch"), True),
+            ("feature: Bash single-quoted ] in a glob bracket", bash("feat", "./apply_pa[x']'t]ch"), True),
+            ("feature: Bash double-quoted ] in a glob bracket", bash("feat", "./apply_pa[x\"]\"t]ch"), True),
+            ("feature: Bash quoted member run ending in ]", bash("feat", "./apply_pa['t]']ch"), True),
+            ("feature: Bash quoted ] glob as an argument", bash("feat", "bash apply_pa[x']'t]ch"), True),
+            ("feature: Bash 24k quoted brackets stay fast", bash("feat", "echo " + "['['" * 6000 + "; ./apply_pa[x']'t]ch"), True),
+            ("feature: Bash allowlist: grep for a quoted bracket pattern", bash("feat", "grep -c 'apply_pa[x]t]ch' f; echo apply_pa'[t]'ch"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

@@ -242,3 +242,27 @@
 **Rule violated:** no formal rule, caught before this review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (read_only_segment, rg branch)
 **Caught by:** commit-time security review of 35c2878 (from the PR body)
+
+## 2026-11-05 — PR#148 — Round 1: quoted-bracket glob check skips the expansions names_patch handles elsewhere
+**What was wrong:** At 76e4481 `quoted_posix_glob` ran only on the raw token, so a quoted `]` combined with `${u}`, `$(:)`, `$'..'` or `"$u"` (`./apply_p${u}a[x']'t]ch`, `./apply$'_'pa[x$']'t]ch`) still ran `apply_patch` in bash 3.2 and zsh 5.9 while `names_patch` returned False. Repeat of the PR#140 Round 7 and Round 8 glob-bracket entries.
+**Rule violated:** no formal rule, caught in review (repeat of PR#140 Rounds 7 and 8)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:681
+**Caught by:** this review
+
+## 2026-11-05 — PR#148 — Round 1: CHANGELOG claims quoted-bracket and command-word globs are caught
+**What was wrong:** The edited `CHANGELOG.md:26` sentence said a bracket with a quoted or escaped member is caught and removed the #145 known limit, though F1 bypasses remain. It also kept "any glob as the command word", though `./a[p]*h` is missed: `w in commands` compares the posix_glob form with the raw word.
+**Rule violated:** no formal rule, caught in review
+**File:** CHANGELOG.md:26
+**Caught by:** this review
+
+## 2026-11-05 — PR#148 — Round 2: brace alternatives beside a quoted-bracket glob are not tried
+**What was wrong:** At 31f2232 `q_globs` only dropped or opened a brace group, so `./apply_p{a,b}[x']'t]ch` and `./apply_pa[x']'t]c{h,i}` ran `apply_patch` in bash 3.2 and zsh 5.9 while `names_patch` returned False. Fixed in d425768 by reading each group as `*` (Akshay chose fail closed).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (names_patch q_globs)
+**Caught by:** this review
+
+## 2026-11-05 — PR#148 — quoted space inside a glob bracket split the marked word
+**What was wrong:** At 31f2232 a quoted space in a bracket (`./apply_pa[x' ]'t]ch`) split the quote-marked text into two words, so the glob was missed. Fixed in aadf990 by holding quoted whitespace, quotes and operators as placeholders.
+**Rule violated:** no formal rule, caught before this review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (mark_quoted)
+**Caught by:** commit-time security review of 31f2232 (from the PR body)

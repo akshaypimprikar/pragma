@@ -242,3 +242,15 @@
 **Rule violated:** no formal rule, caught before this review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (read_only_segment, rg branch)
 **Caught by:** commit-time security review of 35c2878 (from the PR body)
+
+## 2026-11-05 — PR#148 — Round 1: quoted-bracket glob check skips the expansions names_patch handles elsewhere
+**What was wrong:** At 76e4481 `quoted_posix_glob` ran only on the raw token, so a quoted `]` combined with `${u}`, `$(:)`, `$'..'` or `"$u"` (`./apply_p${u}a[x']'t]ch`, `./apply$'_'pa[x$']'t]ch`) still ran `apply_patch` in bash 3.2 and zsh 5.9 while `names_patch` returned False. Repeat of the PR#140 Round 7 and Round 8 glob-bracket entries.
+**Rule violated:** no formal rule, caught in review (repeat of PR#140 Rounds 7 and 8)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:681
+**Caught by:** this review
+
+## 2026-11-05 — PR#148 — Round 1: CHANGELOG claims quoted-bracket and command-word globs are caught
+**What was wrong:** The edited `CHANGELOG.md:26` sentence said a bracket with a quoted or escaped member is caught and removed the #145 known limit, though F1 bypasses remain. It also kept "any glob as the command word", though `./a[p]*h` is missed: `w in commands` compares the posix_glob form with the raw word.
+**Rule violated:** no formal rule, caught in review
+**File:** CHANGELOG.md:26
+**Caught by:** this review

@@ -681,12 +681,15 @@ def names_patch(command):
         item[1][real_command_index(item[1])] for item in split_segments(q_tokens)
         if item[0] == "cmd" and real_command_index(item[1]) is not None]
 
-    def q_globs(words):  # with `{...}` groups dropped or opened as well: `apply_pa{,}[x']'t]ch`
-        words = words + [v for w in words if "{" in w for v in (re.sub(r"\{[^{}]*\}", "", w), re.sub(r"[{},]", "", w))]
+    def q_globs(words, command=False):  # `{...}` groups dropped or opened, or read as `*`
+        words = [re.sub(r"\{,+\}", "", w) for w in words]  # `{,}` expands to nothing
+        words = words + [v for w in words if "{" in w for v in [re.sub(r"\{[^{}]*\}", "", w), re.sub(r"[{},]", "", w)]
+                         + [brace_star(w)] * (not command or "[" in w)]  # any alternative: `apply_p{a,b}[x']'t]ch`
+    # (a bare `{a,b}` command word would read as `*`, which matches any name, so a command needs a bracket too)
         return [unmark(re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower()))) for w in words]
 
-    globs += q_globs(q_words) + q_globs(q_commands)
-    commands.update(q_globs(q_commands))
+    globs += q_globs(q_words) + q_globs(q_commands, command=True)
+    commands.update(q_globs(q_commands, command=True))
     commands |= {posix_glob(c) for c in commands}  # compare a command glob in the same form as `globs` (`./a[p]*h`)
     globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
@@ -762,6 +765,17 @@ def mark_quoted(text):
             out.append(QUOTED_GLOB_CHARS.get(c, c) if quote else c)
         i += 1
     return "".join(out)
+
+
+def brace_star(word):
+    """`word` with every `{...}` group, innermost first, replaced by `*`: an over-approximation of all its brace
+    alternatives (fail closed, PR #148 round 2), so a glob beside a brace group is still matched against the name."""
+    for _ in range(word.count("{")):
+        starred = re.sub(r"\{[^{}]*\}", "*", word)
+        if starred == word:
+            break
+        word = starred
+    return word
 
 
 def unmark(word):
@@ -1627,6 +1641,8 @@ def self_test():
             ("feature: Bash quoted variable ends before the next letter", bash("feat", "./app\"$u\"\\ly_pa\\tc[\"$u\"]'h'x-]"), True),
             ("feature: Bash quoted ] glob after an empty brace expansion", bash("feat", "./apply_pa{,}[x']'t]ch"), True),
             ("feature: Bash quoted space inside a glob bracket", bash("feat", "./apply_pa[x' ]'t]ch"), True),
+            ("feature: Bash brace alternatives beside a quoted ] glob", bash("feat", "./apply_p{a,b}[x']'t]ch; ./apply_pa[x']'t]c{h,i}"), True),
+            ("feature: Bash brace range beside a quoted ] glob", bash("feat", "./apply_p{a..a}[x']'t]ch"), True),
             ("feature: Bash short bracket glob as the command", bash("feat", "./a[p]*h; ./?p[[p]*y_???ch"), True),
             ("feature: Bash 24k quoted brackets stay fast", bash("feat", "echo " + "['['" * 6000 + "; ./apply_pa[x']'t]ch"), True),
             ("feature: Bash allowlist: grep for a quoted bracket pattern", bash("feat", "grep -c 'apply_pa[x]t]ch' f; echo apply_pa'[t]'ch"), False),

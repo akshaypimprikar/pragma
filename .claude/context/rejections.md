@@ -236,3 +236,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (posix_glob)
 **Caught by:** this review
+
+## 2026-11-05 — PR#147 — rg short-option check missed a cluster with an attached value
+**What was wrong:** At 35c2878 the rg check matched `-z` only in a letters-only short-option cluster (`-[A-Za-z]*z[A-Za-z]*`), so on `feature/*` `rg -zA3 apply_patch f.gz` (a cluster ending in an attached value) was allowed and still turned on `--search-zip`, which runs decompressors. Fixed in 8bcac88: any short-option word containing `z` counts.
+**Rule violated:** no formal rule, caught before this review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (read_only_segment, rg branch)
+**Caught by:** commit-time security review of 35c2878 (from the PR body)

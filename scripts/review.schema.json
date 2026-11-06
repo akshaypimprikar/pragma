@@ -15,7 +15,7 @@
       "required": ["cli", "cli_version", "model", "sandbox", "network"],
       "properties": {
         "cli": {"type": "string", "description": "Agent CLI that ran the review, e.g. claude or codex."},
-        "cli_version": {"type": "string"},
+        "cli_version": {"type": "string", "description": "Version the CLI reports, e.g. 0.166.0. Write \"unknown\" if it cannot be read; never leave it empty."},
         "model": {"type": "string"},
         "sandbox": {"type": "string", "description": "Sandbox or permission mode, e.g. read-only."},
         "network": {"type": "boolean"}

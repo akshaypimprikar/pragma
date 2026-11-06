@@ -97,6 +97,15 @@ class ContractTests(unittest.TestCase):
         out["runtime"]["model"] = ""
         self.assertTrue(any("runtime.model" in e for e in self.check(out)))
 
+    def test_unreadable_cli_version_is_written_as_unknown(self):
+        # Codex 0.166.0 left cli_version empty on 3 of 12 runs (2026-11-02) when it could not read it.
+        with open(crc.SCHEMA_PATH, encoding="utf8") as f:
+            desc = json.load(f)["properties"]["runtime"]["properties"]["cli_version"].get("description", "")
+        self.assertIn('"unknown"', desc)
+        out = output()
+        out["runtime"]["cli_version"] = "unknown"
+        self.assertEqual(self.check(out), [])
+
     def test_duplicate_finding_id_fails(self):
         self.assertTrue(any("F1" in e for e in self.check(output(findings=[finding(), finding()]))))
 

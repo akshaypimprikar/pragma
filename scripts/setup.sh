@@ -10,7 +10,7 @@
 #                  ~/.claude/skills (see scripts/install_apple_skills.sh)
 #
 # What it does:
-#   - Copies .claude/skills/, .claude/context/, scripts/, and
+#   - Copies .claude/skills/, scaffold/.claude/context/, scripts/, and
 #     scaffold/.github/workflows/ into your project. .claude/skills/ is the
 #     SKILL.md format (an open standard also read by Cursor, Codex, GitHub
 #     Copilot, Windsurf, and others), replacing the old .claude/commands/
@@ -115,7 +115,9 @@ mkdir -p "$PROJECT_DIR/.claude/skills"
 # ── 2. Context ────────────────────────────────────────────────────────────────
 info "Copying context files…"
 mkdir -p "$PROJECT_DIR/.claude/context"
-for f in "$REPO_ROOT/.claude/context/"*.md; do
+# Header-only templates. pragma's own .claude/context/ holds pragma's releases,
+# decisions and rejections, which a new project must not inherit.
+for f in "$REPO_ROOT/scaffold/.claude/context/"*.md; do
     dest="$PROJECT_DIR/.claude/context/$(basename "$f")"
     if [[ -f "$dest" ]]; then
         warn "Skipping $(basename "$f") — already exists"

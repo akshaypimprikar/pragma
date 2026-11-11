@@ -243,7 +243,7 @@ The agent layer (`/gates`, `/review`, `/test`) runs locally and gives fast feedb
 - `review-evidence` job (`review-evidence.yml`): runs `scripts/check_review_evidence.py` from the base branch, reading the PR only through the GitHub API. Each lane needs its own evidence in the PR body or reviews: a `Gates run at <sha>` gate summary, an APPROVED `/review` verdict at the head SHA from an owner, member or collaborator, a `code-review:` line at the head SHA, and a `Motivating incident:` line for pipeline changes. It runs on `pull_request_target`, so GitHub runs the workflow file from your default branch (`main`): it only takes effect once it is on `main`. Its checkout pins the scripts and lane config to the PR's base branch.
 - `unit-tests` job: runs the test suite and `scripts/check_coverage.py`. This job runs the copy of `check_coverage.py` from the PR, not a copy from the base branch.
 
-CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7, the UI-selector cross-check in Gate 10 of `/gates`, and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps.
+CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7 and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps and UI-selector cross-check (`scripts/check_gates.sh` runs these locally).
 
 Know these limits before you rely on CI:
 
@@ -316,7 +316,7 @@ The script copies everything and replaces all placeholders. Then fill in `AGENTS
 
 To customise by hand, do these steps:
 
-1. Copy `.claude/skills/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project. Put the workflows in `.github/workflows/`.
+1. Copy `.claude/skills/`, `scaffold/.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project. Put the context templates in `.claude/context/` and the workflows in `.github/workflows/`. Do not copy pragma's own `.claude/context/`: it holds pragma's logs, not templates.
 2. Replace `<AppName>` with your module name in each skill file
 3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
 4. Update `AGENTS.md` with your build commands, simulator target, and architecture rules. If you use Claude Code, also add a one-line `CLAUDE.md` that imports it: `@AGENTS.md`.

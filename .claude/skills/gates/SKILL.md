@@ -86,15 +86,17 @@ N/A: a PR that changes only `.claude/context/feature-log.md` (`/release` puts it
 the script reports `[–] CHANGELOG — N/A (feature-log only)`.
 
 ### Gate 6 — Coverage (conditional: new Swift files on branch)
-Each new non-test `.swift` file must reach ≥80% line coverage in Gate 2's result bundle (`xccov`). Test files and
-UI-only files (`*View.swift`, `*Sheet.swift`, `*Row.swift`, `Color+*`) are skipped, the same exclusions as
-`scripts/check_coverage.py`. A new file missing from the report fails. Skipped when the branch adds no files.
+Each new non-test `.swift` file must reach ≥80% line coverage in Gate 2's result bundle (`xccov`). Skipped:
+test files (in a `*Tests/` folder or named `*Test(s).swift`), UI-only files (`*View.swift`, `*Sheet.swift`,
+`*Row.swift`, `Color+*`), `main.swift`, and `scripts/check_coverage.py`'s `HARDWARE_DEPENDENT_EXCEPTIONS`, which the
+script reads from that file. A new file missing from the report fails. Skipped when the branch adds no files.
 
 ### Gate 7 — Security (conditional: sensitive code paths)
 Changed `.swift` paths are matched against `gates.sensitive_paths`. On a match the summary line reads
 `[!] Security — security-review required: <files>`: run the `security-review` skill, fix what it finds, and add
 one line under the pasted summary in the PR body: `Security review: <result>`. The summary block itself stays as
-printed. Skipped when nothing matches, or `not configured` when the key is empty — set it.
+printed. Skipped when nothing matches, or `not configured` when the key is empty — set it. A pattern that is not
+a valid regex fails the gate.
 
 ### Gate 8 — Abstraction bloat / duplication (heuristic, advisory)
 The script lists new protocols with at most one conforming type and runs of 3+ consecutive added lines that each

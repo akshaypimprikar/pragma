@@ -266,3 +266,33 @@
 **Rule violated:** no formal rule, caught before this review
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (mark_quoted)
 **Caught by:** commit-time security review of 31f2232 (from the PR body)
+
+## 2026-11-10 — PR#155 — Coverage gate silently false-passes (stdin collision)
+**What was wrong:** Gate 6 piped the new-file list into `python3 - <<'PY'`; the heredoc replaced stdin, so the list was empty and the gate printed `[✓] Coverage` at 10% coverage. Repeats PR#49 (unreachable coverage check) and PR#110 (test that cannot fail on its defect): the only Gate 6 test covered the no-bundle path.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:197
+**Caught by:** this review
+
+## 2026-11-10 — PR#155 — /review's own log trips the gate script's clean-tree pre-step
+**What was wrong:** `/review` step 2 runs `check_gates.sh --only 3,4,5,10`, whose pre-step fails (exit 3) on the uncommitted `rejections.md` that step 1 explicitly exempts; round 2 would post a false CHANGES REQUESTED.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:49
+**Caught by:** this review
+
+## 2026-11-10 — PR#155 — Invalid sensitive_paths regex reported as a clean skip
+**What was wrong:** `grep -E` with a malformed pattern errors to stderr and Gate 7 prints `skipped (no sensitive files)`; the grep exit status is not checked.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:229
+**Caught by:** this review
+
+## 2026-11-10 — PR#155 — Flag with no value hangs the gate script
+**What was wrong:** `--base` (or any flag) as the last argument makes `shift 2` fail without shifting, so the argument loop never ends instead of exiting 2.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:23
+**Caught by:** this review
+
+## 2026-11-10 — PR#155 — Coverage exclusions differ from check_coverage.py despite the SKILL saying "same"
+**What was wrong:** Gate 6 omits `HARDWARE_DEPENDENT_EXCEPTIONS` (CI passes what the gate fails) and `"Tests" in rel` skips production files under paths like `Contests/`; coverage threshold 80 is hardcoded instead of a named constant.
+**Rule violated:** no formal rule, caught in review (code quality: no magic numbers for thresholds)
+**File:** scripts/check_gates.sh:204-216
+**Caught by:** this review

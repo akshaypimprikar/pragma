@@ -20,10 +20,10 @@ set -u
 BASE=""; BRANCH=""; ONLY=""; CONFIG=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --base)   BASE="${2:-}"; shift 2 ;;
-        --branch) BRANCH="${2:-}"; shift 2 ;;
-        --only)   ONLY="${2:-}"; shift 2 ;;
-        --config) CONFIG="${2:-}"; shift 2 ;;
+        --base|--branch|--only|--config)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "check_gates.sh: $1 needs a value" >&2; exit 2; }
+            case "$1" in --base) BASE=$2 ;; --branch) BRANCH=$2 ;; --only) ONLY=$2 ;; --config) CONFIG=$2 ;; esac
+            shift 2 ;;
         -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
         *) echo "check_gates.sh: unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -46,7 +46,9 @@ wants() {  # wants N: true when gate N is selected
 }
 
 # ── Pre-step — clean tree and pinned SHA ─────────────────────────────────────
-DIRTY=$(git status --porcelain)
+# A partial run (--only, as /review uses it) ignores /review's own uncommitted log, as /review step 1 does.
+if [ -n "$ONLY" ]; then DIRTY=$(git status --porcelain -- . ':!.claude/context/rejections.md')
+else DIRTY=$(git status --porcelain); fi
 if [ -n "$DIRTY" ]; then
     echo "Pre-step FAIL: the working tree is not clean. Commit or stash first:"
     echo "$DIRTY"
@@ -194,26 +196,42 @@ if wants 6; then
     else
         section "Gate 6 — coverage of new files"
         xcrun xccov view --report --json "$TMP/gate2.xcresult" > "$TMP/cov.json" 2>/dev/null
-        if COV=$(printf '%s\n' "$NEW_SWIFT" | python3 - "$TMP/cov.json" <<'PY'
-import json, sys
-# Same exclusions as scripts/check_coverage.py: test files and UI-only files (covered by UI tests).
+        printf '%s\n' "$NEW_SWIFT" > "$TMP/new_swift.txt"
+        if COV=$(python3 - "$TMP/cov.json" "$TMP/new_swift.txt" scripts/check_coverage.py <<'PY'
+import ast, json, sys
+COVERAGE_THRESHOLD = 0.80  # per new file; check_coverage.py's WARN_THRESHOLD
+# Exclusions follow scripts/check_coverage.py: test files, UI-only files (covered by UI tests),
+# main.swift, and its HARDWARE_DEPENDENT_EXCEPTIONS (read from that file, so the two never drift).
+hardware = set()
+try:
+    for node in ast.parse(open(sys.argv[3]).read()).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "HARDWARE_DEPENDENT_EXCEPTIONS" for t in node.targets):
+            v = node.value
+            if isinstance(v, ast.Call):
+                hardware = set(ast.literal_eval(v.args[0])) if v.args else set()
+            else:
+                hardware = set(ast.literal_eval(v))
+except (OSError, ValueError, SyntaxError) as e:
+    print(f"could not read HARDWARE_DEPENDENT_EXCEPTIONS from {sys.argv[3]}: {e}"); sys.exit(1)
 try:
     report = json.load(open(sys.argv[1]))
 except (OSError, ValueError):
     print("could not read the xccov report"); sys.exit(1)
 files = [f for t in report.get("targets", []) if "Tests" not in t.get("name", "") for f in t.get("files", [])]
+def is_test(rel):  # anchored: a *Tests/ folder or a *Test(s).swift file, not any path containing "Tests"
+    parts = rel.split("/")
+    return any(p.endswith("Tests") for p in parts[:-1]) or parts[-1].endswith(("Tests.swift", "Test.swift"))
 bad = 0
-for rel in filter(None, (l.strip() for l in sys.stdin)):
+for rel in filter(None, (l.strip() for l in open(sys.argv[2]))):
     name = rel.rsplit("/", 1)[-1]
-    if "Tests" in rel or name == "main.swift" or name.endswith(("View.swift", "Sheet.swift", "Row.swift")) or name.startswith("Color+"):
-        print(f"  [skip] {rel} (test or UI-only file)"); continue
+    if is_test(rel) or name == "main.swift" or name.endswith(("View.swift", "Sheet.swift", "Row.swift")) or name.startswith("Color+") or any(rel.endswith(h) for h in hardware):
+        print(f"  [skip] {rel} (test, UI-only or hardware-dependent file)"); continue
     match = [f for f in files if f.get("path", "").endswith("/" + rel)]
     if not match or "lineCoverage" not in match[0]:
         print(f"  [FAIL] {rel} not in the coverage report"); bad += 1; continue
-    pct = match[0]["lineCoverage"] * 100
-    flag = "  OK" if pct >= 80 else "FAIL"
-    bad += pct < 80
-    print(f"  [{flag}] {rel} {pct:.1f}%")
+    cov = match[0]["lineCoverage"]
+    bad += cov < COVERAGE_THRESHOLD
+    print(f"  [{'  OK' if cov >= COVERAGE_THRESHOLD else 'FAIL'}] {rel} {cov * 100:.1f}%")
 sys.exit(1 if bad else 0)
 PY
         ); then echo "$COV"; row "[✓] Coverage — new files ≥80%"
@@ -226,8 +244,9 @@ if wants 7; then
     PATTERN=$(cfg sensitive_paths)
     if [ -z "$PATTERN" ]; then row "[–] Security — skipped (gates.sensitive_paths not configured)"
     else
-        SENS=$(changed_swift | grep -E "$PATTERN")
-        if [ -z "$SENS" ]; then row "[–] Security — skipped (no sensitive files)"
+        SENS=$(changed_swift | grep -E -- "$PATTERN" 2>"$TMP/g7.err"); GREP_RC=$?
+        if [ "$GREP_RC" -gt 1 ]; then section "Gate 7 — invalid pattern"; cat "$TMP/g7.err"; fail_row "Security — gates.sensitive_paths is not a valid regex"
+        elif [ -z "$SENS" ]; then row "[–] Security — skipped (no sensitive files)"
         else
             section "Gate 7 — sensitive files changed"; echo "$SENS"
             row "[!] Security — security-review required: $(echo "$SENS" | tr '\n' ' ' | sed 's/ $//')"

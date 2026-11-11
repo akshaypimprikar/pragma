@@ -13,14 +13,20 @@ import tempfile
 import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-SCRIPTS = ["check_gates.sh", "detect_build_target.sh", "check_pr_lane.py", "check_tdd_commit_order.py", "check_gate_integrity.py"]
+SCRIPTS = ["check_gates.sh", "detect_build_target.sh", "check_coverage.py", "check_pr_lane.py", "check_tdd_commit_order.py", "check_gate_integrity.py"]
 
 FAKE_XCODEBUILD = """#!/bin/sh
+prev=""; for a in "$@"; do [ "$prev" = "-resultBundlePath" ] && mkdir -p "$a"; prev=$a; done
 case "$FAKE_XCODEBUILD:$1" in
   pass:build) echo "** BUILD SUCCEEDED **" ;;
   pass:test)  echo "Test Case '-[AppTests testThing]' passed (0.001 seconds)."; echo "** TEST SUCCEEDED **" ;;
   *) echo "error: fake failure"; exit 65 ;;
 esac
+"""
+
+# xcrun xccov view --report --json <bundle> prints the report in $FAKE_COV.
+FAKE_XCRUN = """#!/bin/sh
+cat "$FAKE_COV"
 """
 
 
@@ -55,6 +61,10 @@ class CheckGatesTests(unittest.TestCase):
         with open(fake, "w") as f:
             f.write(FAKE_XCODEBUILD)
         os.chmod(fake, os.stat(fake).st_mode | stat.S_IEXEC)
+        xcrun = os.path.join(bindir, "xcrun")
+        with open(xcrun, "w") as f:
+            f.write(FAKE_XCRUN)
+        os.chmod(xcrun, os.stat(xcrun).st_mode | stat.S_IEXEC)
         self.env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], FAKE_XCODEBUILD="pass")
 
     def write(self, rel, text):
@@ -137,9 +147,68 @@ class CheckGatesTests(unittest.TestCase):
 
     def test_new_file_without_coverage_data_fails(self):
         self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"})
-        rc, summary, out = self.run_gates()
+        rc, summary, out = self.run_gates("--only", "6")
         self.assertEqual(rc, 1, out)
-        self.assertTrue(self.row(summary, "Coverage").startswith("[✗] Coverage — no coverage data"))
+        self.assertEqual(self.row(summary, "Coverage"), "[✗] Coverage — needs Gate 2 in the same run")
+
+    def test_unreadable_coverage_report_fails(self):
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"})
+        rc, summary, out = self.run_gates(FAKE_COV=os.path.join(self.dir, "missing.json"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not read the xccov report", out)
+        self.assertTrue(self.row(summary, "Coverage").startswith("[✗] Coverage"))
+
+    def coverage(self, **pct_by_path):
+        path = os.path.join(self.dir, "cov.json")
+        files = [{"path": "/build/" + p, "name": p.rsplit("/", 1)[-1], "lineCoverage": c} for p, c in pct_by_path.items()]
+        with open(path, "w") as f:
+            json.dump({"targets": [{"name": "App.app", "files": files}]}, f)
+        return path
+
+    def test_new_file_under_threshold_fails_coverage(self):
+        self.commit({"App/Services/Brand.swift": "struct Brand {}\n"})
+        cov = self.coverage(**{"App/Services/Brand.swift": 0.10})
+        rc, summary, out = self.run_gates("--only", "1,2,6", FAKE_COV=cov)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[FAIL] App/Services/Brand.swift 10.0%", out)
+        self.assertTrue(self.row(summary, "Coverage").startswith("[✗] Coverage"))
+
+    def test_new_file_over_threshold_passes_coverage(self):
+        self.commit({"App/Services/Brand.swift": "struct Brand {}\n", "AppTests/BrandTests.swift": "x\n"})
+        cov = self.coverage(**{"App/Services/Brand.swift": 0.92})
+        rc, summary, out = self.run_gates("--only", "1,2,6", FAKE_COV=cov)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("[  OK] App/Services/Brand.swift 92.0%", out)
+        self.assertIn("[skip] AppTests/BrandTests.swift", out)
+
+    def test_production_path_containing_tests_is_not_skipped(self):
+        self.commit({"App/Contests/Score.swift": "struct Score {}\n"})
+        cov = self.coverage(**{"App/Contests/Score.swift": 0.20})
+        rc, _, out = self.run_gates("--only", "1,2,6", FAKE_COV=cov)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[FAIL] App/Contests/Score.swift 20.0%", out)
+
+    def test_invalid_sensitive_pattern_fails(self):
+        self.config["gates"]["sensitive_paths"] = "(unclosed"
+        self.write_config()
+        self.commit({"App/Services/Existing.swift": "struct Existing { let a = 1 }\n"})
+        rc, summary, out = self.run_gates("--only", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "Security"), "[✗] Security — gates.sensitive_paths is not a valid regex")
+
+    def test_flag_without_value_exits_2(self):
+        result = subprocess.run(["bash", "scripts/check_gates.sh", "--base"], cwd=self.repo, env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--base needs a value", result.stderr)
+
+    def test_partial_run_ignores_review_log_but_full_run_does_not(self):
+        self.commit({"docs/notes.md": "x\n"})
+        self.write(".claude/context/rejections.md", "entry\n")
+        rc, _, out = self.run_gates("--only", "3,4,5,10")
+        self.assertEqual(rc, 0, out)
+        rc, _, out = self.run_gates()
+        self.assertEqual(rc, 3, out)
 
     def test_todo_branch_and_changelog_failures(self):
         self.commit({"App/Services/Existing.swift": "struct Existing {} // TODO later\n",

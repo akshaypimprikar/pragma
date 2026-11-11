@@ -299,7 +299,10 @@ def diff_by_path(*diff_args):
 def find_suppressions(path, diff):
     hits = []
     test_path = is_test_path(path)
-    for line in diff.splitlines():
+    # split("\n"), not splitlines(): git ends diff lines with "\n" only, and
+    # splitlines() also breaks on "\r", "\x0b", U+2028 and others, which cut
+    # the "+" off the text after them so a marker there was never checked (#170).
+    for line in diff.split("\n"):
         if not line.startswith("+") or line.startswith("+++"):
             continue
         for pat in UNAMBIGUOUS_SUPPRESSION_PATTERNS:
@@ -316,7 +319,7 @@ def find_stubs(path, diff):
     if is_test_path(path):
         return []
     hits = []
-    for line in diff.splitlines():
+    for line in diff.split("\n"):  # not splitlines(): see find_suppressions
         if not line.startswith("+") or line.startswith("+++"):
             continue
         content = line[1:]
@@ -385,7 +388,7 @@ def paired_threshold_drops(diff):
         removed_buf.clear()
         added_buf.clear()
 
-    for line in diff.splitlines():
+    for line in diff.split("\n"):  # not splitlines(): see find_suppressions
         if line.startswith("-") and not line.startswith("---"):
             removed_buf.append(line)
         elif line.startswith("+") and not line.startswith("+++"):

@@ -14,6 +14,8 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SCRIPT = os.path.join(ROOT, "scripts", "check_gate_integrity.py")
+# Split so this file does not trip the suppression check itself.
+MARKER = "// swiftlint:" "disable all\n"
 
 
 def git(cwd, *args):
@@ -59,7 +61,7 @@ class GateIntegrityPathTests(unittest.TestCase):
 
     def test_suppression_is_reported_under_the_exact_path(self):
         self.branch("fix/x")
-        self.write("Sources/a b/b.swift", "// swiftlint:disable all\n")
+        self.write("Sources/a b/b.swift", MARKER)
         self.commit("add")
         r = self.run_script("fix/x")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
@@ -70,7 +72,7 @@ class GateIntegrityPathTests(unittest.TestCase):
         self.branch("fix/x")
         names = ['Sources/we"ird.swift', "Sources/tab\there.swift", "Sources/back\\slash.swift"]
         for name in names:
-            self.write(name, "// swiftlint:disable all\n")
+            self.write(name, MARKER)
         self.commit("add")
         r = self.run_script("fix/x")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)

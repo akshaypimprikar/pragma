@@ -98,13 +98,17 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    as `NOT VERIFIED: <script> not on <base>` and, for a PR that adds it, run from the PR copy
    with that caveat stated — never counted as a clean pass. Exit 2 from the TDD script means the
    configured layer names (`project.architecture` / `project.scoped_layer_dirs`) match nothing in the repo: report that, not a pass. Also re-run the grep-only
-   gates exactly as written in `gates/SKILL.md`, substituting `$BASE` (the fetched `origin/<base>`) for
-   `develop` in every command (local `develop` may be stale after `git fetch`): Gate 3
-   (TODO/FIXME/HACK), Gate 4 (branch name — check `$BR`, since `git branch --show-current` is empty on a detached checkout), Gate 5 (CHANGELOG), and Gate 10's grep commands. Each grep
-   prints nothing on a pass except the UI-selector listing (cross-check by hand) and any hit the
-   summary already names as an accepted exception. Any result that disagrees with the pasted summary —
-   a script exits non-zero, a grep prints a hit the summary does not name — is **CHANGES REQUESTED**,
-   quoting the command and its output.
+   gates — Gate 3 (TODO/FIXME/HACK), Gate 4 (branch name), Gate 5 (CHANGELOG) and Gate 10 (architecture
+   rules) — with the **base** branch's gate script and config, against `$BASE` (local `develop` may be stale
+   after `git fetch`) and `$BR` (a detached checkout has no current branch):
+   ```bash
+   if git show "${BASE}:scripts/check_gates.sh" > "$T/check_gates.sh" 2>/dev/null && git show "${BASE}:scripts/pipeline_lanes.json" > "$T/lanes.json" 2>/dev/null; then
+     bash "$T/check_gates.sh" --only 3,4,5,10 --base "$BASE" --branch "$BR" --config "$T/lanes.json"
+   else echo "NOT VERIFIED: scripts/check_gates.sh or scripts/pipeline_lanes.json not on ${BASE}"; fi
+   ```
+   Each of its four summary lines must match the same gate's line in the pasted summary. Any result that
+   disagrees — a script exits non-zero, a gate line differs — is **CHANGES REQUESTED**, quoting the command
+   and its output.
    Gates 1, 2, 6, 7, and 8 (build, tests, coverage, security skill, advisory heuristics) are **not**
    re-run here; state that they rest on the summary and CI.
 3. **Check CI.** If a PR exists:

@@ -87,6 +87,8 @@ GUARDED_PATH_GLOBS = (
     ".claude/settings.json",
     ".claude/hooks/*",
     "scripts/pipeline_lanes.json",
+    "scripts/detect_build_target.sh",
+    "scripts/select_simulator.py",
     ".github/workflows/*",
     ".codex/hooks.json",
     ".codex/config.toml",

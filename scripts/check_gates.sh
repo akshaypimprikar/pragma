@@ -180,7 +180,9 @@ fi
 
 # ── Gate 5 — CHANGELOG.md has Unreleased entries ─────────────────────────────
 if wants 5; then
-    ENTRIES=$(grep -A 10 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -v "^##" | grep -v "^$")
+    # Only the [Unreleased] section itself: stop at the next "## " heading, so an empty section
+    # never borrows the previous release's bullets. "###" subheadings are not entries.
+    ENTRIES=$(awk '/^## \[Unreleased\]/{f=1; next} /^## /{f=0} f && NF && !/^##/' CHANGELOG.md 2>/dev/null)
     ALL_CHANGED=$(git -c core.quotepath=false diff "$BASE"...HEAD --name-only)
     if [ -n "$ENTRIES" ]; then row "[✓] CHANGELOG"
     elif [ "$ALL_CHANGED" = ".claude/context/feature-log.md" ]; then row "[–] CHANGELOG — N/A (feature-log only)"

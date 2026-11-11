@@ -222,6 +222,13 @@ class CheckGatesTests(unittest.TestCase):
         self.assertTrue(self.row(summary, "CHANGELOG").startswith("[✗]"))
         self.assertIn("Existing.swift:1:", out)
 
+    def test_empty_unreleased_above_a_release_fails_changelog(self):
+        # FinanceTracker PR#201 F1: a fixed-size window read the previous release's bullets as Unreleased entries.
+        self.commit({"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n### Added\n\n## [1.0.0]\n- Old entry\n"})
+        rc, summary, out = self.run_gates("--only", "5")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[✗] CHANGELOG — Unreleased section missing or empty")
+
     def test_project_rules_hits_allow_and_missing_mode(self):
         self.config["gates"]["rules"] = [
             {"name": "View imports SwiftData", "paths": "/Views/", "pattern": "^import SwiftData"},

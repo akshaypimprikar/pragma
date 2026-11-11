@@ -84,10 +84,10 @@ Pass: branch matches your project's naming convention (e.g. `feature/*`, `fix/*`
 ## Gate 5 — Changelog has an unreleased entry
 
 ```bash
-awk '/^## \[Unreleased\]/{f=1; next} /^## /{f=0} f && NF && !/^##/' CHANGELOG.md 2>/dev/null
+awk '{sub(/\r$/, "")} /^## \[Unreleased\]/{f=1; next} /^## /{f=0} f && NF && !/^##/ && !/^\[[^]]+\]:/' CHANGELOG.md 2>/dev/null
 ```
 
-Pass: at least one non-empty line in the project's "Unreleased" section, read up to the next `## ` heading (`###` subheadings are not entries). Fail: section missing or empty — add a one-line summary per commit on this branch (`git log <base-branch>..HEAD --oneline`) before opening the PR. Skip this gate entirely if the project doesn't maintain a changelog.
+Pass: at least one non-empty line in the project's "Unreleased" section, read up to the next `## ` heading (`###` subheadings, CRLF blank lines and link definitions such as `[1.0.0]: https://...` are not entries). Fail: section missing or empty — add a one-line summary per commit on this branch (`git log <base-branch>..HEAD --oneline`) before opening the PR. Skip this gate entirely if the project doesn't maintain a changelog.
 
 ## Gate 6 — Coverage (conditional: new source files on this branch)
 

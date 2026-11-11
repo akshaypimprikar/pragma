@@ -78,7 +78,7 @@ Pass: `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*
 
 ### Gate 5 — CHANGELOG.md has Unreleased entries
 Pass: at least one non-empty line in the `## [Unreleased]` section, read up to the next `## ` heading (`###`
-subheadings are not entries).
+subheadings, CRLF blank lines and link definitions such as `[1.0.0]: https://...` are not entries).
 Fail: section missing or empty — create the section and add a one-line summary per task, using
 `git log develop..HEAD --oneline` to enumerate commits. `/feature`'s two-commit-per-task structure means only the
 GREEN (implementation) commit carries user-facing content — summarize those, skipping RED (test-only) commits.

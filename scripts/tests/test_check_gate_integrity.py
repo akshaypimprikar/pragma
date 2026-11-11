@@ -108,6 +108,21 @@ class GateIntegrityPathTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("A.swift: new suppression marker", r.stdout)
 
+    def test_marker_after_a_line_break_other_than_lf_is_caught(self):
+        # str.splitlines() also breaks on these, which cut the "+" off the
+        # text after them, so the marker and stub checks never saw it (#170).
+        self.branch("fix/x")
+        breaks = {"cr": "\r", "vt": "\x0b", "ls": " "}
+        for name, brk in breaks.items():
+            self.write(f"Sources/{name}.swift", "let a = 1" + brk + MARKER)
+        self.write("Sources/stub.swift", "let a = 1\rfatalError()\n")
+        self.commit("add")
+        r = self.run_script("fix/x")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        for name in breaks:
+            self.assertIn(f"Sources/{name}.swift: new suppression marker", r.stdout)
+        self.assertIn("Sources/stub.swift: unfinished stub", r.stdout)
+
     def test_path_with_cr_passes(self):
         self.branch("fix/x")
         self.write("Sources/a\rb.swift", "let a = 1\n")

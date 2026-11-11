@@ -97,6 +97,35 @@ class GateIntegrityPathTests(unittest.TestCase):
         r = self.run_script("fix/x")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_bare_cr_in_a_line_does_not_start_a_block(self):
+        # Universal newlines read the "\r" as "\n", so the line after it looked
+        # like README.txt's header and the marker below was checked as a doc.
+        self.branch("fix/x")
+        self.write("README.txt", "changed\n")
+        self.write("A.swift", "let a = 1\rdiff --git a/README.txt b/README.txt\n" + MARKER)
+        self.commit("add")
+        r = self.run_script("fix/x")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("A.swift: new suppression marker", r.stdout)
+
+    def test_path_with_cr_passes(self):
+        self.branch("fix/x")
+        self.write("Sources/a\rb.swift", "let a = 1\n")
+        self.commit("add")
+        r = self.run_script("fix/x")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_masked_file_with_pathspec_magic_name_is_refetched(self):
+        # -diff hides the content until the --text re-fetch, which names the
+        # file after `--`; ":(top)" must not be read as pathspec magic.
+        self.branch("fix/x")
+        self.write(".gitattributes", "*.swift -diff\n")
+        self.write(":(top)Q.swift", MARKER)
+        self.commit("add")
+        r = self.run_script("fix/x")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(":(top)Q.swift: new suppression marker", r.stdout)
+
     def test_clean_change_passes(self):
         self.branch("feature/x")
         self.write("Sources/App.swift", "let x = 1\n")

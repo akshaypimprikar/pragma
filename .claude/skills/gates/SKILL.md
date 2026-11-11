@@ -77,7 +77,8 @@ Pass: `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*
 (including `main`, `develop`, a detached HEAD without `--branch`) fails — ask the user to rename.
 
 ### Gate 5 — CHANGELOG.md has Unreleased entries
-Pass: at least one non-empty line in the 10 lines under `## [Unreleased]`.
+Pass: at least one non-empty line in the `## [Unreleased]` section, read up to the next `## ` heading (`###`
+subheadings are not entries).
 Fail: section missing or empty — create the section and add a one-line summary per task, using
 `git log develop..HEAD --oneline` to enumerate commits. `/feature`'s two-commit-per-task structure means only the
 GREEN (implementation) commit carries user-facing content — summarize those, skipping RED (test-only) commits.

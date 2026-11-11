@@ -52,7 +52,7 @@ Read the most recently modified plan file. Count lines starting with `## Task` t
 
 ### 5. CHANGELOG status
 ```bash
-grep -c "^-" <(grep -A 20 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -B 20 "^## \[" | grep "^-") 2>/dev/null || echo 0
+awk '/^## \[Unreleased\]/{f=1; next} /^## /{f=0} f && /^-/{n++} END{print n+0}' CHANGELOG.md 2>/dev/null || echo 0
 ```
 
 ### 6. Unaddressed pipeline reviews

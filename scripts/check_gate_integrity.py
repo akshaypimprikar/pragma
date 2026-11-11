@@ -5,7 +5,7 @@ pass without fixing the underlying violation, rather than a legitimate gate
 or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
-Flags, via a single git diff against the base branch:
+Flags, via a git diff against the base branch:
   1. A gate-definition file (see GATE_DEFINITION_FILES/GUARDED_PATH_GLOBS
      below for the exact list — not repeated here so this docstring can't
      drift out of sync with it the way an inline copy already had)
@@ -59,8 +59,13 @@ BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 # diff.noprefix/diff.mnemonicPrefix git config — applied here, to every
 # git-diff call, not just the narrower text_diff_for() re-fetch below, so a
 # config-dependent header format can't mis-parse (or drop) the main diff
-# every other check reads.
-GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff", "--src-prefix=a/", "--dst-prefix=b/")
+# every other check reads. --literal-pathspecs: text_diff_for() passes changed
+# paths after `--`, and a name like ":(top)x.swift" must name that file, not
+# act as pathspec magic.
+GIT_DIFF_BASE_ARGS = (
+    "git", "-c", "core.quotepath=false", "--literal-pathspecs",
+    "diff", "--src-prefix=a/", "--dst-prefix=b/",
+)
 
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
@@ -159,12 +164,16 @@ def run(*args):
         # errors="replace": a diff containing bytes that aren't valid UTF-8
         # (a binary-ish file, or another encoding entirely) must not crash
         # this script outright — decode what's decodable and substitute the
-        # rest, rather than raising UnicodeDecodeError mid-gate-run.
+        # rest, rather than raising UnicodeDecodeError mid-gate-run. Decoded
+        # here, not with text=True: universal newlines would turn a bare "\r"
+        # in a diff line or a path into "\n", which could start a fake
+        # `diff --git` block or break a path match.
         return subprocess.run(
-            args, capture_output=True, text=True, errors="replace", check=True
-        ).stdout
+            args, capture_output=True, check=True
+        ).stdout.decode("utf-8", errors="replace")
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
+        err = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+        print(f"ERROR: `{' '.join(args)}` failed — {err or e}", file=sys.stderr)
         # BASE_REF never appears as its own arg — every call site embeds it in a
         # formatted ref spec like f"{BASE_REF}...HEAD" — so this has to search
         # each arg for it as a substring, not check tuple membership.
@@ -270,8 +279,8 @@ def diff_by_path(*diff_args):
             stop(f"two changed paths share the diff header {header!r}.")
         path_by_header[header] = new
     raw = run(*GIT_DIFF_BASE_ARGS, *diff_args)
-    # re.M's ^ follows only "\n", so a Unicode line separator inside a path
-    # or a line can't start a block.
+    # re.M's ^ follows only "\n", and run() keeps "\r" as is, so a CR or a
+    # Unicode line separator inside a path or a line can't start a block.
     starts = [m.start() for m in re.finditer(r"^diff --git ", raw, re.M)]
     files = {}
     for start, end in zip(starts, starts[1:] + [len(raw)]):

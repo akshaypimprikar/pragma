@@ -296,3 +296,21 @@
 **Rule violated:** no formal rule, caught in review (code quality: no magic numbers for thresholds)
 **File:** scripts/check_gates.sh:204-216
 **Caught by:** this review
+
+## 2026-11-11 — PR#169 — Bare CR in diff content starts a fake block in gate integrity
+**What was wrong:** `run()` decodes git output with `text=True` (universal newlines), so a `\r` inside an added line becomes `\n` and `^diff --git` matches mid-line; the rest of a `.swift` block is filed under a doc path and its suppression marker is skipped (exit 0). The new comment claimed only `\n` could start a block.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gate_integrity.py:273
+**Caught by:** this review
+
+## 2026-11-11 — PR#169 — File name with a CR makes gate integrity exit 2
+**What was wrong:** universal newlines turn the CR in `git diff -z --name-status` output into `\n`, so the expected header never matches git's quoted `\r` header and a legitimate change stops the gate.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gate_integrity.py:238
+**Caught by:** this review
+
+## 2026-11-11 — PR#169 — Pathspec-magic file name skips the forced-text re-fetch
+**What was wrong:** `text_diff_for` passes changed paths to `git diff --` as pathspecs, so a masked file named `:(top)Q.swift` is never re-fetched as text and its suppression marker is missed (exit 0).
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gate_integrity.py:415
+**Caught by:** this review

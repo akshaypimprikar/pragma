@@ -229,6 +229,38 @@ class CheckGatesTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.row(summary, "CHANGELOG"), "[✗] CHANGELOG — Unreleased section missing or empty")
 
+    def test_empty_unreleased_with_crlf_blank_lines_fails_changelog(self):
+        # pragma #164: a CRLF blank line is "\r", which awk counted as a non-empty line.
+        self.commit({"CHANGELOG.md": "# Changelog\r\n\r\n## [Unreleased]\r\n\r\n## [1.0.0]\r\n- Old entry\r\n"})
+        rc, summary, out = self.run_gates("--only", "5")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[✗] CHANGELOG — Unreleased section missing or empty")
+
+    def test_empty_last_unreleased_with_link_definitions_fails_changelog(self):
+        # pragma #165: Keep-a-Changelog link definitions at the end of the file are not entries.
+        self.commit({"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n"
+                                     "[Unreleased]: https://example.com/compare/v1.0.0...HEAD\n"
+                                     "[1.0.0]: https://example.com/releases/v1.0.0\n"})
+        rc, summary, out = self.run_gates("--only", "5")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[✗] CHANGELOG — Unreleased section missing or empty")
+
+    def test_unreleased_entry_under_subheading_passes_changelog(self):
+        # pragma #166: a real entry under "### Added" above a release still counts.
+        self.commit({"CHANGELOG.md": "# Changelog\r\n\r\n## [Unreleased]\r\n\r\n### Added\r\n- New thing\r\n\r\n"
+                                     "## [1.0.0]\r\n- Old entry\r\n"})
+        rc, summary, out = self.run_gates("--only", "5")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[✓] CHANGELOG")
+
+    def test_last_unreleased_with_entry_and_link_definitions_passes_changelog(self):
+        # pragma #166: an [Unreleased] section that is last in the file still counts its entries.
+        self.commit({"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n### Fixed\n- A fix\n\n"
+                                     "[Unreleased]: https://example.com/compare/v1.0.0...HEAD\n"})
+        rc, summary, out = self.run_gates("--only", "5")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[✓] CHANGELOG")
+
     def test_project_rules_hits_allow_and_missing_mode(self):
         self.config["gates"]["rules"] = [
             {"name": "View imports SwiftData", "paths": "/Views/", "pattern": "^import SwiftData"},

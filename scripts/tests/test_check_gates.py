@@ -95,6 +95,18 @@ class CheckGatesTests(unittest.TestCase):
         self.assertEqual(self.row(summary, "Build"), "[–] Build — skipped (no build-relevant changes)")
         self.assertEqual(self.row(summary, "Gate integrity"), "[✓] Gate integrity")
 
+    def test_unconfigured_layers_fail_only_when_swift_is_added(self):
+        self.config["project"]["scoped_layer_dirs"] = ["Nowhere/"]
+        self.write_config()
+        self.commit({"docs/notes.md": "x\n"})
+        rc, summary, out = self.run_gates("--only", "9")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.row(summary, "RED-before-GREEN"), "[–] RED-before-GREEN commit order — skipped (no new Swift files)")
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"})
+        rc, summary, out = self.run_gates("--only", "9")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("unconfigured", self.row(summary, "RED-before-GREEN"))
+
     def test_dirty_tree_stops_before_any_gate(self):
         self.write("App/Dirty.swift", "x\n")
         rc, _, out = self.run_gates()

@@ -295,7 +295,8 @@ fi
 
 # ── Gate 9 — RED-before-GREEN commit order ───────────────────────────────────
 if wants 9; then
-    if [ ! -f scripts/check_tdd_commit_order.py ]; then fail_row "RED-before-GREEN commit order — script missing"
+    if [ -z "$NEW_SWIFT" ]; then row "[–] RED-before-GREEN commit order — skipped (no new Swift files)"
+    elif [ ! -f scripts/check_tdd_commit_order.py ]; then fail_row "RED-before-GREEN commit order — script missing"
     else
         OUT=$(python3 scripts/check_tdd_commit_order.py "$BASE" 2>&1); RC=$?
         section "Gate 9 — RED-before-GREEN commit order"; echo "$OUT"

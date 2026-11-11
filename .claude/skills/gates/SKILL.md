@@ -109,8 +109,9 @@ Services; viper: Presenters, Interactors, Entities — set `project.architecture
 or list your own folders in `project.scoped_layer_dirs`) that has a matching test file, the test file must be
 added in a strictly earlier commit than the implementation. Why from git history: `reference.md` § Gate 9.
 Fail: fix by re-doing the task as two commits (test-only, confirm it fails, then implementation). Exit 2
-(unconfigured — the layer names match nothing in this repo) is reported `[✗]`, never a pass. No new files in the
-scoped layers → skipped. Rewriting already-pushed history is not required.
+(unconfigured — the layer names match nothing in this repo) is reported `[✗]`, never a pass. A branch that adds
+no `.swift` file has nothing to check, so the script skips the gate without running the TDD script; an
+unconfigured repo still fails on its first branch that adds one. No new files in the scoped layers → skipped. Rewriting already-pushed history is not required.
 
 ### Gate 10 — Architecture & layer-rule compliance (instantiate from your AGENTS.md/CLAUDE.md's enforced rules)
 The single authoritative check for layer-separation, type-safety and pattern rules, before the PR opens rather

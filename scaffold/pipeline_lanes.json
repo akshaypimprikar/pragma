@@ -4,6 +4,16 @@
     "ui": "YOUR_UI",
     "architecture": "mvvm"
   },
+  "gates": {
+    "scheme": "YOUR_PROJECT",
+    "build_target": "",
+    "destination": "",
+    "sensitive_paths": "",
+    "app_dir": "YOUR_PROJECT",
+    "ui_tests_dir": "YOUR_PROJECTUITests",
+    "ui_selector_allow": [],
+    "rules": []
+  },
   "release": {
     "paths": [
       "YOUR_PROJECT.xcodeproj/project.pbxproj",

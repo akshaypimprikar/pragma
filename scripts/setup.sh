@@ -139,6 +139,7 @@ cp "$REPO_ROOT/scripts/check_file_registration.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_gates.sh"           "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_pr_lane.py"         "$PROJECT_DIR/scripts/"
@@ -162,6 +163,7 @@ else
     read -r PERSISTENCE UI_KIT <<< "$("$SCRIPT_DIR/detect_project_settings.sh" "$PROJECT_DIR" || echo "none swiftui")"
     sedi "s|YOUR_PERSISTENCE|${PERSISTENCE}|g; s|YOUR_UI|${UI_KIT}|g" "$LANES"
     info "Detected persistence=${PERSISTENCE}, ui=${UI_KIT}; architecture defaults to mvvm. Edit \"project\" in scripts/pipeline_lanes.json if wrong (architecture: mvvm | mvc | viper)."
+    info "Set \"gates\" in scripts/pipeline_lanes.json: sensitive_paths (Gate 7) and rules (Gate 10, your AGENTS.md layer rules) — see .claude/skills/gates/SKILL.md."
 fi
 success "Scripts ready"
 

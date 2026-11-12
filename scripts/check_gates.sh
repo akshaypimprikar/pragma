@@ -231,7 +231,7 @@ def is_test(rel):  # anchored: a *Tests/ folder or a *Test(s).swift file, not an
 bad = 0
 for rel in filter(None, (l.strip() for l in open(sys.argv[2]))):
     name = rel.rsplit("/", 1)[-1]
-    if is_test(rel) or name == "main.swift" or name.endswith(("View.swift", "Sheet.swift", "Row.swift")) or name.startswith("Color+") or any(rel.endswith(h) for h in hardware):
+    if is_test(rel) or name == "main.swift" or name.endswith(("View.swift", "Sheet.swift", "Row.swift")) or name.startswith("Color+") or any(rel == h or rel.endswith("/" + h) for h in hardware):
         print(f"  [skip] {rel} (test, UI-only or hardware-dependent file)"); continue
     match = [f for f in files if f.get("path", "").endswith("/" + rel)]
     if not match or "lineCoverage" not in match[0]:

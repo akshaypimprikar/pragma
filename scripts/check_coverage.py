@@ -18,16 +18,22 @@ WARN_THRESHOLD = 0.80
 # ARKitTracker.swift", not a bare name) with a comment naming the real
 # constraint and how it's verified instead — this is an escape hatch for a
 # genuine coverage-tooling gap, not a way to silence a file that's just
-# under-tested. Matched by path suffix, not name or exact path: xccov's own
-# "path" field is the absolute filesystem path at build time, which differs
-# between machines and CI runners — an exact-match would silently never fire
-# outside whichever environment it was copied from. A path-suffix match still
-# distinguishes two files sharing a basename in different directories, unlike
-# a bare-name match.
+# under-tested. Matched by path suffix on a "/"-boundary, not name or exact
+# path: xccov's own "path" field is the absolute filesystem path at build time,
+# which differs between machines and CI runners — an exact-match would silently
+# never fire outside whichever environment it was copied from. The "/"-boundary
+# keeps a suffix match from over-matching an unrelated file that merely ends
+# with the same characters (e.g. "FakeFoo/Bar.swift" would otherwise match an
+# exception for "Foo/Bar.swift"). scripts/check_gates.sh's Gate 6 uses the same
+# match.
 HARDWARE_DEPENDENT_EXCEPTIONS = set()
 
 with open(sys.argv[1]) as f:
     report = json.load(f)
+
+def _matches_exception(path, rel):
+    return path == rel or path.endswith("/" + rel)
+
 
 source_files = []
 schema_drift_files = []
@@ -43,7 +49,7 @@ for target in report.get("targets", []):
         if (name.endswith("View.swift") or name.endswith("Sheet.swift") or
                 name.endswith("Row.swift") or name.startswith("Color+")):
             continue
-        if any(path.endswith(rel) for rel in HARDWARE_DEPENDENT_EXCEPTIONS):
+        if any(_matches_exception(path, rel) for rel in HARDWARE_DEPENDENT_EXCEPTIONS):
             continue
         if "lineCoverage" not in file:
             schema_drift_files.append(name)

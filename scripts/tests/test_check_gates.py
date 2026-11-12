@@ -188,6 +188,37 @@ class CheckGatesTests(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("[FAIL] App/Contests/Score.swift 20.0%", out)
 
+    def with_hardware_exception(self, rel):
+        with open(os.path.join(ROOT, "scripts", "check_coverage.py")) as f:
+            text = f.read()
+        self.assertIn("HARDWARE_DEPENDENT_EXCEPTIONS = set()", text)
+        return text.replace("HARDWARE_DEPENDENT_EXCEPTIONS = set()", f"HARDWARE_DEPENDENT_EXCEPTIONS = {{{rel!r}}}", 1)
+
+    def test_hardware_exception_matches_on_a_path_boundary(self):
+        # FinanceTracker #206: a bare endswith let an exception for Services/Bar.swift skip App/FakeServices/Bar.swift.
+        self.commit({"scripts/check_coverage.py": self.with_hardware_exception("Services/Bar.swift"),
+                     "App/Services/Bar.swift": "struct Bar {}\n", "App/FakeServices/Bar.swift": "struct FakeBar {}\n"})
+        cov = self.coverage(**{"App/Services/Bar.swift": 0.10, "App/FakeServices/Bar.swift": 0.10})
+        rc, summary, out = self.run_gates("--only", "1,2,6", FAKE_COV=cov)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("[skip] App/Services/Bar.swift", out)
+        self.assertIn("[FAIL] App/FakeServices/Bar.swift 10.0%", out)
+        self.assertTrue(self.row(summary, "Coverage").startswith("[✗] Coverage"))
+
+    def test_check_coverage_exception_matches_on_a_path_boundary(self):
+        script = os.path.join(self.dir, "check_coverage.py")
+        with open(script, "w") as f:
+            f.write(self.with_hardware_exception("Services/Bar.swift"))
+        report = os.path.join(self.dir, "report.json")
+        with open(report, "w") as f:
+            json.dump({"targets": [{"name": "App.app", "files": [
+                {"path": "/build/App/Services/Bar.swift", "name": "Bar.swift", "lineCoverage": 0.10},
+                {"path": "/build/App/FakeServices/Bar.swift", "name": "FakeBar.swift", "lineCoverage": 0.10}]}]}, f)
+        result = subprocess.run(["python3", script, report], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FakeBar.swift", result.stdout)
+        self.assertIn("1 source files", result.stdout)
+
     def test_invalid_sensitive_pattern_fails(self):
         self.config["gates"]["sensitive_paths"] = "(unclosed"
         self.write_config()

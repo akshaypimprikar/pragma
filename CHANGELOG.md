@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.1.2] — 2026-11-12
 
 ### Added
 - **`/gates` runs as one script (`scripts/check_gates.sh`).** It runs the pre-step and Gates 0-11 and prints the Gate summary block itself, so no model retypes results that `/review` then has to re-check. The model keeps only the judgment steps: filling an empty CHANGELOG, running `security-review` when Gate 7 prints `[!] Security`, weighing Gate 8's advisory candidates, and candidate invariants. Project settings move to a new `gates` key in `scripts/pipeline_lanes.json` (scheme, destination, `sensitive_paths`, UI-test folders, and Gate 10 `rules` as JSON regex entries); `setup.sh` copies the script and fills the scheme. An unset scheme fails Gates 1-2 instead of skipping them. Gate 6 now reads coverage for new files from Gate 2's result bundle (no second test run), and Gate 10's UI-selector check, which used to be done by hand, is scripted: a selector must appear as a string in the app or be text the tests type. Gate 9 is skipped on a branch that adds no `.swift` file (nothing to check), so an unconfigured layer list fails only once Swift is added; pragma's own PRs had been hand-reporting that case as skipped against the SKILL's `[✗]` rule. `gates/SKILL.md` keeps the gate headings and judgment steps and drops the inline commands; `/review` re-runs Gates 3, 4, 5 and 10 with the base branch's copy of the script and config. The `scripts/check_*` name puts it under the guard hook and Gate 11, and the two helpers it runs (`scripts/detect_build_target.sh`, `scripts/select_simulator.py`) are added to both guard lists and the small-PR excludes. Existing installs: add the `gates` key and copy the script at the next `/sync-workflow`.

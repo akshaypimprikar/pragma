@@ -12,7 +12,8 @@
 #   --config  pipeline config (default: scripts/pipeline_lanes.json), read from its "gates" key
 #
 # Exit: 0 every blocking gate passed, 1 a blocking gate failed, 2 usage or setup
-# error, 3 the working tree is not clean.
+# error, 3 the working tree is not clean, 4 every blocking gate passed but Gate 7
+# needs the security-review skill.
 # Details print first; the summary block to paste into the PR body prints last.
 
 set -u
@@ -58,7 +59,7 @@ SHA=$(git rev-parse HEAD)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/check_gates.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
-SUMMARY=""; FAILED=0
+SUMMARY=""; FAILED=0; SECURITY_PENDING=0
 row() { SUMMARY="${SUMMARY}$1"$'\n'; }
 fail_row() { row "[✗] $1"; FAILED=1; }
 section() { printf '\n--- %s ---\n' "$1"; }
@@ -252,7 +253,7 @@ if wants 7; then
         elif [ -z "$SENS" ]; then row "[–] Security — skipped (no sensitive files)"
         else
             section "Gate 7 — sensitive files changed"; echo "$SENS"
-            row "[!] Security — security-review required: $(echo "$SENS" | tr '\n' ' ' | sed 's/ $//')"
+            row "[!] Security — security-review required: $(echo "$SENS" | tr '\n' ' ' | sed 's/ $//')"; SECURITY_PENDING=1
         fi
     fi
 fi
@@ -333,7 +334,7 @@ fi
 
 # ── Gate 10 — architecture & layer rules ─────────────────────────────────────
 if wants 10; then
-    if G10=$(python3 - "$BASE" "$CONFIG" <<'PY'
+    if G10=$(python3 - "$BASE" "$CONFIG" 2>&1 <<'PY'
 import json, re, subprocess, sys
 base, config = sys.argv[1], sys.argv[2]
 def git(*a):
@@ -398,7 +399,9 @@ PY
         else row "[✓] Architecture & layer-rule compliance"; fi
     else
         section "Gate 10 — architecture & layer rules"; echo "$G10"
-        fail_row "Architecture & layer-rule compliance — $(echo "$G10" | grep -c '\[FAIL\]') violation(s) (see report)"
+        N=$(echo "$G10" | grep -c '\[FAIL\]')
+        if [ "$N" -gt 0 ]; then fail_row "Architecture & layer-rule compliance — $N violation(s) (see report)"
+        else fail_row "Architecture & layer-rule compliance — check did not run (see report)"; fi
     fi
 fi
 
@@ -423,4 +426,5 @@ echo "Gates run at $SHA"
 echo "Lane: $LANE"
 if [ -n "$ONLY" ]; then echo "Gates (only $ONLY):"; else echo "Gates:"; fi
 printf '%s' "$SUMMARY"
+[ "$FAILED" -eq 0 ] && [ "$SECURITY_PENDING" -eq 1 ] && exit 4
 exit "$FAILED"

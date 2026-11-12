@@ -321,6 +321,27 @@ class CheckGatesTests(unittest.TestCase):
         git(self.repo, "merge", "-q", "chore/x")
         git(self.repo, "checkout", "-q", "chore/x")
 
+    def test_quoted_name_is_still_checked(self):
+        # git quotes a name with `"`, `\` or a tab even with core.quotepath=false (#175 F1).
+        self.sensitive_services()
+        self.commit({'App/Services/a"b.swift': "struct Q { let a = 1 }\n"})
+        rc, summary, out = self.run_gates("--only", "7")
+        self.assertEqual(rc, 4, out)
+        self.assertEqual(self.row(summary, "Security"), '[!] Security — security-review required: App/Services/a"b.swift')
+
+    def test_quoted_name_is_checked_by_gate_10(self):
+        self.commit({'App/Services/a"b.swift': "let x = try! load()\n"})
+        rc, _, out = self.run_gates("--only", "10")
+        self.assertEqual(rc, 1, out)
+        self.assertIn('App/Services/a"b.swift:1:', out)
+
+    def test_newline_in_a_changed_name_fails(self):
+        self.commit({"App/Services/a\nb.swift": "struct Q {}\n"})
+        rc, summary, out = self.run_gates("--only", "3")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "File names"),
+                         "[✗] File names — 1 changed path(s) have a newline in the name; rename them")
+
     def test_sensitive_file_asks_for_security_review_with_exit_4(self):
         self.sensitive_services()
         self.commit({"App/Services/Existing.swift": "struct Existing { let a = 1 }\n"})

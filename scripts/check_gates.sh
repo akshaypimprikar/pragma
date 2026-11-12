@@ -12,7 +12,8 @@
 #   --config  pipeline config (default: scripts/pipeline_lanes.json), read from its "gates" key
 #
 # Exit: 0 every blocking gate passed, 1 a blocking gate failed, 2 usage or setup
-# error, 3 the working tree is not clean.
+# error, 3 the working tree is not clean, 4 every blocking gate passed but Gate 7
+# needs the security-review skill.
 # Details print first; the summary block to paste into the PR body prints last.
 
 set -u
@@ -58,7 +59,7 @@ SHA=$(git rev-parse HEAD)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/check_gates.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
-SUMMARY=""; FAILED=0
+SUMMARY=""; FAILED=0; SECURITY_PENDING=0
 row() { SUMMARY="${SUMMARY}$1"$'\n'; }
 fail_row() { row "[✗] $1"; FAILED=1; }
 section() { printf '\n--- %s ---\n' "$1"; }
@@ -79,8 +80,8 @@ PY
 }
 
 changed_swift() {  # existing .swift files changed on the branch; --diff-filter passes through
-    git -c core.quotepath=false diff "$BASE"...HEAD --name-only "$@" -- '*.swift' |
-        while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done
+    git -c core.quotepath=false diff "$BASE"...HEAD -z --name-only "$@" -- '*.swift' |
+        while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\n' "$f"; done
 }
 
 # ── Gate 0 — build-relevant change check (decides whether Gates 1-2 run) ─────
@@ -89,6 +90,9 @@ GATE0_FILES=$(
     git -c core.quotepath=false diff "$BASE"...HEAD --name-only -- '*.swift' '*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan'
 )
 NEW_SWIFT=$(changed_swift --diff-filter=A)
+# The gates pass paths one per line, so a name with a newline can't be checked: fail it in every run.
+NL_NAMES=$(git diff "$BASE"...HEAD -z --name-only | LC_ALL=C tr '\n\0' '\001\n' | LC_ALL=C grep -c $'\001')
+[ "$NL_NAMES" -gt 0 ] && fail_row "File names — $NL_NAMES changed path(s) have a newline in the name; rename them"
 if wants 1 || wants 2; then
     section "Gate 0 — build-relevant changes"
     if [ -n "$GATE0_FILES" ]; then echo "$GATE0_FILES"; else echo "none — Gates 1 and 2 are skipped"; fi
@@ -252,7 +256,7 @@ if wants 7; then
         elif [ -z "$SENS" ]; then row "[–] Security — skipped (no sensitive files)"
         else
             section "Gate 7 — sensitive files changed"; echo "$SENS"
-            row "[!] Security — security-review required: $(echo "$SENS" | tr '\n' ' ' | sed 's/ $//')"
+            row "[!] Security — security-review required: $(echo "$SENS" | tr '\n' ' ' | sed 's/ $//')"; SECURITY_PENDING=1
         fi
     fi
 fi
@@ -267,7 +271,7 @@ def git(*a):
 out = []
 # New protocols with at most one conforming type.
 proto_decl = re.compile(r"^((public|internal|package|private|fileprivate|open|nonisolated|@[A-Za-z]+) )*protocol (\w+)")
-added = [f for f in git("diff", f"{base}...HEAD", "--name-only", "--diff-filter=A", "--", "*.swift").split("\n") if f]
+added = [f for f in git("diff", f"{base}...HEAD", "-z", "--name-only", "--diff-filter=A", "--", "*.swift").split("\0") if f]
 for path in added:
     try:
         lines = open(path).read().splitlines()
@@ -333,7 +337,7 @@ fi
 
 # ── Gate 10 — architecture & layer rules ─────────────────────────────────────
 if wants 10; then
-    if G10=$(python3 - "$BASE" "$CONFIG" <<'PY'
+    if G10=$(python3 - "$BASE" "$CONFIG" 2>&1 <<'PY'
 import json, re, subprocess, sys
 base, config = sys.argv[1], sys.argv[2]
 def git(*a):
@@ -345,8 +349,8 @@ except (OSError, ValueError) as e:
 def as_list(v):
     return [v] if isinstance(v, str) else list(v or [])
 def swift(filter_=None):
-    args = ["diff", f"{base}...HEAD", "--name-only"] + ([f"--diff-filter={filter_}"] if filter_ else []) + ["--", "*.swift"]
-    return [f for f in git(*args).split("\n") if f]
+    args = ["diff", f"{base}...HEAD", "-z", "--name-only"] + ([f"--diff-filter={filter_}"] if filter_ else []) + ["--", "*.swift"]
+    return [f for f in git(*args).split("\0") if f]
 changed, added = swift("d"), swift("A")
 rules = [{"name": "No try!/as! in production code", "pattern": r"\btry!|as!", "exclude": "Tests/"}] + list(gates.get("rules", []))
 violations, accepted = [], []
@@ -374,8 +378,8 @@ for rule in rules:
 app_dir, ui_dir = gates.get("app_dir", ""), gates.get("ui_tests_dir", "")
 if app_dir and ui_dir and not app_dir.startswith("YOUR_"):
     sel = re.compile(r'app\.(?:buttons|textFields|staticTexts)\["([^"]*)"\]')
-    ui_files = [f for f in git("ls-files", "--", f"{ui_dir}/*.swift").split("\n") if f]
-    app_files = [f for f in git("ls-files", "--", f"{app_dir}/*.swift").split("\n") if f]
+    ui_files = [f for f in git("ls-files", "-z", "--", f"{ui_dir}/*.swift").split("\0") if f]
+    app_files = [f for f in git("ls-files", "-z", "--", f"{app_dir}/*.swift").split("\0") if f]
     ui_text = "".join(open(f, errors="replace").read() for f in ui_files)
     app_text = "".join(open(f, errors="replace").read() for f in app_files)
     typed = set(re.findall(r'typeText\("([^"]*)"\)', ui_text))
@@ -398,7 +402,9 @@ PY
         else row "[✓] Architecture & layer-rule compliance"; fi
     else
         section "Gate 10 — architecture & layer rules"; echo "$G10"
-        fail_row "Architecture & layer-rule compliance — $(echo "$G10" | grep -c '\[FAIL\]') violation(s) (see report)"
+        N=$(echo "$G10" | grep -c '\[FAIL\]')
+        if [ "$N" -gt 0 ]; then fail_row "Architecture & layer-rule compliance — $N violation(s) (see report)"
+        else fail_row "Architecture & layer-rule compliance — check did not run (see report)"; fi
     fi
 fi
 
@@ -423,4 +429,5 @@ echo "Gates run at $SHA"
 echo "Lane: $LANE"
 if [ -n "$ONLY" ]; then echo "Gates (only $ONLY):"; else echo "Gates:"; fi
 printf '%s' "$SUMMARY"
+[ "$FAILED" -eq 0 ] && [ "$SECURITY_PENDING" -eq 1 ] && exit 4
 exit "$FAILED"

@@ -227,6 +227,35 @@ class CliTests(unittest.TestCase):
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertEqual(out.stdout.strip(), "pipeline")
 
+    def test_git_mode_keeps_non_ascii_and_newline_paths(self):
+        for name in ("Café.swift", "a\nb.swift"):
+            with self.subTest(name=repr(name)), tempfile.TemporaryDirectory() as d:
+                def git(*a):
+                    subprocess.run(["git", *a], cwd=d, check=True, capture_output=True)
+                git("init", "-q", "-b", "develop")
+                git("config", "user.email", "t@example.com")
+                git("config", "user.name", "t")
+                git("config", "core.quotepath", "true")
+                open(os.path.join(d, "README.md"), "w").write("x\n")
+                git("add", ".")
+                git("commit", "-qm", "base")
+                git("checkout", "-qb", "chore/x")
+                os.makedirs(os.path.join(d, "App"))
+                open(os.path.join(d, "App", name), "w").write("x\n")
+                git("add", ".")
+                git("commit", "-qm", "change")
+                cfg = os.path.join(d, "lanes.json")
+                import json
+                json.dump(CONFIG, open(cfg, "w"))
+                script = os.path.join(os.path.dirname(__file__), "..", "check_pr_lane.py")
+                out = subprocess.run(
+                    [sys.executable, script, "--git", "develop", "--head-branch", "chore/x",
+                     "--base-branch", "develop", "--config", cfg],
+                    cwd=d, capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(out.stdout.strip(), "app")
+
     def test_invalid_config_exits_2(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = os.path.join(d, "lanes.json")

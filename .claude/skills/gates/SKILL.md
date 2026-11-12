@@ -25,7 +25,9 @@ scripts/check_gates.sh            # --base main on release/* and hotfix/* (the d
 It runs the pre-step and Gates 0–11 in order, prints each gate's details, and ends with the Gate summary block
 (`Gates run at <sha>`, `Lane:`, one line per gate). Paste that block into the PR body as printed; never retype or
 edit it. Exit 0: every blocking gate passed. Exit 1: a blocking gate failed — fix it, commit, and re-run.
-Exit 2: a usage or config error. Exit 3: the tree is dirty. If `scripts/check_gates.sh` is missing, `/gates` FAILS;
+Exit 2: a usage or config error. Exit 3: the tree is dirty. Exit 4: every blocking gate passed but Gate 7 printed
+`[!] Security`; run the security review (Gate 7) before you call `/gates` done. A `[✗] File names` row means a
+changed path has a newline in its name, which the gates cannot check: rename it. If `scripts/check_gates.sh` is missing, `/gates` FAILS;
 do not fall back to running the checks by hand.
 
 Your part is only the judgment the script can't make: filling an empty CHANGELOG (Gate 5), running the

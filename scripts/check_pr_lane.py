@@ -57,7 +57,7 @@ def glob_match(pattern, path):
         else:
             out.append(re.escape(pattern[i]))
             i += 1
-    return re.fullmatch("".join(out), path) is not None
+    return re.fullmatch("".join(out), path, re.DOTALL) is not None
 
 
 def _matches_any(patterns, path):
@@ -194,10 +194,11 @@ def evidence_for_change(config, lane_name, changed, changed_lines=None):
 
 
 def _git_names(spec):
-    out = subprocess.run(["git", "diff", "--name-only", spec], capture_output=True, text=True)
+    out = subprocess.run(["git", "-c", "core.quotepath=false", "diff", "-z", "--name-only", spec],
+                         capture_output=True)
     if out.returncode != 0:
-        raise ConfigError(f"git diff {spec} failed: {out.stderr.strip()}")
-    return [l for l in out.stdout.splitlines() if l]
+        raise ConfigError(f"git diff {spec} failed: {out.stderr.decode(errors='replace').strip()}")
+    return [p for p in out.stdout.decode(errors="surrogateescape").split("\0") if p]
 
 
 def main(argv=None):

@@ -300,17 +300,61 @@ class CheckGatesTests(unittest.TestCase):
         self.assertNotIn('"saveButton" is not', out)
         self.assertNotIn('"Coffee Shop" is not', out)
 
-    def test_sensitive_file_asks_for_security_review_without_failing(self):
+    def test_bad_rule_says_the_check_could_not_run(self):
+        self.config["gates"]["rules"] = [{"name": "No pattern", "paths": "App/"}]
+        self.write_config()
+        git(self.repo, "commit", "-qam", "config")
+        git(self.repo, "checkout", "-q", "develop")
+        git(self.repo, "merge", "-q", "chore/x")
+        git(self.repo, "checkout", "-q", "chore/x")
+        self.commit({"App/Services/Existing.swift": "struct Existing { let a = 2 }\n"})
+        rc, summary, out = self.run_gates("--only", "10")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("KeyError", out)
+        self.assertEqual(self.row(summary, "Architecture"), "[✗] Architecture & layer-rule compliance — check did not run (see report)")
+
+    def sensitive_services(self):
         self.config["gates"]["sensitive_paths"] = "Services/"
         self.write_config()
         git(self.repo, "commit", "-qam", "config")
         git(self.repo, "checkout", "-q", "develop")
         git(self.repo, "merge", "-q", "chore/x")
         git(self.repo, "checkout", "-q", "chore/x")
+
+    def test_quoted_name_is_still_checked(self):
+        # git quotes a name with `"`, `\` or a tab even with core.quotepath=false (#175 F1).
+        self.sensitive_services()
+        self.commit({'App/Services/a"b.swift': "struct Q { let a = 1 }\n"})
+        rc, summary, out = self.run_gates("--only", "7")
+        self.assertEqual(rc, 4, out)
+        self.assertEqual(self.row(summary, "Security"), '[!] Security — security-review required: App/Services/a"b.swift')
+
+    def test_quoted_name_is_checked_by_gate_10(self):
+        self.commit({'App/Services/a"b.swift': "let x = try! load()\n"})
+        rc, _, out = self.run_gates("--only", "10")
+        self.assertEqual(rc, 1, out)
+        self.assertIn('App/Services/a"b.swift:1:', out)
+
+    def test_newline_in_a_changed_name_fails(self):
+        self.commit({"App/Services/a\nb.swift": "struct Q {}\n"})
+        rc, summary, out = self.run_gates("--only", "3")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.row(summary, "File names"),
+                         "[✗] File names — 1 changed path(s) have a newline in the name; rename them")
+
+    def test_sensitive_file_asks_for_security_review_with_exit_4(self):
+        self.sensitive_services()
         self.commit({"App/Services/Existing.swift": "struct Existing { let a = 1 }\n"})
         rc, summary, out = self.run_gates("--only", "7")
-        self.assertEqual(rc, 0, out)
+        self.assertEqual(rc, 4, out)
         self.assertEqual(self.row(summary, "Security"), "[!] Security — security-review required: App/Services/Existing.swift")
+
+    def test_blocking_failure_outranks_pending_security_review(self):
+        self.sensitive_services()
+        self.commit({"App/Services/Existing.swift": "let x = try! load()\n"})
+        rc, summary, out = self.run_gates("--only", "7,10")
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.row(summary, "Security").startswith("[!] Security"), summary)
 
     def test_duplicated_block_is_an_advisory_candidate(self):
         block = "let a = 1\nlet b = 2\nlet c = 3\n"

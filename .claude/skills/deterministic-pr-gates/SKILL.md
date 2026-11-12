@@ -1,6 +1,6 @@
 ---
 name: deterministic-pr-gates
-description: Run deterministic, scriptable pre-PR verification gates (build, full test suite, coverage threshold, branch naming, changelog presence, force-unwrap/duplication heuristics, and project-specific architecture/layer rules via grep) before a PR is opened or before a human reviewer looks at the diff. Use when a user asks whether a branch is ready for PR, wants a pre-PR checklist automated, wants CI-equivalent checks run locally and fast, or wants pre-merge verification that doesn't depend on an LLM's subjective judgment of code quality. Works standalone in any project — no other skill or pipeline required.
+description: Run deterministic, scriptable pre-PR verification gates (build, full test suite, coverage threshold, branch naming, changelog presence, force-unwrap/duplication heuristics, project-specific architecture/layer rules via grep, and gate integrity) before a PR is opened or before a human reviewer looks at the diff. Use when a user asks whether a branch is ready for a PR, what to check before opening one, whether a docs-only or config-only branch can skip the build and tests, how to report skipped checks, or wants pre-merge verification that doesn't depend on an LLM's subjective judgment. Also use when someone proposes weakening a check to get green: disabling or deleting a test, lowering a coverage threshold, or editing a gates or CI file on a feature branch. Works standalone in any project, no other skill or pipeline required.
 ---
 
 # Deterministic Pre-PR Gates
@@ -24,10 +24,12 @@ Run Gate 0 through Gate 10 below in order, then report the Gate summary. Not eve
 ## Gate 0 — Change scope check (runs first)
 
 ```bash
-git diff <base-branch>...HEAD --name-only -- '<source file extension(s), e.g. *.swift or *.py *.ts>'
+git diff <base-branch>...HEAD --name-only -- '<source file extension(s), e.g. *.swift or *.py *.ts>' '<build-input patterns, see below>'
 ```
 
-If this returns no output, no source code changed on this branch — skip the Build and Test gates below and continue from Gate 2. If source files are listed, run Build and Test as normal. This is what lets a docs-only or config-only PR skip an expensive build/test cycle without skipping it silently.
+If this returns no output, nothing that affects the build or tests changed on this branch — skip the Build and Test gates below and continue from Gate 3. If any file is listed, run Build and Test as normal. This is what lets a docs-only PR skip an expensive build/test cycle without skipping it silently.
+
+Build-input files count as changes even though they are not source code: a build-setting change (e.g. `SWIFT_VERSION` or a default actor-isolation setting) can break the build or change runtime behavior without touching a source file. Add every build input your project has to the pathspec. Swift/Xcode: `'*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan'`. Match the project and workspace bundles whole, not by file extension, so `project.pbxproj`, the `project.xcproj` that `xcodebuild -convert-project xcproj` produces, shared schemes and later-added files all count. Node/Python: `package.json` and lockfiles, `tsconfig*.json`, `pyproject.toml`, `requirements*.txt`. Mirrors Gate 0 in `gates/SKILL.md`.
 
 ## Gate 1 — Build (conditional: source files changed)
 
@@ -38,7 +40,7 @@ If this returns no output, no source code changed on this branch — skip the Bu
 Swift/Xcode example:
 ```bash
 LOG=$(mktemp -t build)
-xcodebuild build -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild build <BuildTarget> -scheme <AppName> \
   -configuration Debug -destination 'platform=<simulator platform>,name=<simulator>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"
@@ -82,10 +84,10 @@ Pass: branch matches your project's naming convention (e.g. `feature/*`, `fix/*`
 ## Gate 5 — Changelog has an unreleased entry
 
 ```bash
-grep -A 10 "## \[Unreleased\]" CHANGELOG.md 2>/dev/null | grep -v "^##" | grep -v "^$"
+awk '{sub(/\r$/, "")} /^## \[Unreleased\]/{f=1; next} /^## /{f=0} f && NF && !/^##/ && !/^\[[^]]+\]:/' CHANGELOG.md 2>/dev/null
 ```
 
-Pass: at least one non-empty line under the project's "Unreleased" section. Fail: section missing or empty — add a one-line summary per commit on this branch (`git log <base-branch>..HEAD --oneline`) before opening the PR. Skip this gate entirely if the project doesn't maintain a changelog.
+Pass: at least one non-empty line in the project's "Unreleased" section, read up to the next `## ` heading (`###` subheadings, CRLF blank lines and link definitions such as `[1.0.0]: https://...` are not entries). Fail: section missing or empty — add a one-line summary per commit on this branch (`git log <base-branch>..HEAD --oneline`) before opening the PR. Skip this gate entirely if the project doesn't maintain a changelog.
 
 ## Gate 6 — Coverage (conditional: new source files on this branch)
 

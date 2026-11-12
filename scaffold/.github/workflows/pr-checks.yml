@@ -19,6 +19,7 @@ on:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTTests/**'
       - 'YOUR_PROJECTUITests/**'
       - 'scripts/**'
@@ -32,11 +33,13 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: macos-26
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: '~26.4'
 
@@ -48,6 +51,19 @@ jobs:
           restore-keys: |
             deriveddata-${{ runner.os }}-
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
+      - name: Check new Swift files are registered in the project
+        run: |
+          git fetch --depth=1 origin ${{ github.event.pull_request.base.sha }}
+          git diff -z --name-only --diff-filter=AR ${{ github.event.pull_request.base.sha }} HEAD -- '*.swift' > "$RUNNER_TEMP/new-swift.z"
+          NEW=()
+          while IFS= read -r -d '' f; do NEW+=("$f"); done < "$RUNNER_TEMP/new-swift.z"
+          if [ ${#NEW[@]} -eq 0 ]; then echo "no new Swift files"; exit 0; fi
+          python3 scripts/check_file_registration.py --project-dir . --app-name YOUR_PROJECT "${NEW[@]}"
+
       - name: Run unit and integration tests
         run: |
           set -o pipefail
@@ -57,7 +73,7 @@ jobs:
           # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -skip-testing:YOUR_PROJECTUITests \

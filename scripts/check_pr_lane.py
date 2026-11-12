@@ -57,11 +57,18 @@ def glob_match(pattern, path):
         else:
             out.append(re.escape(pattern[i]))
             i += 1
-    return re.fullmatch("".join(out), path) is not None
+    return re.fullmatch("".join(out), path, re.DOTALL) is not None
 
 
 def _matches_any(patterns, path):
     return any(glob_match(p, path) for p in patterns)
+
+
+PROJECT_CHOICES = {
+    "persistence": {"swiftdata", "coredata", "realm", "none"},
+    "ui": {"swiftui", "uikit"},
+    "architecture": {"mvvm", "mvc", "viper"},
+}
 
 
 def validate_config(config):
@@ -85,6 +92,31 @@ def validate_config(config):
             raise ConfigError(f"lane '{name}' lists unknown evidence: {sorted(unknown)}")
         if name != "default" and entry is not default and not isinstance(entry.get("paths"), list):
             raise ConfigError(f"lane '{name}' needs a 'paths' list")
+        small = entry.get("small_pr")
+        if small is not None:
+            if not isinstance(small, dict):
+                raise ConfigError(f"lane '{name}' small_pr must be an object")
+            n = small.get("max_changed_lines")
+            if type(n) is not int or n < 1:
+                raise ConfigError(f"lane '{name}' small_pr needs a positive integer 'max_changed_lines'")
+            unknown = set(small.get("evidence", [])) - EVIDENCE_ITEMS
+            if unknown:
+                raise ConfigError(f"lane '{name}' small_pr lists unknown evidence: {sorted(unknown)}")
+            excluded = small.get("exclude_paths", [])
+            if not isinstance(excluded, list) or not all(isinstance(x, str) for x in excluded):
+                raise ConfigError(f"lane '{name}' small_pr 'exclude_paths' must be a list of strings")
+    project = config.get("project", {})
+    if not isinstance(project, dict):
+        raise ConfigError("'project' must be an object")
+    for key, allowed in PROJECT_CHOICES.items():
+        if key in project and project[key] not in allowed:
+            raise ConfigError(f"project.{key} must be one of {sorted(allowed)}, got {project[key]!r}")
+    layers = project.get("scoped_layer_dirs", [])
+    if not isinstance(layers, list) or not all(isinstance(x, str) for x in layers):
+        raise ConfigError("project.scoped_layer_dirs must be a list of strings")
+    carry = config.get("review_carryover_paths", [])
+    if not isinstance(carry, list) or not all(isinstance(x, str) for x in carry):
+        raise ConfigError("'review_carryover_paths' must be a list of strings")
     if "sync" in config and not config["sync"].get("branch_prefix"):
         raise ConfigError("'sync' needs a 'branch_prefix'")
     return config
@@ -129,8 +161,14 @@ def evidence_for(config, lane_name):
     raise ConfigError(f"unknown lane '{lane_name}'")
 
 
-def evidence_for_change(config, lane_name, changed):
+def evidence_for_change(config, lane_name, changed, changed_lines=None):
     """Evidence a PR needs: its lane's, plus that of every other configured lane it touches.
+
+    A lane with `small_pr` swaps in the `small_pr` evidence (no model review) when
+    `changed_lines` (additions plus deletions) is below `max_changed_lines`. Only a
+    PR laned by that lane can qualify, and a PR with an app path is laned `app`, so
+    a small PR never skips review on app code. A PR touching a path in the lane's
+    `small_pr.exclude_paths` (the files that enforce the rules) never qualifies.
 
     The lane rank decides the lane name only. A PR touching app and pipeline
     paths is laned `app` but still owes the pipeline lane's evidence (such as a
@@ -140,17 +178,27 @@ def evidence_for_change(config, lane_name, changed):
     items = evidence_for(config, lane_name)
     if lane_name in ("release", "sync"):
         return items
+    small_for = {}
+    for entry in config["lanes"]:
+        small = entry.get("small_pr")
+        if small and entry["name"] == lane_name and changed_lines is not None \
+                and changed_lines < small["max_changed_lines"] \
+                and not any(_matches_any(small.get("exclude_paths", []), p) for p in changed):
+            small_for[entry["name"]] = small.get("evidence", [])
+            items = [i for i in items if i in small_for[entry["name"]]]
     for entry in config["lanes"]:
         if any(_matches_any(entry["paths"], p) for p in changed):
-            items += [i for i in entry.get("evidence", []) if i not in items]
+            evidence = small_for.get(entry["name"], entry.get("evidence", []))
+            items += [i for i in evidence if i not in items]
     return items
 
 
 def _git_names(spec):
-    out = subprocess.run(["git", "diff", "--name-only", spec], capture_output=True, text=True)
+    out = subprocess.run(["git", "-c", "core.quotepath=false", "diff", "-z", "--name-only", spec],
+                         capture_output=True)
     if out.returncode != 0:
-        raise ConfigError(f"git diff {spec} failed: {out.stderr.strip()}")
-    return [l for l in out.stdout.splitlines() if l]
+        raise ConfigError(f"git diff {spec} failed: {out.stderr.decode(errors='replace').strip()}")
+    return [p for p in out.stdout.decode(errors="surrogateescape").split("\0") if p]
 
 
 def main(argv=None):

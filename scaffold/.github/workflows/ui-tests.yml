@@ -12,11 +12,13 @@ on:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTUITests/**'
   push:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTUITests/**'
 
 concurrency:
@@ -27,11 +29,13 @@ jobs:
   ui-tests:
     name: UI Tests
     runs-on: macos-26
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: '~26.4'
 
@@ -43,6 +47,10 @@ jobs:
           restore-keys: |
             deriveddata-ui-${{ runner.os }}-
 
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
+
       - name: Run UI tests
         run: |
           set -o pipefail
@@ -52,7 +60,7 @@ jobs:
           # add --requires <feature,feature> here — see scripts/slim_simulator.sh header.
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -only-testing:YOUR_PROJECTUITests \

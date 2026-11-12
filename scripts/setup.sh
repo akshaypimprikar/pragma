@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]
+# Usage: ./scripts/setup.sh [--no-guard-hook] [--no-review-alert] [--apple-skills] APP_NAME [PROJECT_DIR] [SCHEME]
 #
 # APP_NAME     — your Xcode project/module name (e.g. MyApp)
 # PROJECT_DIR  — path to your iOS project root (default: current directory)
 # SCHEME       — Xcode scheme name (default: same as APP_NAME)
 # --no-guard-hook — skip installing the PreToolUse guard hook (see below)
 # --no-review-alert — skip installing the pipeline-review alert hook (see below)
+# --apple-skills — also install Xcode 27's allowlisted Apple Agent Skills to
+#                  ~/.claude/skills (see scripts/install_apple_skills.sh)
 #
 # What it does:
-#   - Copies .claude/skills/, .claude/context/, scripts/, and
+#   - Copies .claude/skills/, scaffold/.claude/context/, scripts/, and
 #     scaffold/.github/workflows/ into your project. .claude/skills/ is the
 #     SKILL.md format (an open standard also read by Cursor, Codex, GitHub
 #     Copilot, Windsurf, and others), replacing the old .claude/commands/
@@ -20,13 +22,18 @@
 #   - Migrates an older install: any .claude/commands/<name>.md that shares
 #     a name with a skill being installed is backed up alongside it and
 #     removed, so the old command can't shadow or collide with the new skill
+#   - Links each skill into .agents/skills/<name> (relative symlink to
+#     .claude/skills/<name>) so Codex CLI finds it, leaving the project's own
+#     entries there alone
 #   - Replaces YOUR_PROJECT / YOUR_SCHEME in workflow files
 #   - Copies scaffold/pipeline_lanes.json to scripts/pipeline_lanes.json (with
-#     YOUR_PROJECT replaced) unless the project already has one
+#     YOUR_PROJECT replaced, and the detected persistence and ui filled in)
+#     unless the project already has one
 #   - Installs .claude/hooks/guard_protected_paths.py and merges its PreToolUse
-#     entry into .claude/settings.json (other settings are kept; the original
-#     is backed up). The hook blocks edits to gate-definition files on
-#     feature/* branches during a Claude Code session. Skip with --no-guard-hook
+#     entry into .claude/settings.json and .codex/hooks.json (other settings
+#     are kept; originals are backed up). The hook blocks edits to
+#     gate-definition files on feature/* branches during a Claude Code or
+#     Codex CLI session. Skip with --no-guard-hook
 #   - Merges a UserPromptSubmit entry into .claude/settings.json that alerts on
 #     every prompt while a docs/pipeline-review/ report has `addressed: false`
 #     in its frontmatter. Skip with --no-review-alert
@@ -48,11 +55,13 @@ die()     { echo -e "${RED}  ✗${RESET} $*" >&2; exit 1; }
 # ── Args ─────────────────────────────────────────────────────────────────────
 INSTALL_GUARD_HOOK=1
 INSTALL_REVIEW_ALERT=1
+INSTALL_APPLE_SKILLS=0
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
         --no-guard-hook) INSTALL_GUARD_HOOK=0 ;;
         --no-review-alert) INSTALL_REVIEW_ALERT=0 ;;
+        --apple-skills) INSTALL_APPLE_SKILLS=1 ;;
         *) POSITIONAL+=("$arg") ;;
     esac
 done
@@ -62,7 +71,7 @@ APP_NAME="${1:-}"
 PROJECT_DIR="${2:-.}"
 SCHEME="${3:-$APP_NAME}"
 
-[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] APP_NAME [PROJECT_DIR] [SCHEME]"
+[[ -z "$APP_NAME" ]] && die "Usage: $0 [--no-guard-hook] [--no-review-alert] [--apple-skills] APP_NAME [PROJECT_DIR] [SCHEME]"
 [[ ! -d "$PROJECT_DIR" ]] && die "Project directory not found: $PROJECT_DIR"
 
 # pwd -P resolves symlinks, so a symlink to pragma's root can't slip past the
@@ -88,6 +97,7 @@ echo ""
 
 # ── sed helper (BSD/GNU portable) ────────────────────────────────────────────
 source "$SCRIPT_DIR/lib_sedi.sh"
+BUILD_TARGET="$("$SCRIPT_DIR/detect_build_target.sh" "$PROJECT_DIR" "$APP_NAME")"
 
 # ── 1. Skills ────────────────────────────────────────────────────────────────
 info "Copying skill files…"
@@ -105,7 +115,9 @@ mkdir -p "$PROJECT_DIR/.claude/skills"
 # ── 2. Context ────────────────────────────────────────────────────────────────
 info "Copying context files…"
 mkdir -p "$PROJECT_DIR/.claude/context"
-for f in "$REPO_ROOT/.claude/context/"*.md; do
+# Header-only templates. pragma's own .claude/context/ holds pragma's releases,
+# decisions and rejections, which a new project must not inherit.
+for f in "$REPO_ROOT/scaffold/.claude/context/"*.md; do
     dest="$PROJECT_DIR/.claude/context/$(basename "$f")"
     if [[ -f "$dest" ]]; then
         warn "Skipping $(basename "$f") — already exists"
@@ -119,14 +131,24 @@ success "Context files ready"
 info "Copying support scripts…"
 mkdir -p "$PROJECT_DIR/scripts"
 cp "$REPO_ROOT/scripts/select_simulator.py"      "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_build_target.sh"   "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_project_settings.sh" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/detect_file_registration.sh" "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/register_files.rb"        "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_file_registration.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_coverage.py"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_tdd_commit_order.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_gate_integrity.py"  "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_gates.sh"           "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/capture_pipeline_metrics.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/slim_simulator.sh"        "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_pr_lane.py"         "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_review_evidence.py" "$PROJECT_DIR/scripts/"
 cp "$REPO_ROOT/scripts/check_citations.py"       "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/review_verdict.py"         "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_finding_lines.py"    "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/check_review_contract.py"  "$PROJECT_DIR/scripts/"
+cp "$REPO_ROOT/scripts/review.schema.json"        "$PROJECT_DIR/scripts/"
 mkdir -p "$PROJECT_DIR/scripts/tests"
 cp "$REPO_ROOT/scripts/tests/test_check_pr_lane.py" \
    "$REPO_ROOT/scripts/tests/test_check_review_evidence.py" \
@@ -138,6 +160,10 @@ if [[ -f "$LANES" ]]; then
 else
     cp "$REPO_ROOT/scaffold/pipeline_lanes.json" "$LANES"
     sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$LANES"
+    read -r PERSISTENCE UI_KIT <<< "$("$SCRIPT_DIR/detect_project_settings.sh" "$PROJECT_DIR" || echo "none swiftui")"
+    sedi "s|YOUR_PERSISTENCE|${PERSISTENCE}|g; s|YOUR_UI|${UI_KIT}|g" "$LANES"
+    info "Detected persistence=${PERSISTENCE}, ui=${UI_KIT}; architecture defaults to mvvm. Edit \"project\" in scripts/pipeline_lanes.json if wrong (architecture: mvvm | mvc | viper)."
+    info "Set \"gates\" in scripts/pipeline_lanes.json: sensitive_paths (Gate 7) and rules (Gate 10, your AGENTS.md layer rules) — see .claude/skills/gates/SKILL.md."
 fi
 success "Scripts ready"
 
@@ -191,6 +217,7 @@ for f in "$REPO_ROOT/scaffold/.github/workflows/"*.yml; do
         # Strip the setup comment block (up to and including the closing ===== line)
         sedi '1,/^# ====/d' "$dest"
         # Substitute placeholders
+        sedi "s|YOUR_BUILD_TARGET|${BUILD_TARGET}|g" "$dest"
         sedi "s|YOUR_PROJECT|${APP_NAME}|g" "$dest"
         sedi "s|YOUR_SCHEME|${SCHEME}|g"   "$dest"
     fi
@@ -220,21 +247,21 @@ ${APP_NAME} — iOS app (SwiftUI + SwiftData).
 
 ## Build & Test
 
-All commands run from the repo root (contains \`${APP_NAME}.xcodeproj\`).
+All commands run from the repo root (contains \`${APP_NAME}.xcodeproj\`, or \`${APP_NAME}.xcworkspace\` for CocoaPods projects).
 
 \`\`\`bash
 # Build
-xcodebuild build -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
+xcodebuild build ${BUILD_TARGET} -scheme ${SCHEME} -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Full test suite
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
+xcodebuild test ${BUILD_TARGET} -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>'
 
 # Single suite / single test
-xcodebuild test -project ${APP_NAME}.xcodeproj -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>' -only-testing:${APP_NAME}Tests/<SuiteName>
+xcodebuild test ${BUILD_TARGET} -scheme ${SCHEME} -destination 'platform=iOS Simulator,name=iPhone 17,OS=<pin to your installed runtime, e.g. 26.4.1>' -only-testing:${APP_NAME}Tests/<SuiteName>
 \`\`\`
 
 > **Simulator:** pin \`OS=\` explicitly to your installed runtime version (check with \`xcrun simctl list runtimes\`; \`xcodebuild\` requires an exact match) — a bare \`name=iPhone 17\` destination becomes ambiguous the moment a second iOS runtime is installed, since each gets its own "iPhone 17" device. If a UI test fails with \`RequestDenied ... SBMainWorkspace\`, the simulator's SpringBoard state is corrupt — \`xcrun simctl erase <device-id>\` and reboot it; killing \`Simulator.app\`/\`CoreSimulatorService\` alone won't fix it.
-> **File inclusion:** \`PBXFileSystemSynchronizedRootGroup\` (Xcode 16) — drop a \`.swift\` file in the right folder and it compiles automatically. Never edit \`project.pbxproj\`.
+> **File inclusion:** with \`PBXFileSystemSynchronizedRootGroup\` (Xcode 16) a \`.swift\` file dropped in the right folder compiles automatically. With classic groups, run \`ruby scripts/register_files.rb . ${APP_NAME} <new files>\`; \`scripts/detect_file_registration.sh . ${APP_NAME}\` says which applies (\`xcproj\` or \`stop\`: ask the human). Never hand-edit \`project.pbxproj\`.
 
 ## Architecture
 
@@ -262,6 +289,13 @@ CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"
     success "CLAUDE.md generated (imports AGENTS.md)"
+fi
+
+# ── 6. Apple Agent Skills (opt-in) ───────────────────────────────────────────
+# User-level, not copied into the project: Apple's files carry no license header.
+if [[ "$INSTALL_APPLE_SKILLS" -eq 1 ]]; then
+    info "Installing allowlisted Apple Agent Skills…"
+    "$SCRIPT_DIR/install_apple_skills.sh" || warn "Apple Agent Skills not installed (setup continues)"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────

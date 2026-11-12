@@ -11,6 +11,12 @@ Hook contract (Claude Code hooks reference, code.claude.com/docs/en/hooks):
   exit 2 blocks the tool call and feeds stderr back to Claude
   exit 0 allows; any other exit code is a non-blocking error (tool proceeds)
 
+Codex CLI runs the same script from .codex/hooks.json (Codex hooks docs,
+learn.chatgpt.com/docs/hooks): same stdin fields and the same exit 2. Codex
+reports shell commands as Bash, and file edits as tool_name `apply_patch` with
+the patch text in tool_input.command; its `*** Add/Update/Delete File:` and
+`*** Move to:` paths are the edit targets.
+
 PROTECTED_GLOBS must stay in step with GUARDED_PATH_GLOBS in
 scripts/check_gate_integrity.py: this hook blocks the edit live, that script
 catches the same files on a plain commit that never went through Claude Code.
@@ -40,6 +46,7 @@ Limits (deliberate):
 Usage: guard_protected_paths.py            (reads hook JSON on stdin)
        guard_protected_paths.py --self-test
 """
+import codecs
 import fnmatch
 import json
 import os
@@ -51,6 +58,7 @@ import tempfile
 # Repo-relative globs. fnmatch's `*` also crosses `/`, so nested paths match.
 PROTECTED_GLOBS = (
     ".claude/skills/*/SKILL.md",
+    ".claude/skills/*/reference.md",
     "scripts/check_*",
     "AGENTS.md",
     "CLAUDE.md",
@@ -59,11 +67,21 @@ PROTECTED_GLOBS = (
     ".claude/hooks/*",
     "CONSTRAINTS.md",
     "scripts/pipeline_lanes.json",
+    "scripts/detect_build_target.sh",
+    "scripts/select_simulator.py",
     ".github/workflows/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
 )
 GUARDED_BRANCH = re.compile(r"^feature/")
 FILE_TOOLS = ("Write", "Edit", "MultiEdit")
-WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid")
+# Codex trims each patch line before reading a header, so indentation must not hide one.
+PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$", re.MULTILINE)
+# Codex runs a shell-invoked patch as apply_patch or applypatch; a patch body also gives one away.
+SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
+CD_TARGET = re.compile(r"(?:^|[;&|(\s])(?:cd|pushd)\s+(?:-[A-Za-z]+\s+|--\s+)*([^\s;&|()]+)")  # skips -P/-L/--
+WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid",
+                 "builtin", "busybox", "flock", "chroot", "arch", "caffeinate", "doas", "xcrun", "strace", "runuser")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
 SHELL_KEYWORDS = ("if", "then", "elif", "else", "while", "until", "do", "!", "{")
@@ -85,9 +103,14 @@ WRAPPER_ARG_FLAGS = {
     "nice": {"-n", "--adjustment"},
     "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid", "--pgid", "--uid"},
     "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
+    "doas": {"-u", "-C"},
+    "xcrun": {"-sdk", "--sdk", "--toolchain"},
+    "strace": {"-o", "-e", "-p", "-s", "-u", "-E"},
+    "runuser": {"-u", "-g", "-G", "--user", "--group"},
 }
 # Wrappers whose first non-flag argument is not the command (`timeout 5 rm x`: 5 is a duration).
-WRAPPER_LEADING_OPERAND = ("timeout",)
+WRAPPER_LEADING_OPERAND = ("timeout", "flock", "chroot")  # a duration, a lock file, a new root
 # Global `git` options that take a separate argument token.
 GIT_ARG_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
 
@@ -155,9 +178,9 @@ def is_protected_dir_prefix(rel_dir):
 # the dominant cost.
 _PROTECTED_FRAGMENTS = tuple(
     frag.lower() for frag in (
-        "skill.md", "scripts/check_", "agents.md", "claude.md",
+        "skill.md", "/reference.md", "scripts/check_", "agents.md", "claude.md",
         "invariants.md", "settings.json", ".claude/hooks/", "constraints.md",
-        "pipeline_lanes.json", ".github/workflows/",
+        "pipeline_lanes.json", "detect_build_target.sh", "select_simulator.py", ".github/workflows/", ".codex/hooks.json", ".codex/config.toml",
     )
 )
 
@@ -347,6 +370,19 @@ def real_command_index(words):
     i, n = 0, len(words)
     while i < n:
         w = words[i]
+        base = os.path.basename(unquote(w))  # `/usr/bin/env` is the env wrapper
+        if w in ("function", "coproc"):
+            # `function f { ...`: skip the name too. `coproc NAME { ...`: NAME only when a `{` follows.
+            i += 2 if w == "function" or (i + 2 < n and words[i + 2] == "{") else 1
+            continue
+        if base == "command":
+            opts = []
+            for x in words[i + 1 :]:
+                if x == "--" or not x.startswith("-"):
+                    break
+                opts.append(x)
+            if any(re.search(r"[vV]", x) for x in opts):
+                return None  # `command -v x` / `command -V x` look a command up, they do not run it
         if w in REDIRECT_OPS:
             i += 2  # a leading redirection: `>/dev/null rm x`, `</dev/null sed -i ...`
             continue
@@ -359,14 +395,14 @@ def real_command_index(words):
         if w in SHELL_KEYWORDS:
             i += 1
             continue
-        if w in WRAPPER_WORDS:
-            arg_flags = WRAPPER_ARG_FLAGS.get(w, set())
+        if base in WRAPPER_WORDS:
+            arg_flags = WRAPPER_ARG_FLAGS.get(base, set())
             i += 1
             while i < n and (words[i].startswith("-") or "=" in words[i]):
                 if words[i] in arg_flags:
                     i += 1  # also skip this flag's own argument token
                 i += 1
-            if w in WRAPPER_LEADING_OPERAND and i < n:
+            if base in WRAPPER_LEADING_OPERAND and i < n:
                 i += 1  # `timeout 5 rm x`: 5 is the duration, not the command
             continue
         return i
@@ -580,6 +616,436 @@ def bash_write_targets(command, cwd, _depth=0):
     return results
 
 
+def patch_targets(patch, cwd, dirs=None):
+    """Every path a Codex apply_patch adds, updates, deletes or moves to; the source of a move is its Update File line.
+    Each path is resolved against every directory in `dirs` (default: cwd alone)."""
+    return [(resolve(p, d), WRITE) for p in PATCH_TARGET.findall(patch) for d in (dirs or [cwd])]
+
+
+PATCH_NAME = re.compile(r"apply_?patch", re.IGNORECASE)  # macOS paths are case-insensitive
+ASSIGNMENT = re.compile(r"(?:^|[\s;&|(])(?:(?:export|declare|typeset|local|readonly)\s+(?:-\w+\s+)*)?"
+                        r"([A-Za-z_]\w*)=('[^']*'|\"[^\"]*\"|[^\s;&|()]*)")
+# Read-only tools a command that names apply_patch may run on a feature branch (pragma #140: a denylist of ways to
+# run it kept leaking, so anything not listed here is blocked). Matched by exact name: `./grep` or `$g` is not grep.
+READ_ONLY_TOOLS = ("grep", "egrep", "fgrep", "rg", "echo", "printf", "cat", "type", "which", "sed", "find", "git", "command")
+FIND_ACTIONS = re.compile(r"-(?:exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)")
+SED_PRINT = re.compile(r"(?:(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?)?p")  # `5p`, `1,9p`, `/re/p`: no e or w command
+# Expansions that evaluate a value as code: `$(( ))`, `(( ))`, `$[ ]`, and any `${...}` other than a plain
+# `${name}` (`${a[...]}`, `${a@P}`, `${v:off:len}` offsets are arithmetic).
+EVAL_EXPANSION = re.compile(r"\$\(\(|\(\(|\$\[|\$\{(?![A-Za-z_]\w*\})")
+GLOB_MIN_LETTERS = 5  # a glob word needs this many literal letters to count: `*` alone matches any name
+MAX_ANALYZED_COMMAND = 32768  # characters; none of ~4,800 real session commands exceeded 20k (2026-11-03)
+BRACE_SEPARATORS = "{},"  # an unquoted one of these sits next to every piece of text brace expansion leaves out
+SUBSTITUTION_SEPARATORS = BRACE_SEPARATORS + "$()`"  # a `$( )`/backtick span starts with `$`/`` ` `` and ends with `)`/`` ` ``
+# Allowlisted tools whose options can run code or write files, so their arguments must be literal.
+FLAG_SENSITIVE = ("sed", "git", "rg", "find", "command", "printf")
+# rg options that run another program (rg 15 `--help`): a preprocessor, a hostname command, decompressors.
+# Any short-option word containing `z` (`-nz`, `-zA3`) counts as -z/--search-zip: a cluster can end in an attached
+# value, so this fails closed (`-ez` is blocked too). rg takes no abbreviated long options.
+RG_RUNS_PROGRAM = ("--pre", "--hostname-bin", "--search-zip")
+SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done", "!", "{", "}", "for", "case", "esac",
+               "select", "in", "time")
+
+
+def names_patch(command):
+    """True if apply_patch/applypatch is named anywhere in the command: after removing quotes and backslashes
+    (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or with
+    unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
+    `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
+    word (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is not seen; one assembled
+    with `printf -v` or `read` and then run as `$a` is caught by builds_command_name()."""
+    if "\\\n" in command:  # `apply\<NL>patch`: a line continuation joins the word; check both forms
+        joined = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", command)
+        if joined != command and names_patch(joined):
+            return True
+    if "$'" in command or '$"' in command:
+        bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
+        if any(ansi_c_decode(b) is None for b in bodies):
+            return True  # an escape bash reads differently (`\\u61`, `\\x6`): fail closed
+        decoded = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: "'" + ansi_c_decode(m.group(1)).replace("'", "'\\''") + "'", command).replace('$"', '"')
+        if decoded != command and names_patch(decoded):
+            return True
+    flat = re.sub(r"[\\'\"]", "", command)
+    values = {name: unquote(value) for name, value in ASSIGNMENT.findall(command)}
+    expanded, defaulted, dropped = expand_words(flat, values)
+    # #145: the same text with quoted glob characters kept as placeholders, so a quoted `]` stays a bracket member
+    q_dropped = expand_words(mark_quoted(command), values)[2].replace(QUOTE_BOUNDARY, "")
+    commands = set()
+    for item in split_segments(tokenize(command) or []):
+        idx = real_command_index(item[1]) if item[0] == "cmd" else None
+        if idx is not None:
+            commands.add(unquote(item[1][idx]).rsplit("/", 1)[-1].lower())
+    globs = [re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower())) for w in dropped.split() if re.search(r"[*?\[]", w)]
+    globs += [posix_glob(c) for c in commands if re.search(r"[*?\[]", c)]
+    q_words = [w for w in q_dropped.split() if re.search(r"[*?\[]", w)]
+    q_tokens = tokenize(q_dropped)
+    q_commands = q_words if q_tokens is None else [  # unparsable: treat every glob word as a command (fail closed)
+        item[1][real_command_index(item[1])] for item in split_segments(q_tokens)
+        if item[0] == "cmd" and real_command_index(item[1]) is not None]
+
+    def q_globs(words, command=False):  # `{...}` groups dropped or opened, or read as `*`
+        words = [re.sub(r"\{,+\}", "", w) for w in words]  # `{,}` expands to nothing
+        words = words + [v for w in words if "{" in w for v in [re.sub(r"\{[^{}]*\}", "", w), re.sub(r"[{},]", "", w)]
+                         + [brace_star(w)] * (not command or "[" in w)]  # any alternative: `apply_p{a,b}[x']'t]ch`
+    # (a bare `{a,b}` command word would read as `*`, which matches any name, so a command needs a bracket too)
+        return [unmark(re.sub(r"\*+", "*", posix_glob(w.rsplit("/", 1)[-1].lower()))) for w in words]
+
+    globs += q_globs(q_words) + q_globs(q_commands, command=True)
+    commands.update(q_globs(q_commands, command=True))
+    commands |= {posix_glob(c) for c in commands}  # compare a command glob in the same form as `globs` (`./a[p]*h`)
+    globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
+    if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
+           and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
+        return True  # `apply_pat?h`, `a*` as a command: the glob runs the tool when it matches a file of that name
+    if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
+        return True
+    if has_brace_group(flat) and any(spells_through_braces(t) for t in [flat, expanded, defaulted, dropped]):
+        return True  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`, `apply_{'{',pa}tch`
+    if re.search(r"\$\(|`", flat) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in [flat, expanded, defaulted]):
+        return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
+    return builds_command_name(command)
+
+
+def posix_glob(word):
+    """`word` with every bash bracket expression replaced by `?` (any one character, an over-approximation), read
+    the way bash reads it: an optional `!`/`^`, a leading `]` kept as a member, `[:class:]`, `[.sym.]` and `[=eq=]`
+    members and a literal `[` inside (`[][:alpha:]]`, `[[a[:alpha:]]`). One pass: the `:]`, `.]` and `=]`
+    positions are found up front. An unterminated `[` and the rest of the word stay as text."""
+    n = len(word)
+    member_close = {c: [-1] * (n + 2) for c in ":.="}
+    for c, close in member_close.items():
+        nxt = -1
+        for k in range(n - 2, -1, -1):
+            nxt = k if word[k] == c and word[k + 1] == "]" else nxt
+            close[k] = nxt
+    out, i = [], 0
+    while i < n:
+        if word[i] != "[":
+            out.append(word[i])
+            i += 1
+            continue
+        j = i + 1
+        j += j < n and word[j] in "!^"
+        j += j < n and word[j] == "]"
+        while j < n and word[j] != "]":
+            k = member_close[word[j + 1]][j + 2] if word[j] == "[" and j + 2 < n and word[j + 1] in ":.=" else -1
+            j = k + 2 if k >= 0 else j + 1
+        if j >= n:
+            out.append(word[i:])
+            break
+        out.append("?")
+        i = j + 1
+    return "".join(out)
+
+
+# A quoted or escaped glob character is literal, so it stands in as one of these while posix_glob() runs, then
+# goes back as text fnmatch reads literally.
+# Quoted whitespace, quotes and operators are held too, so the marked text splits into the same words (`[x' ]t]`).
+QUOTED_GLOB_CHARS = {c: chr(0xE000 + n) for n, c in enumerate("[]!^:.=*? \t\n'\"\\;&|<>")}
+QUOTE_BOUNDARY = "\ue0ff"  # where a quote opened or closed: it ends a variable name (`"$u"x` is `$u` then `x`)
+QUOTED_GLOB_LITERAL = {v: {"[": "[[]", "*": "[*]", "?": "[?]"}.get(c, c) for c, v in QUOTED_GLOB_CHARS.items()}
+
+
+def mark_quoted(text):
+    """`text` with its quotes and backslashes removed, and each quoted or escaped glob character replaced by a
+    placeholder posix_glob() does not read, so a quoted `]` inside a bracket is a member, not the closer
+    (`apply_pa[x\\]t]ch`, `apply_pa[x']'t]ch`, #145). A QUOTE_BOUNDARY marks each quote and escape, so a variable
+    name ends there as it does in the shell; names_patch() removes it after expanding. Linear."""
+    out, quote, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if quote and c == quote:
+            quote = None
+            out.append(QUOTE_BOUNDARY)
+        elif not quote and c in "'\"":
+            quote = c
+            out.append(QUOTE_BOUNDARY)
+        elif c == "\\" and quote != "'" and i + 1 < len(text) and (not quote or text[i + 1] in '\\"$`'):
+            i += 1
+            out += [QUOTE_BOUNDARY, QUOTED_GLOB_CHARS.get(text[i], text[i])]
+        else:
+            out.append(QUOTED_GLOB_CHARS.get(c, c) if quote else c)
+        i += 1
+    return "".join(out)
+
+
+def brace_star(word):
+    """`word` with every `{...}` group, innermost first, replaced by `*`: an over-approximation of all its brace
+    alternatives (fail closed, PR #148 round 2), so a glob beside a brace group is still matched against the name."""
+    for _ in range(word.count("{")):
+        starred = re.sub(r"\{[^{}]*\}", "*", word)
+        if starred == word:
+            break
+        word = starred
+    return word
+
+
+def unmark(word):
+    """A posix_glob() result with mark_quoted() placeholders turned back into text fnmatch reads literally."""
+    return "".join(QUOTED_GLOB_LITERAL.get(c, c) for c in word)
+
+
+def expand_words(text, values):
+    """(expanded, defaulted, dropped) forms of `text` for names_patch(): variables the command sets expanded,
+    `${x:-...}` defaults kept, then `$( )`, backticks, unset variables and special parameters dropped."""
+    expanded = text
+    for _ in range(3):  # a value may itself name another variable
+        expanded = re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)",
+                          lambda m: values.get(m.group(1) or m.group(2), m.group(0)), expanded)
+    defaulted = re.sub(r"\$\{[A-Za-z_]\w*:?[-=+?]([^}]*)\}", r"\1", expanded)  # `apply_pat${x:-ch}`
+    dropped = re.sub(r"\$\{[^}]*\}|\$[A-Za-z_]\w*|\$\[[^\]]*\]|\$[@*#?$!0-9-]", "", drop_substitutions(defaulted))
+    return expanded, defaulted, dropped
+
+
+def glob_min_length(word):
+    """The fewest characters a glob word can match (`*` matches none, `?` and a `[...]` class one each), in one pass,
+    so a word too long to match the name is skipped before fnmatch, which is quadratic on unmatched `[`."""
+    close, last = [-1] * (len(word) + 2), -1
+    for k in range(len(word) - 1, -1, -1):
+        last = k if word[k] == "]" else last
+        close[k] = last
+    n, i = 0, 0
+    while i < len(word):
+        if word[i] == "[":
+            k = i + 1 + (word[i + 1 : i + 2] in ("!", "^"))
+            k += word[k : k + 1] == "]"  # `[]a]`: a leading `]` is part of the class
+            j = close[k] if k < len(word) else -1
+            i = j + 1 if j >= 0 else i + 1
+        else:
+            i += 1
+            if word[i - 1] == "*":
+                continue
+        n += 1
+    return n
+
+
+def ansi_c_decode(body):
+    """The text bash makes of a `$'...'` body: `\\x61`, `\\141`, `\\u0061` and the other C escapes decoded, or None
+    when Python's decoder rejects it (bash accepts shorter `\\x`/`\\u`/`\\U` forms), so the caller fails closed."""
+    try:
+        return codecs.decode(body, "unicode_escape")
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+
+def drop_substitutions(text):
+    """`text` without its `$( )` and backtick substitutions, outermost first, in one pass. An unterminated `$(`
+    is kept as text, so a stray `(` cannot swallow the rest of the command."""
+    close, stack = {}, []
+    for k, c in enumerate(text):  # match every `(` to its `)` once, so the scan below stays linear
+        if c == "(":
+            stack.append(k)
+        elif c == ")" and stack:
+            close[stack.pop()] = k
+    out, i = [], 0
+    while i < len(text):
+        if text.startswith("$(", i) and i + 1 in close:
+            i = close[i + 1] + 1
+            continue
+        if text[i] == "`":
+            j = text.find("`", i + 1)
+            if j >= 0:
+                i = j + 1
+                continue
+            out.append(text[i:])  # no closing backtick: the rest is text
+            break
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def has_brace_group(text):
+    """True if `text` has a `{` followed by a `,` or `..` and then a `}`: a possible brace expansion, quoted or not.
+    One left-to-right pass: the first `{` is the earliest start any group could have."""
+    i = text.find("{")
+    if i < 0:
+        return False
+    seps = [j for j in (text.find(",", i), text.find("..", i)) if j >= 0]
+    return bool(seps) and text.find("}", min(seps)) >= 0
+
+
+# A comma-free `{...}` group; one with a `..` is a possible range (bash range grammar varies by version). Each match
+# stops at the next brace or comma, so matching is linear, unlike a pattern with `..` between two open runs.
+BRACE_GROUP = re.compile(r"\{[^{},]*\}")
+
+
+def spells_through_braces(text, separators=BRACE_SEPARATORS, name="applypatch"):
+    """True if brace expansion could turn `text` (quotes already removed) into a word containing the name.
+    Brace expansion keeps text in order and only leaves out the alternatives it did not pick, and a left-out piece
+    always starts and ends at an unquoted `{`, `,` or `}`. So the name's letters must appear in order, and each gap
+    between two letters must be empty or start and end with one of those characters. A `{a..z}` range stands for
+    any one letter. Underscores are ignored and a quoted brace counts as a real one, so this over-approximates
+    bash without parsing quotes, in one pass per letter."""
+    text = BRACE_GROUP.sub(lambda m: "\0" if ".." in m.group() else m.group(), text.lower().replace("_", ""))
+    text = re.sub(r"\[[^\[\]{},]*\]|[?*]", "\0", re.sub(r"\[:[a-z]+:\]", "x", text))  # `ap?ly`, `pat[c]h`: a glob character stands for a letter
+    sep = [c in separators for c in text]
+    reach = [c == name[0] or c == "\0" for c in text]
+    for letter in name[1:]:
+        nxt, opened = [False] * len(text), False
+        for q, c in enumerate(text):
+            if q >= 2 and reach[q - 2] and sep[q - 1]:
+                opened = True  # a candidate p <= q - 2 whose gap starts with a separator
+            nxt[q] = (c == letter or c == "\0") and q > 0 and (reach[q - 1] or (opened and sep[q - 1]))
+        reach = nxt
+        if not any(reach):
+            return False
+    return True
+
+
+def split_quoted(command):
+    """(the command with every quoted string removed, the contents of each `'...'`/`"..."` string)."""
+    plain, quoted, i = [], [], 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\":
+            plain.append(command[i : i + 2])
+            i += 2
+        elif c in "'\"":
+            j = i + 1
+            while j < len(command) and command[j] != c:
+                j += 2 if c == '"' and command[j] == "\\" else 1
+            quoted.append(command[i + 1 : j])
+            i = j + 1
+        else:
+            plain.append(c)
+            i += 1
+    return "".join(plain), quoted
+
+
+def builds_command_name(command):
+    """True if a `$var` command word uses a variable the same command sets (`a=app; a+=ly_patch; $a`,
+    `printf -v a ...; $a`, `read a; $a`), or positional parameters after a `set`: the name it runs is built
+    in the command, so it can't be read. `$EDITOR f` or `"$HOME/bin/x"` (set elsewhere) stay readable."""
+    tokens = tokenize(command)
+    for item in split_segments(tokens or []):
+        if item[0] != "cmd":
+            continue
+        idx = real_command_index(item[1])
+        word = item[1][idx] if idx is not None else ""
+        for name in re.findall(r"\$\{?!?([A-Za-z_]\w*|[0-9@*])", word):
+            if not name[0].isalpha() and name[0] != "_":
+                if re.search(r"(?:^|[\s;&|(])set\s", command):
+                    return True
+            elif re.search(rf"(?<![$\w{{!]){name}\b", command):
+                return True
+    return False
+
+
+def redirects_read_only(words):
+    """True if every redirection in one command only reads or duplicates a descriptor: input (`<`, `<<`, `<<<`,
+    `<&`), `>&N`/`>&-`, or output to /dev/null. Any other output target (`>`, `>>`, `>|`, `&>`, `&>>`, `<>`,
+    `>& file`) writes a file, and a file written here can be run by the same command (pragma #146)."""
+    for i, w in enumerate(words):
+        if w not in REDIRECT_OPS or w in ("<", "<<", "<<<", "<&"):
+            continue
+        target = unquote(words[i + 1]) if i + 1 < len(words) else ""
+        if w == ">&" and re.fullmatch(r"\d+-?|-", target):
+            continue  # `2>&1`, `>&2`, `>&-`: a descriptor, not a file
+        if target != "/dev/null":
+            return False
+    return True
+
+
+def read_only_segment(words):
+    """True if one `;`/`|`-separated command only reads: no command at all (assignments, keywords), or an
+    allowlisted tool used read-only (`sed` only to print, `find` with no action, `git commit`/`git log` with no
+    global options, `command -v`, `rg` without an option that runs a program). Leading assignments are skipped.
+    An output redirection to anything but /dev/null is a write, so the command is not read-only (pragma #146:
+    `echo apply_patch > tool.sh; rg --hostname-bin=./tool.sh ...` and `... >> .git/hooks/pre-commit; git commit`)."""
+    if not redirects_read_only(words):
+        return False
+    i, assigned = 0, False
+    while i < len(words):
+        w = words[i]
+        if w in REDIRECT_OPS:
+            i += 2
+        elif re.fullmatch(r"\d+", w) and i + 1 < len(words) and words[i + 1] in REDIRECT_OPS:
+            i += 1
+        elif w in SHELL_WORDS:
+            i += 1
+        elif re.fullmatch(r"[A-Za-z_]\w*=.*", w):
+            assigned, i = True, i + 1
+        else:
+            break
+    if i >= len(words) or words[0] in ("for", "case", "select"):
+        return True  # nothing runs here: `a=1`, `fi`, `done`, or a for/case word list
+    if assigned:
+        return False  # `GIT_PAGER=... git log`, `GREP_OPTIONS=...`: an environment prefix can make a tool run commands
+    cmd, args = unquote(words[i]), command_operands(words[i + 1 :])
+    if cmd not in READ_ONLY_TOOLS:
+        return False
+    if cmd in FLAG_SENSITIVE and any(re.search(r"[$`{}]", w) or (not re.search(r"['\"]", w) and re.search(r"[*?\[]", w))
+                                     for w in words[i + 1 :]):
+        return False  # `git log $opt`, `sed -n {e x,1p}`: an expansion could become a flag or script that runs code
+    if cmd == "sed":
+        flags = [a for a in args if a.startswith("-")]
+        scripts = [a for a in args if not a.startswith("-")][:1]
+        # only `sed -n SCRIPT [file...]` (plus -E/-r): -e/-f/-i and long options could add an e or w command
+        return "-n" in flags and all(a in ("-n", "-E", "-r") for a in flags) \
+            and bool(scripts) and SED_PRINT.fullmatch(scripts[0]) is not None
+    if cmd == "find":
+        return not any(FIND_ACTIONS.fullmatch(a) for a in args)
+    if cmd == "git":
+        return bool(args) and args[0] in ("commit", "log") and not any(
+            a.startswith(("--output", "--ext-diff", "--textconv", "--template")) for a in args)
+    if cmd == "command":
+        return bool(args) and re.fullmatch(r"-p?[vV]p?", args[0]) is not None
+    if cmd == "printf":
+        return not any(a.startswith("-v") for a in args)  # `printf -v 'a[$(...)]'` evaluates the subscript
+    if cmd == "rg":
+        return not any(a.startswith(RG_RUNS_PROGRAM) or re.match(r"-[^-]*z", a) for a in args)
+    return True
+
+
+def runs_shell_patch(command):
+    """True if a Bash command names apply_patch/applypatch (see names_patch()) and does anything other than read:
+    every command in it, including inside `$( )` and backticks, must be a read-only allowlisted tool
+    (read_only_segment()). Anything else, from `apply_patch < f` to `bash`, `xargs`, `sudo` or an unknown command,
+    counts as a possible run, so it is blocked on a feature branch. A command that does not name the tool (a name
+    decoded at run time, a script file) is not seen."""
+    if not names_patch(command):
+        return False
+    if any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
+        return True  # an unquoted heredoc body expands `$( )` and backticks, and the parser drops heredoc bodies
+    if "\\`" in command:
+        return True  # nested, escaped backticks are not parsed
+    if EVAL_EXPANSION.search(command) or any(PATCH_NAME.search(v) for _, v in ASSIGNMENT.findall(command)):
+        return True  # arithmetic, subscripts and @P evaluate text as code; an assigned name may be run later
+    plain, quoted = split_quoted(command)
+    if any(re.search(r"\$\(|`", v) for v in quoted + [v for _, v in ASSIGNMENT.findall(command)]):
+        return True  # a stored `$( )` or backtick can be run later (eval, @P, an indirect expansion)
+    if has_brace_group(plain):
+        return True  # an unquoted `{x,y}` or `{a..b}` can add words, flags or scripts the parser never sees
+
+    def all_read_only(text, depth=0):
+        tokens = tokenize(text)
+        if tokens is None or depth > 3:
+            return False
+        for item in split_segments(tokens):
+            if item[0] != "cmd":
+                continue
+            if not read_only_segment(item[1]):
+                return False
+            if any(not all_read_only(b, depth + 1) for w in item[1] for b in command_substitutions(w)):
+                return False
+        return True
+
+    return not all_read_only(command)
+
+
+def cd_dirs(command, cwd):
+    """cwd plus every directory a `cd`/`pushd` in the command could move to, in order (an over-approximation:
+    a patch path is checked against all of them, so a `cd` before a shell-run patch can't move it off the guard)."""
+    dirs, cur = [cwd], cwd
+    for arg in CD_TARGET.findall(command):
+        arg = unquote(arg)
+        if arg in ("-", "~") or arg.startswith("$"):
+            continue
+        cur = resolve(arg, cur)
+        dirs.append(cur)
+    return dirs
+
+
 def evaluate(payload):
     """Return a block message, or None to allow."""
     tool = payload.get("tool_name", "")
@@ -588,8 +1054,33 @@ def evaluate(payload):
 
     if tool in FILE_TOOLS:
         candidates = [(resolve(tool_input["file_path"], cwd), WRITE)] if tool_input.get("file_path") else []
+    elif tool == "apply_patch":
+        candidates = patch_targets(tool_input.get("command") or "", cwd)
     elif tool == "Bash":
-        candidates = bash_write_targets(tool_input.get("command") or "", cwd)
+        command = tool_input.get("command") or ""
+        if len(command) > MAX_ANALYZED_COMMAND:  # parsing is not linear everywhere and a timed-out hook fails open
+            return (
+                f"BLOCKED: this Bash command is {len(command)} characters, over the guard's {MAX_ANALYZED_COMMAND}-character "
+                "limit, so it was not analyzed. Split it, or write long content to a file with the Write tool."
+            )
+        # an `apply_patch <<'EOF'` heredoc run through the shell (older Codex) is stripped by the parser
+        candidates = bash_write_targets(command, cwd)
+        dirs = cd_dirs(command, cwd)
+        if SHELL_PATCH.search(command):
+            # headers joined by a literal \n (`printf '...\n*** Update File: X'`) are read too; this still
+            # catches an absolute path into another repo that is on a feature branch
+            candidates += patch_targets(command.replace("\\n", "\n"), cwd, dirs)
+        if runs_shell_patch(command):
+            # fail closed if the session or any directory the command cds into is on a feature branch
+            for d in dirs:
+                branch = git(d, "branch", "--show-current")
+                if branch and GUARDED_BRANCH.match(branch):
+                    return (
+                        f"BLOCKED: this command runs, or may run, apply_patch through the shell and `{d}` is on `{branch}` "
+                        "(feature/*). The guard can't reliably tell which files a shell-run patch changes, so "
+                        "that route is closed on feature branches. Remedy: use the apply_patch tool directly "
+                        "(its file list is checked), or make the change on a chore/* or fix/* branch."
+                    )
     else:
         return None
 
@@ -649,6 +1140,13 @@ def check_ci_list_in_step():
 
 def self_test():
     failures = 0
+    # Every protected glob must pass the substring pre-filter, or a Write/Edit to it exits early as
+    # unprotected (fail open). `*` becomes a sample name; a glob missing from _PROTECTED_FRAGMENTS fails here.
+    for g in PROTECTED_GLOBS:
+        sample = g.replace("*", "x").lower()
+        if not any(f in sample for f in _PROTECTED_FRAGMENTS):
+            print(f"FAIL  {g} is in PROTECTED_GLOBS but not in _PROTECTED_FRAGMENTS (edits to it skip the check)")
+            failures += 1
     with tempfile.TemporaryDirectory() as tmp:
         tmp = os.path.realpath(tmp)
         repos = {}
@@ -883,6 +1381,274 @@ def self_test():
         ]
         cases.append(("feature: Bash rm -rf of the directory holding the repo", bash("feat", f"rm -rf {tmp}"), True))
         cases.append(("feature: Bash `a#b` word keeps the redirect", bash("feat", "echo a#b > CLAUDE.md"), True))
+
+        def patch(repo, body):  # Codex CLI file edit
+            return {"tool_name": "apply_patch", "cwd": repos[repo], "tool_input": {"command": f"*** Begin Patch\n{body}\n*** End Patch\n"}}
+
+        cases += [
+            ("feature: apply_patch Update CLAUDE.md", patch("feat", "*** Update File: CLAUDE.md\n@@\n+Rule: none"), True),
+            ("feature: apply_patch Add a skill file", patch("feat", "*** Add File: .claude/skills/gates/reference.md\n+x"), True),
+            ("feature: apply_patch Delete AGENTS.md", patch("feat", "*** Delete File: AGENTS.md"), True),
+            ("feature: apply_patch Move an app file onto CLAUDE.md",
+             patch("feat", "*** Update File: App/A.swift\n*** Move to: CLAUDE.md\n@@\n-x\n+y"), True),
+            ("feature: apply_patch absolute path to nested CLAUDE.md",
+             patch("feat", f"*** Update File: {os.path.join(repos['feat'], 'ios/CLAUDE.md')}\n@@\n+x"), True),
+            ("feature: apply_patch Update .codex/hooks.json", patch("feat", "*** Update File: .codex/hooks.json\n@@\n+x"), True),
+            ("feature: apply_patch second file in the patch is protected",
+             patch("feat", "*** Update File: App/A.swift\n@@\n+x\n*** Update File: CONSTRAINTS.md\n@@\n+y"), True),
+            ("feature: apply_patch Update App/A.swift is ordinary", patch("feat", "*** Update File: App/A.swift\n@@\n+x"), False),
+            ("chore: apply_patch Update CLAUDE.md allowed", patch("chore", "*** Update File: CLAUDE.md\n@@\n+x"), False),
+            ("detached: apply_patch Update CLAUDE.md fails open", patch("detached", "*** Update File: CLAUDE.md\n@@\n+x"), False),
+            ("feature: Bash apply_patch heredoc to CLAUDE.md",
+             bash("feat", "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash patch header text without apply_patch is data",
+             bash("feat", "cat <<'EOF' > App/notes.md\n*** Update File: CLAUDE.md\nEOF"), False),
+            ("feature: Write .codex/config.toml", write("Write", "feat", ".codex/config.toml"), True),
+            ("feature: apply_patch indented header", patch("feat", "  *** Update File: CLAUDE.md\n@@\n+x"), True),
+            ("feature: apply_patch tab-indented Move to", patch("feat", "*** Update File: App/A.swift\n\t*** Move to: AGENTS.md\n@@\n+x"), True),
+            ("feature: Bash applypatch alias heredoc",
+             bash("feat", "applypatch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd then apply_patch ../CLAUDE.md",
+             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd ios then apply_patch CLAUDE.md (nested)",
+             bash("feat", "cd ios; apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd -P then apply_patch ../CLAUDE.md",
+             bash("feat", "cd -P App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: ../CLAUDE.md\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash cd then shell apply_patch of an ordinary file is blocked (shell route closed)",
+             bash("feat", "cd App && apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: A.swift\n@@\n+x\n*** End Patch\nEOF"), True),
+            ("feature: Bash printf literal \\n patch piped to apply_patch (CLAUDE.md)",
+             bash("feat", r"printf '*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch\n' | apply_patch"), True),
+            ("feature: Bash printf literal \\n patch piped to apply_patch fails closed (ordinary file)",
+             bash("feat", r"printf '*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch\n' | apply_patch"), True),
+            ("feature: Bash apply_patch with patch from $(cat file) fails closed", bash("feat", 'apply_patch "$(cat p.patch)"'), True),
+            ("feature: Bash cat file | applypatch fails closed", bash("feat", "cat p.patch | applypatch"), True),
+            ("feature: Bash apply_patch < file fails closed", bash("feat", "apply_patch < p.patch"), True),
+            ("feature: Bash bash -c apply_patch from file fails closed", bash("feat", "bash -c 'apply_patch < p.patch'"), True),
+            ("feature: Bash grep for apply_patch is not a patch run", bash("feat", "grep -rn apply_patch scripts/"), False),
+            ("feature: Bash echo naming apply_patch is not a patch run", bash("feat", "echo 'use apply_patch here'"), False),
+            ("chore: Bash cat file | apply_patch allowed", bash("chore", "cat p.patch | apply_patch"), False),
+            ("feature: Bash decoy header before apply_patch < file fails closed",
+             bash("feat", r"printf 'x\n*** Update File: x.txt\n' >/dev/null; apply_patch < real.patch"), True),
+            ("feature: Bash decoy header after apply_patch < file fails closed",
+             bash("feat", r"apply_patch < real.patch; echo 'a\n*** Update File: x.txt'"), True),
+            ("chore cwd: Bash cd into a feature repo then apply_patch < file fails closed",
+             bash("chore", f"cd {repos['feat']} && apply_patch < p.patch"), True),
+            ("feature: Bash $var command word with apply_patch fails closed", bash("feat", "p=apply_patch; $p < f"), True),
+            ("feature: Bash alias to apply_patch fails closed", bash("feat", "alias ap=apply_patch; ap < f"), True),
+            ("feature: Bash find -exec apply_patch fails closed", bash("feat", r"find . -name '*.patch' -exec apply_patch {} \;"), True),
+            ("feature: Bash parallel apply_patch fails closed", bash("feat", "parallel apply_patch ::: a.patch"), True),
+            ("feature: Bash apply_patch <<< herestring fails closed", bash("feat", 'apply_patch <<< "$(cat p.patch)"'), True),
+            ("feature: Bash find -name apply_patch.md is not a patch run", bash("feat", "find . -name apply_patch.md"), False),
+            ("feature: Bash inline apply_patch argument to an ordinary file is blocked (shell route closed)",
+             bash("feat", "apply_patch '*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch'"), True),
+            ("chore: Bash heredoc apply_patch of an ordinary file allowed",
+             bash("chore", "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: App/A.swift\n@@\n+x\n*** End Patch\nEOF"), False),
+            ("feature: Bash stray Begin Patch argument with < file", bash("feat", "apply_patch '*** Begin Patch' < real.patch"), True),
+            ("feature: Bash literal \\n inline argument to CLAUDE.md",
+             bash("feat", r"apply_patch '*** Begin Patch\n*** Update File: CLAUDE.md\n@@\n+x\n*** End Patch'"), True),
+            ("feature: Bash unquoted heredoc expanding $(cat file)", bash("feat", "apply_patch <<EOF\n$(cat real.patch)\nEOF"), True),
+            ("feature: Bash ${var} command word", bash("feat", "p=apply_patch; ${p} < f"), True),
+            ("feature: Bash quote-split tool name", bash("feat", "ap''ply_patch < f"), True),
+            ("feature: Bash backslash-split tool name", bash("feat", "apply\\_patch < f"), True),
+            # PR #140 round 3
+            ("feature: Bash path-qualified env wrapper", bash("feat", "/usr/bin/env apply_patch < f"), True),
+            ("feature: Bash path-qualified sudo wrapper", bash("feat", "/usr/bin/sudo -u x apply_patch < f"), True),
+            ("feature: Bash function keyword body", bash("feat", "function f { apply_patch < p; }; f"), True),
+            ("feature: Bash coproc", bash("feat", "coproc apply_patch < f"), True),
+            ("feature: Bash named coproc", bash("feat", "coproc P { apply_patch < f; }"), True),
+            ("feature: Bash builtin command wrapper", bash("feat", "builtin command apply_patch < f"), True),
+            ("feature: Bash echo piped to bash", bash("feat", "echo 'apply_patch < f' | bash"), True),
+            ("feature: Bash here-string to bash", bash("feat", "bash <<< 'apply_patch < f'"), True),
+            ("feature: Bash heredoc piped to sh", bash("feat", "cat <<EOF | sh\napply_patch < f\nEOF"), True),
+            ("feature: Bash bash -s reading stdin", bash("feat", "echo 'apply_patch < f' | bash -s"), True),
+            ("feature: Bash eval $var", bash("feat", "a='apply_patch < f'; eval $a"), True),
+            ("feature: Bash bash -c \"$var\"", bash("feat", "a='apply_patch < f'; bash -c \"$a\""), True),
+            ("feature: Bash bash -c -- string", bash("feat", "bash -c -- 'apply_patch < f'"), True),
+            ("feature: Bash bash -o pipefail -c string", bash("feat", "bash -o pipefail -c 'apply_patch < f'"), True),
+            ("feature: Bash quoted parallel template", bash("feat", "parallel 'apply_patch < {}' ::: a.patch"), True),
+            ("feature: Bash find -exec sh -c", bash("feat", "find . -name '*.patch' -exec sh -c 'apply_patch < \"$0\"' {} \\;"), True),
+            ("feature: Bash four nested bash -c fails closed",
+             bash("feat", "bash -c \"bash -c 'bash -c \\\"bash -c apply_patch\\\"'\""), True),
+            ("feature: Bash watch", bash("feat", "watch -n 1 'apply_patch < f'"), True),
+            ("feature: Bash ssh remote command", bash("feat", "ssh localhost 'apply_patch < f'"), True),
+            ("feature: Bash script -c", bash("feat", "script -q -c 'apply_patch < f' /dev/null"), True),
+            ("feature: Bash busybox sh", bash("feat", "echo 'apply_patch < f' | busybox sh"), True),
+            ("feature: Bash split name across a variable", bash("feat", "a=apply_; ${a}patch < f"), True),
+            ("feature: Bash split name across two variables", bash("feat", "a=app; b=ly_patch; $a$b < f"), True),
+            ("feature: Bash exported split name", bash("feat", "export a=apply_; \"${a}patch\" < f"), True),
+            ("feature: Bash source process substitution", bash("feat", "source <(echo 'apply_patch < f')"), True),
+            ("feature: Bash dot /dev/stdin", bash("feat", "echo 'apply_patch < f' | . /dev/stdin"), True),
+            ("feature: Bash command -v apply_patch is a lookup", bash("feat", "command -v apply_patch"), False),
+            ("feature: Bash command -V applypatch is a lookup", bash("feat", "command -V applypatch"), False),
+            ("feature: Bash bash -c naming apply_patch in echo (bash not allowlisted)", bash("feat", "bash -c 'echo apply_patch'"), True),
+            ("feature: Bash bash script file plus a grep (bash not allowlisted)", bash("feat", "grep -c apply_patch log.txt; bash build.sh"), True),
+            ("feature: Bash unrelated variable assignment", bash("feat", "a=1; grep -rn apply_patch $a"), False),
+            ("feature: Bash command -v after the tool name is not a lookup", bash("feat", "command apply_patch -v < f"), True),
+            ("feature: Bash bash -co cluster", bash("feat", "bash -co pipefail 'apply_patch < f'"), True),
+            ("feature: Bash bash -oc cluster", bash("feat", "bash -oc pipefail 'apply_patch < f'"), True),
+            ("feature: Bash split name built with +=", bash("feat", "a=app; a+=ly_patch; $a < f"), True),
+            ("feature: Bash split name built with printf -v", bash("feat", "printf -v a '%s%s' app ly_patch; $a < f"), True),
+            ("feature: Bash positional parameters after set", bash("feat", "set -- app ly_patch; \"$1$2\" < f"), True),
+            ("feature: Bash env -S", bash("feat", "env -S 'apply_patch < f'"), True),
+            ("feature: Bash env --split-string=", bash("feat", "/usr/bin/env '--split-string=apply_patch < f'"), True),
+            ("feature: Bash sudo -s from stdin", bash("feat", "echo 'apply_patch < f' | sudo -s"), True),
+            ("feature: Bash bash /dev/stdin", bash("feat", "echo 'apply_patch < f' | bash /dev/stdin"), True),
+            ("feature: Bash sh -- /dev/fd/0", bash("feat", "echo 'apply_patch < f' | sh -- /dev/fd/0"), True),
+            ("feature: Bash sudo -su cluster", bash("feat", "echo 'apply_patch < f' | sudo -su root"), True),
+            ("feature: Bash env -iS cluster", bash("feat", "env -iS 'apply_patch < f'"), True),
+            ("feature: Bash env --split prefix", bash("feat", "env --split 'apply_patch < f'"), True),
+            # PR #140 allowlist redesign: round-5 forms must block, read-only tools stay allowed
+            ("feature: Bash flock -c", bash("feat", "flock /tmp/l -c 'apply_patch < f'"), True),
+            ("feature: Bash runuser -l -c", bash("feat", "runuser -l me -c 'apply_patch < f'"), True),
+            ("feature: Bash caffeinate -t", bash("feat", "caffeinate -t 5 apply_patch < f"), True),
+            ("feature: Bash arch -arch", bash("feat", "arch -arch arm64 apply_patch < f"), True),
+            ("feature: Bash chroot --userspec", bash("feat", "chroot --userspec u:g / apply_patch < f"), True),
+            ("feature: Bash bash /./dev/stdin", bash("feat", "echo 'apply_patch < f' | bash /./dev/stdin"), True),
+            ("feature: Bash cd /dev then bash stdin", bash("feat", "cd /dev && echo 'apply_patch < f' | bash stdin"), True),
+            ("feature: Bash xargs env", bash("feat", "echo apply_patch | xargs env"), True),
+            ("feature: Bash xargs -J env", bash("feat", "echo apply_patch | xargs -J % env %"), True),
+            ("feature: Bash doas -s from stdin", bash("feat", "echo 'apply_patch < f' | doas -s"), True),
+            ("feature: Bash sed e command", bash("feat", "echo x | sed 'e apply_patch < f'"), True),
+            ("feature: Bash rg --pre", bash("feat", "rg --pre apply_patch x ."), True),
+            ("feature: Bash find -exec", bash("feat", "find . -name x -exec apply_patch {} +"), True),
+            ("feature: Bash path-qualified grep is not allowlisted", bash("feat", "./grep apply_patch < f"), True),
+            ("feature: Bash git -c then commit", bash("feat", "git -c alias.x='!apply_patch < f' x"), True),
+            ("feature: Bash unquoted heredoc body with $( )", bash("feat", "cat <<EOF\n$(apply_patch < f)\nEOF"), True),
+            ("feature: Bash quoted heredoc body is data", bash("feat", "cat <<'EOF'\n$(apply_patch < f)\nEOF"), False),
+            ("feature: Bash arithmetic subscript", bash("feat", "a='x[$(apply_patch < f)]'; echo $((a))"), True),
+            ("feature: Bash printf -v subscript", bash("feat", "printf -v 'a[$(apply_patch < f)]' x"), True),
+            ("feature: Bash name in an assignment value", bash("feat", "p=apply_patch; echo ok"), True),
+            ("feature: Bash nested escaped backticks", bash("feat", "echo `echo \\`apply_patch < f\\``"), True),
+            ("feature: Bash @P prompt expansion", bash("feat", "a='$(apply_patch < f)'; echo ${a@P}"), True),
+            ("feature: Bash upper-case name", bash("feat", "APPLY_PATCH < f"), True),
+            ("feature: Bash name split by a default", bash("feat", "apply_pat${x:-ch} < f"), True),
+            ("feature: Bash name split by brace expansion", bash("feat", "apply_{pa,xx}tch < f"), True),
+            ("feature: Bash git log with a $var argument", bash("feat", "o=--output=CLAUDE.md; git log $o --grep apply_patch"), True),
+            ("feature: Bash sed brace-expanded script", bash("feat", "sed -n {'e apply_patch < f',1p} x"), True),
+            ("feature: Bash sed second -e script", bash("feat", "sed -n 1p -e 'e apply_patch < f' x"), True),
+            ("feature: Bash sed -f script file", bash("feat", "sed -n -f s.sed apply_patch.md"), True),
+            ("feature: Bash GIT_PAGER prefix", bash("feat", "GIT_PAGER='apply_patch < f' git log"), True),
+            ("feature: Bash git log --output", bash("feat", "git log --output=CLAUDE.md --grep apply_patch"), True),
+            ("feature: Bash allowlist: sed -n print", bash("feat", "sed -n '/apply_patch/p' f"), False),
+            ("feature: Bash allowlist: rg", bash("feat", "rg -n 'apply_?patch' scaffold"), False),
+            ("feature: Bash allowlist: git log --grep", bash("feat", "git log --oneline --grep apply_patch"), False),
+            ("feature: Bash allowlist: git commit -m", bash("feat", "git commit -m 'block shell apply_patch'"), False),
+            ("feature: Bash allowlist: pipe of grep and cat", bash("feat", "cat CHANGELOG.md | grep -c apply_patch"), False),
+            ("feature: Bash allowlist: which and type", bash("feat", "which apply_patch; type applypatch"), False),
+            ("feature: Bash allowlist: grep with $( ) of an allowed command", bash("feat", "grep -c apply_patch $(echo f)"), False),
+            ("feature: Bash allowlist: $( ) running the tool", bash("feat", "echo $(apply_patch < f)"), True),
+            # PR #140 round 4 + security scan of b772ccf
+            ("feature: Bash xargs-fed sh -c", bash("feat", "echo 'apply_patch < f' | xargs -I{} sh -c {}"), True),
+            ("feature: Bash xargs placeholder command", bash("feat", "echo apply_patch | xargs -I{} {} < f"), True),
+            ("feature: Bash xargs -I custom placeholder", bash("feat", "echo apply_patch | xargs -I CMD CMD < f"), True),
+            ("feature: Bash flock wrapper", bash("feat", "flock /tmp/l apply_patch < f"), True),
+            ("feature: Bash arch wrapper", bash("feat", "arch -arm64 apply_patch < f"), True),
+            ("feature: Bash xcrun wrapper", bash("feat", "xcrun apply_patch < f"), True),
+            ("feature: Bash doas wrapper", bash("feat", "doas -u root apply_patch < f"), True),
+            ("feature: Bash chroot wrapper", bash("feat", "chroot / apply_patch < f"), True),
+            ("feature: Bash csh -c", bash("feat", "csh -c 'apply_patch < f'"), True),
+            ("feature: Bash tmux new", bash("feat", "tmux new 'apply_patch < f'"), True),
+            ("feature: Bash at reads stdin", bash("feat", "echo 'apply_patch < f' | at now"), True),
+            ("feature: Bash sudo -u root -s", bash("feat", "echo 'apply_patch < f' | sudo -u root -s"), True),
+            ("feature: Bash env -u X -S", bash("feat", "env -u X -S 'apply_patch < f'"), True),
+            ("feature: Bash env A=1 env -S", bash("feat", "env A=1 env -S 'apply_patch < f'"), True),
+            ("feature: Bash env --s prefix", bash("feat", "env --s 'apply_patch < f'"), True),
+            ("feature: Bash sudo --sh prefix", bash("feat", "echo 'apply_patch < f' | sudo --sh"), True),
+            ("feature: Bash bash /dev/./stdin", bash("feat", "echo 'apply_patch < f' | bash /dev/./stdin"), True),
+            ("feature: Bash bash /proc/PID/fd/0", bash("feat", "echo 'apply_patch < f' | bash /proc/123/fd/0"), True),
+            ("feature: Bash bash $path script", bash("feat", "p=/dev/stdin; echo 'apply_patch < f' | bash $p"), True),
+            ("feature: Bash xargs grep naming the tool (ls/xargs not allowlisted)", bash("feat", "ls | xargs grep -l apply_patch"), True),
+            ("feature: Bash sudo -u with a grep naming the tool (sudo not allowlisted)", bash("feat", "sudo -u me grep -c apply_patch log"), True),
+            ("feature: Bash su from stdin", bash("feat", "echo 'apply_patch < f' | su me"), True),
+            ("feature: Bash $HOME-based command word is readable", bash("feat", "\"$HOME/bin/lint\" App/A.swift"), False),
+            # PR #140 security scan of fcbef38
+            ("feature: Bash name split by nested braces", bash("feat", "apply_{{p,q}a,x}tch < f"), True),
+            ("feature: Bash name split by a brace range", bash("feat", "apply_pa{s..t}ch < f"), True),
+            ("feature: Bash name split by a stepped brace range", bash("feat", "apply_pa{a..z..19}ch < f"), True),
+            ("feature: Bash name split by a +step brace range (bash 4+)", bash("feat", "apply_pa{s..t..+1}ch < f"), True),
+            ("feature: Bash brace alternative with a quoted space", bash("feat", "apply_{'x y',pa}tch < f"), True),
+            ("feature: Bash many brace groups not spelling the tool are readable", bash("feat", "x" + "{a,b}" * 13 + " < f"), False),
+            ("feature: Bash quoted brace shifts the pairing", bash("feat", "apply_{'{',pa}tch < f"), True),
+            ("feature: Bash quoted close brace shifts the pairing", bash("feat", "apply_{x'}'yyy,pa}tch < f"), True),
+            ("feature: Bash name split across a heredoc apostrophe", bash("feat", "cat <<E\n'\nE\napply_{'x y',pa}tch < f"), True),
+            ("feature: Bash 64k unmatched braces after the name", bash("feat", "apply_patch_x " + "{" * 65536), True),
+            ("feature: Bash ANSI-C hex escape", bash("feat", "$'\\x61pply_patch' < f"), True),
+            ("feature: Bash ANSI-C octal escape", bash("feat", "$'\\141pply_patch' < f"), True),
+            ("feature: Bash empty $'' and $\"\" splits", bash("feat", "apply_pa$''tch < f; apply_pa$\"\"tch < f"), True),
+            ("feature: Bash empty $( ) split", bash("feat", "apply_p$(:)atch < f"), True),
+            ("feature: Bash empty backtick split", bash("feat", "apply_p`:`atch < f"), True),
+            ("feature: Bash $@ split", bash("feat", "apply_pa$@tch < f"), True),
+            ("feature: Bash glob command word", bash("feat", "apply_pat?h < f"), True),
+            ("feature: Bash glob class command word", bash("feat", "apply_pat[c]h < f"), True),
+            ("feature: Bash star glob alone is not a name", bash("feat", "ls * | xargs wc -l"), False),
+            ("feature: Bash 100k unterminated $( stay fast", bash("feat", "apply_patch_x " + "$(" * 100000), True),
+            ("feature: Bash empty $( ) with a quoted paren", bash("feat", "apply_p$(: \")\")atch < f"), True),
+            ("feature: Bash empty $( ) with quoted paren and text", bash("feat", "apply_p$(: \")x\")atch < f"), True),
+            ("feature: Bash ANSI-C short \\u escape fails closed", bash("feat", "$'\\u61'pply_patch < f"), True),
+            ("feature: Bash short glob as the command word", bash("feat", "a* < f"), True),
+            ("feature: Bash short glob behind sudo", bash("feat", "sudo /tmp/a* < f"), True),
+            ("feature: Bash backslash-newline join", bash("feat", "apply\\\npatch < f"), True),
+            ("feature: Bash backslash-newline join with underscore", bash("feat", "apply_pa\\\ntch < f"), True),
+            ("feature: Bash glob inside a brace group", bash("feat", "ap?lypatc{h,} < f"), True),
+            ("feature: Bash brace group around a glob", bash("feat", "{apply_pat?h,} < f"), True),
+            ("feature: Bash 25k open brackets stay fast", bash("feat", "apply_patch < f; echo a" + "[" * 25000), True),
+            ("feature: Bash long subscript word is not a glob name", bash("feat", "d['k']['s']=" + "x" * 400 + "; make"), False),
+            ("feature: Bash command over the size cap", bash("feat", "echo " + "x" * 40000), True),
+            ("feature: Bash [^x] glob class", bash("feat", "apply_pa[^x]ch < f"), True),
+            ("feature: Bash POSIX glob class", bash("feat", "apply_pa[[:alpha:]]ch < f"), True),
+            ("chore: Bash command over the size cap", bash("chore", "echo " + "x" * 40000), True),
+            ("feature: Bash negated POSIX glob class", bash("feat", "apply_pa[^[:digit:]]ch < f"), True),
+            ("feature: Bash multi-class glob bracket", bash("feat", "apply_pa[[:alpha:][:digit:]]ch < f"), True),
+            ("feature: Bash mixed glob bracket", bash("feat", "apply[[:punct:]_]patch < f"), True),
+            ("feature: Bash glob bracket with a leading ] member", bash("feat", "apply_pa[][:alpha:]]ch < f"), True),
+            ("feature: Bash glob bracket with a literal [ member", bash("feat", "apply_pa[[a[:alpha:]]ch < f"), True),
+            ("feature: Bash collating and equivalence glob members", bash("feat", "apply_pa[[.t.]]ch < f; apply_pa[[=t=]]ch < f"), True),
+            ("feature: Bash allowlist: grep with an ANSI-C newline", bash("feat", "grep -c $'apply_patch\\n' f"), False),
+            ("feature: Bash 128k dots in an open brace stay fast", bash("feat", "apply_pa{,}ch {" + ".." * 65536 + "; apply_{x,pa}tch < f"), True),
+            ("feature: Bash brace copy not spelling the tool is readable", bash("feat", "cp Package.swift{,.bak}; make apply"), False),
+            ("feature: Bash unquoted braces in a read-only command naming the tool", bash("feat", "rg {--pre=sh,apply_patch} f"), True),
+            ("feature: Bash $[ ] arithmetic", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; echo $[a]"), True),
+            ("feature: Bash ${v:off:len} offset", bash("feat", "a='x[$(ap\"\"ply_patch < f)]'; v=abc; echo ${v:a:1}"), True),
+            ("feature: Bash quoted $( ) naming the tool", bash("feat", "grep -c apply_patch \"$(echo f)\""), True),
+            ("feature: Bash integer brace range not naming the tool is readable", bash("feat", "for i in {1..99999}; do make t$i; done"), False),
+            ("feature: Bash allowlist: grep with quoted braces", bash("feat", "grep -E 'apply_patch{1,2}' f"), False),
+            # pragma #146: output redirects and rg options that run a program
+            ("feature: Bash redirect writes a script rg --hostname-bin runs", bash("feat", "echo apply_patch > tool.sh; rg --hostname-bin=./tool.sh --hyperlink-format=default apply_patch f"), True),
+            ("feature: Bash append to a git hook then commit", bash("feat", "printf 'apply_patch < p\\n' >> .git/hooks/pre-commit; git commit -m x"), True),
+            ("feature: Bash output redirect forms", bash("feat", "echo apply_patch >| t; echo apply_patch &> t; echo apply_patch &>> t"), True),
+            ("feature: Bash read-write and >& file redirects", bash("feat", "cat <> t apply_patch.md; echo apply_patch >& t"), True),
+            ("feature: Bash fd-numbered output redirect", bash("feat", "grep apply_patch f 2> err.log"), True),
+            ("feature: Bash leading output redirect", bash("feat", "> t echo apply_patch"), True),
+            ("feature: Bash quoted redirect target", bash("feat", "echo apply_patch > 'tool.sh'"), True),
+            ("feature: Bash output process substitution", bash("feat", "echo apply_patch > >(sh)"), True),
+            ("feature: Bash rg --hostname-bin alone", bash("feat", "rg --hostname-bin ./t --hyperlink-format=default apply_patch f"), True),
+            ("feature: Bash rg -z", bash("feat", "rg -z apply_patch f.gz"), True),
+            ("feature: Bash rg --search-zip", bash("feat", "rg --search-zip apply_patch f.gz"), True),
+            ("feature: Bash rg -z in a short-option cluster", bash("feat", "rg -nz apply_patch f.gz"), True),
+            ("feature: Bash rg -z in a cluster with an attached value", bash("feat", "rg -zA3 apply_patch f.gz"), True),
+            ("feature: Bash allowlist: redirects to /dev/null and fd dups", bash("feat", "rg apply_patch f 2>/dev/null >/dev/null; grep -c apply_patch f 2>&1 >&2 &>/dev/null"), False),
+            ("feature: Bash allowlist: input redirect and here-string", bash("feat", "grep -c apply_patch < f; grep apply_patch <<< 'x'"), False),
+            ("feature: Bash allowlist: rg --no-search-zip and -n", bash("feat", "rg -n --no-search-zip apply_patch f"), False),
+            # pragma #145: a quoted or escaped `]` inside a glob bracket is a member, not the closer
+            ("feature: Bash escaped ] in a glob bracket", bash("feat", "./apply_pa[x\\]t]ch"), True),
+            ("feature: Bash single-quoted ] in a glob bracket", bash("feat", "./apply_pa[x']'t]ch"), True),
+            ("feature: Bash double-quoted ] in a glob bracket", bash("feat", "./apply_pa[x\"]\"t]ch"), True),
+            ("feature: Bash quoted member run ending in ]", bash("feat", "./apply_pa['t]']ch"), True),
+            ("feature: Bash quoted ] glob as an argument", bash("feat", "bash apply_pa[x']'t]ch"), True),
+            # PR #148 round 1: quoted brackets mixed with expansions, and an unquoted bracket glob as the command
+            ("feature: Bash quoted ] glob with an unset variable", bash("feat", "./apply_p${u}a[x']'t]ch"), True),
+            ("feature: Bash quoted ] glob with $'...' members", bash("feat", "./apply$'_'pa[x$']'t]ch"), True),
+            ("feature: Bash quoted ] glob with an empty $( )", bash("feat", "./apply_p$(:)a[x']'t]ch"), True),
+            ("feature: Bash quoted ] glob after a quoted variable", bash("feat", "./apply_pa\"$u\"[x']'t]ch"), True),
+            ("feature: Bash quoted variable ends before the next letter", bash("feat", "./app\"$u\"\\ly_pa\\tc[\"$u\"]'h'x-]"), True),
+            ("feature: Bash quoted ] glob after an empty brace expansion", bash("feat", "./apply_pa{,}[x']'t]ch"), True),
+            ("feature: Bash quoted space inside a glob bracket", bash("feat", "./apply_pa[x' ]'t]ch"), True),
+            ("feature: Bash brace alternatives beside a quoted ] glob", bash("feat", "./apply_p{a,b}[x']'t]ch; ./apply_pa[x']'t]c{h,i}"), True),
+            ("feature: Bash brace range beside a quoted ] glob", bash("feat", "./apply_p{a..a}[x']'t]ch"), True),
+            ("feature: Bash short bracket glob as the command", bash("feat", "./a[p]*h; ./?p[[p]*y_???ch"), True),
+            ("feature: Bash 24k quoted brackets stay fast", bash("feat", "echo " + "['['" * 6000 + "; ./apply_pa[x']'t]ch"), True),
+            ("feature: Bash allowlist: grep for a quoted bracket pattern", bash("feat", "grep -c 'apply_pa[x]t]ch' f; echo apply_pa'[t]'ch"), False),
+        ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(
                 [sys.executable, os.path.abspath(__file__)],

@@ -25,6 +25,7 @@ on:
     branches: [develop, main]
     paths:
       - 'YOUR_PROJECT/**'
+      - 'YOUR_PROJECT.xcodeproj/**'
       - 'YOUR_PROJECTTests/**'
       - 'scripts/**'
       - '.github/**'
@@ -38,13 +39,19 @@ jobs:
     name: Concurrency Advisory (non-blocking)
     runs-on: macos-26
     continue-on-error: true
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode 26
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: '~26.4'
+
+      - name: Install CocoaPods dependencies
+        if: hashFiles('Podfile') != ''
+        run: pod install
 
       - name: Unit tests under ThreadSanitizer
         run: |
@@ -53,18 +60,27 @@ jobs:
           echo "Selected simulator: $SIM_ID"
           bash scripts/slim_simulator.sh "$SIM_ID" || true
           xcodebuild test \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             -skip-testing:YOUR_PROJECTUITests \
             -enableThreadSanitizer YES \
+            -resultBundlePath tsan.xcresult \
             2>&1 | tee tsan.log
 
       - name: Summarize ThreadSanitizer result
         if: always()
         run: |
-          reports=$(grep -c "WARNING: ThreadSanitizer" tsan.log || true)
-          echo "ThreadSanitizer unit-test run: $reports report(s) (the previous step's exit status decides pass/fail)" | tee -a "$GITHUB_STEP_SUMMARY"
+          # TSan writes its reports to the test process's stderr, which xcodebuild does
+          # not echo into tsan.log; the result bundle keeps that stream per test run.
+          # No stdout files means nothing was read, so say so rather than print 0.
+          if [ -d tsan.xcresult ] && xcrun xcresulttool export diagnostics --path tsan.xcresult --output-path tsan-diagnostics > /dev/null \
+            && [ -n "$(find tsan-diagnostics -name StandardOutputAndStandardError.txt)" ]; then
+            reports=$({ find tsan-diagnostics -name StandardOutputAndStandardError.txt -exec grep -h "WARNING: ThreadSanitizer" {} + || true; } | wc -l | tr -d ' ')
+            echo "ThreadSanitizer unit-test run: $reports report(s) (the previous step's exit status decides pass/fail)" | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ThreadSanitizer unit-test run: report count unavailable (no test output in the result bundle)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Build with strict concurrency
         if: always()
@@ -72,7 +88,7 @@ jobs:
           set -o pipefail
           SIM_ID=$(xcrun simctl list devices available -j | python3 scripts/select_simulator.py)
           xcodebuild build \
-            -project YOUR_PROJECT.xcodeproj \
+            YOUR_BUILD_TARGET \
             -scheme YOUR_SCHEME \
             -destination "id=$SIM_ID" \
             SWIFT_STRICT_CONCURRENCY=complete \

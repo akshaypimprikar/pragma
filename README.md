@@ -1,4 +1,4 @@
-# Pragma
+# Pragma for iOS: a Claude Code skill pipeline
 
 > You approve twice. The agent ships the rest.
 
@@ -26,7 +26,28 @@ These screenshots are not mockups. They show what 120+ merged PRs of `/spec → 
 
 ---
 
-[Quick Start](#quick-start) · [At a Glance](#at-a-glance-what-needs-you-and-what-does-not) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)
+[Scope](#scope-and-requirements) · [Quick Start](#quick-start) · [At a Glance](#at-a-glance-what-needs-you-and-what-does-not) · [What You Get](#what-you-get) · [Pipeline](#pipeline) · [Why Not a Spec Mode?](#why-not-just-cursor--windsurf--copilots-built-in-spec-mode) · [Skills](#skills) · [CI Layer](#ci-layer) · [Memory Layer](#memory-layer) · [Customising](#customising-for-your-project) · [Contributing](CONTRIBUTING.md)
+
+---
+
+## Scope and requirements
+
+Pragma supports two project shapes. Both are iOS only.
+
+| | Modern (default) | Legacy mode |
+|---|---|---|
+| UI | SwiftUI | SwiftUI or UIKit |
+| Persistence | SwiftData | SwiftData, Core Data, Realm, or none |
+| Architecture | MVVM | MVVM, MVC, or VIPER |
+| Dependencies | Swift Package Manager | Swift Package Manager or CocoaPods |
+| Xcode project | Xcode 16+ synchronized folders | Classic groups, or the Xcode 27.2 `project.xcproj` format |
+| Build command | `-project <App>.xcodeproj` | `-workspace <App>.xcworkspace` when a Podfile or workspace exists |
+
+`scripts/setup.sh` detects these settings at install time and writes them to `scripts/pipeline_lanes.json`. You can edit them there. The architecture cannot be detected, so it defaults to MVVM.
+
+- **New files:** with synchronized folders, the agent adds nothing to the project file. With classic groups, the agent registers new files with the `xcodeproj` gem (`scripts/register_files.rb`) and a gate checks that every new `.swift` file is in a build phase. The agent never hand-edits `project.pbxproj`.
+- **Stops and asks:** if the project is generated from `project.yml` or `Project.swift`, or mixes synchronized and classic groups, the agent stops and asks you.
+- **Not supported:** Android, web, and Objective-C-only projects.
 
 ---
 
@@ -40,6 +61,12 @@ Run these commands in Claude Code, in the root of your iOS project repository:
 /plugin marketplace add akshaypimprikar/pragma
 /plugin install pragma@pragma
 /pragma:init MyApp
+```
+
+To install from a terminal instead of from inside Claude Code, run this one command. It adds the marketplace and installs the plugin. It needs Claude Code 2.1.292 or later.
+
+```bash
+claude plugin install pragma --marketplace akshaypimprikar/pragma
 ```
 
 `/pragma:init` does the same work as `scripts/setup.sh`. It copies skills, context files, CI workflows, and support scripts. It replaces the placeholder app name in all of them. It also asks you questions about the architecture and key constraints of your app. It uses your answers for the content of `AGENTS.md`. It also seeds `.claude/context/invariants.md` from the same answers. `setup.sh` leaves both files as templates for you to fill in later.
@@ -62,7 +89,7 @@ Both installers have safety behavior. `setup.sh` enforces it in the script. `/pr
 - If `.claude/skills/` has files that differ from the files of pragma, the installers copy the whole directory to `.claude/skills.bak-<timestamp>/` before they overwrite it. This includes files from an earlier version of pragma or from a different app name. To re-apply your edits, compare the backup with the new files. Then delete the backup.
 - If your project still has a `.claude/commands/<name>.md` file from a pragma version that shipped commands instead of skills, the installers back it up to `.claude/commands.bak-<timestamp>/` and remove it. The old command then cannot hide the new skill of the same name.
 - The installers skip existing context files, `CONSTRAINTS.md`, `AGENTS.md`, `CLAUDE.md`, and workflow files. They do not overwrite them.
-- The installers overwrite files in `scripts/`. If you edited `SCOPED_LAYER_DIRS`, re-apply your edit.
+- The installers overwrite files in `scripts/`. Your layer choice lives in `scripts/pipeline_lanes.json` (`project.architecture`), which the installers never overwrite.
 
 After either method, start your first feature:
 
@@ -94,7 +121,7 @@ Pragma installs three layers into your project:
 
 | Layer | Source | What it does |
 |---|---|---|
-| Agent skills | `.claude/skills/` | 16 Agent Skills (SKILL.md files) that cover the full software development life cycle. You start each skill in the same way as a Claude Code command. |
+| Agent skills | `.claude/skills/` | 17 Agent Skills (SKILL.md files) that cover the full software development life cycle. You start each skill in the same way as a Claude Code command. |
 | CI pipeline | `scaffold/.github/workflows/` | 3 GitHub Actions workflows: PR checks, UI tests, and release |
 | Support scripts | `scripts/` | Scripts for simulator selection, coverage enforcement, TDD-order checks, and gate-integrity checks. One optional script reduces simulator memory use in CI. |
 
@@ -216,7 +243,7 @@ The agent layer (`/gates`, `/review`, `/test`) runs locally and gives fast feedb
 - `review-evidence` job (`review-evidence.yml`): runs `scripts/check_review_evidence.py` from the base branch, reading the PR only through the GitHub API. Each lane needs its own evidence in the PR body or reviews: a `Gates run at <sha>` gate summary, an APPROVED `/review` verdict at the head SHA from an owner, member or collaborator, a `code-review:` line at the head SHA, and a `Motivating incident:` line for pipeline changes. It runs on `pull_request_target`, so GitHub runs the workflow file from your default branch (`main`): it only takes effect once it is on `main`. Its checkout pins the scripts and lane config to the PR's base branch.
 - `unit-tests` job: runs the test suite and `scripts/check_coverage.py`. This job runs the copy of `check_coverage.py` from the PR, not a copy from the base branch.
 
-CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7, the UI-selector cross-check in Gate 10 of `/gates`, and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps.
+CI does not re-run the parts that the agent judges. These are the `security-review` in Gate 7 and the design-compliance checklist in `/review`. CI also does not re-run the other `/gates` checks: the TODO/FIXME scan, branch naming, the CHANGELOG entry, per-file new-code coverage, the Gate 8 heuristics, and the Gate 10 architecture greps and UI-selector cross-check (`scripts/check_gates.sh` runs these locally).
 
 Know these limits before you rely on CI:
 
@@ -229,7 +256,7 @@ Know these limits before you rely on CI:
   `gates.yml` and `review-evidence.yml` have no `paths:` filter, so both checks report on every PR. `pr-checks.yml` still runs only for the paths in its `paths:` filter, and a required check that never runs stays pending. If you make `Unit Tests` required, remove that filter. This also makes the macOS `unit-tests` job run on every PR.
 - `gates.yml` comes from the PR ref. On a `feature/*` branch, gate integrity flags an edit to `.github/workflows/*`, but on any other branch a PR can still edit or delete the `gates` job. Such a PR is in the `pipeline` lane, so `review-evidence`, which runs from the base branch, still requires an APPROVED review for it. Review changes under `.github/workflows/` in the same way as changes to gate definitions. For example, add a `CODEOWNERS` entry for that path and require code-owner review.
 - Gate integrity checks for edited gate-definition files only on `feature/*` branches. The PR author chooses the branch name. The same edit on a `chore/*` or `fix/*` branch is allowed by design. The other gate-integrity checks apply on any branch. They look for deleted tests, new suppressions, stubs, and lowered thresholds.
-- The guard hook and the CI check cover the same files. During a Claude Code session on a `feature/*` branch, `.claude/hooks/guard_protected_paths.py` blocks edits to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json`, `.claude/hooks/*`, `scripts/pipeline_lanes.json` and `.github/workflows/*`. On a `feature/*` PR, `check_gate_integrity.py` flags the same files. To get the hook in an existing project, run `setup.sh` or `/pragma:init` again. You must add the new workflows by hand, because the installers skip existing workflow files (see the next item). Neither layer detects an agent that renames its branch to a name outside `feature/*`.
+- The guard hook and the CI check cover the same files. During a Claude Code or Codex CLI session on a `feature/*` branch, `.claude/hooks/guard_protected_paths.py` blocks edits to skills, `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/settings.json`, `.claude/hooks/*`, `.codex/hooks.json`, `.codex/config.toml`, `scripts/pipeline_lanes.json` and `.github/workflows/*`. Codex runs it from `.codex/hooks.json` only after you trust it with `/hooks`. On a `feature/*` PR, `check_gate_integrity.py` flags the same files. To get the hook in an existing project, run `setup.sh` or `/pragma:init` again. You must add the new workflows by hand, because the installers skip existing workflow files (see the next item). Neither layer detects an agent that renames its branch to a name outside `feature/*`.
 - On PRs into `main`, the TDD-order check reads every commit since `main`. If a repository squash-merges into `develop`, the check can flag squashed commits on a release PR. A squashed commit holds the test and the implementation in one commit.
 - `setup.sh` and `/pragma:init` skip workflow files that already exist. In an existing project, copy `gates.yml` and `review-evidence.yml` from `scaffold/.github/workflows/` by hand, and delete the old `gates` job and its gate-definition `paths:` entries from your `pr-checks.yml`.
 
@@ -277,7 +304,7 @@ These are the default architecture assumptions. To override them, edit `AGENTS.m
 - MVVM and Repository: views contain no business logic. ViewModels depend on protocols, never on concrete implementations.
 - SwiftData for persistence: Domain Services have zero SwiftData imports.
 - Swift Testing: use `import Testing`, `@Suite`, `@Test`, and `#expect()` for unit and integration tests. Use XCUITest for UI tests.
-- `PBXFileSystemSynchronizedRootGroup` (Xcode 16 and later): files compile automatically when you place them in the correct directory. Never edit `project.pbxproj`.
+- `PBXFileSystemSynchronizedRootGroup` (Xcode 16 and later): files compile automatically when you place them in the correct directory. Never edit `project.pbxproj` by hand. For classic groups, see [Scope and requirements](#scope-and-requirements).
 
 To customise with the script (recommended), run:
 
@@ -289,12 +316,31 @@ The script copies everything and replaces all placeholders. Then fill in `AGENTS
 
 To customise by hand, do these steps:
 
-1. Copy `.claude/skills/`, `.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project. Put the workflows in `.github/workflows/`.
+1. Copy `.claude/skills/`, `scaffold/.claude/context/`, `scaffold/.github/workflows/`, and `scripts/` into your project. Put the context templates in `.claude/context/` and the workflows in `.github/workflows/`. Do not copy pragma's own `.claude/context/`: it holds pragma's logs, not templates.
 2. Replace `<AppName>` with your module name in each skill file
 3. Replace `YOUR_PROJECT` and `YOUR_SCHEME` in the three workflow files
 4. Update `AGENTS.md` with your build commands, simulator target, and architecture rules. If you use Claude Code, also add a one-line `CLAUDE.md` that imports it: `@AGENTS.md`.
 5. Fill in `.claude/context/invariants.md` with your non-negotiable rules
 6. Update the Architecture Rules checklist in `/review` to match your stack
+
+---
+
+## FAQ
+
+**Does Pragma work with UIKit?**
+Yes. Set `project.ui` to `uikit` in `scripts/pipeline_lanes.json` (setup.sh detects it). `/design` uses UIKit tokens (asset catalog and `UIColor`), and `/test` uses UIKit test patterns. SwiftUI-only checks run only in SwiftUI mode.
+
+**Does it work with CocoaPods?**
+Yes. When a Podfile or `.xcworkspace` exists, all build commands use `-workspace`, and CI runs `pod install` first.
+
+**My project does not use SwiftData.**
+Set `project.persistence` to `coredata`, `realm`, or `none`. The Domain layer rule still applies: Domain Services import no persistence framework.
+
+**My app is not MVVM.**
+Set `project.architecture` to `mvc` or `viper`. The layer check (Gate 9) then uses that layout.
+
+**Can the agent edit `project.pbxproj`?**
+It never edits it by hand. For classic groups it uses the `xcodeproj` gem. For generated projects it stops and asks.
 
 ---
 

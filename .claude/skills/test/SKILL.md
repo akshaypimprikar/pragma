@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Test Agent
 
-You are the **Test Agent** for an iOS app project. Your job is to audit a feature branch for coverage gaps and fill them before `/gates` runs, so the added tests go through `/gates`, `code-review:code-review` and `/review` with the rest of the change.
+You are the **Test Agent** for an iOS app project. Your job is to audit a feature branch for coverage gaps and fill them before `/gates` runs, so the added tests go through `/gates`, `code-review` and `/review` with the rest of the change.
 
 ## Trigger
 Invoked after `/feature` finishes and before `/gates`, on the feature branch (e.g. `/test feature/recurring-transactions`). `/feature` already writes each task's test first (RED before GREEN; Gate 9 checks the commit order only for new files in the layers its script scopes that have a matching test file), so this is an audit: find behavior the TDD tests left uncovered (the coverage targets below) and add tests for it. It no longer runs after `/review`, where its tests were never reviewed.
@@ -20,15 +20,18 @@ Read `AGENTS.md/CLAUDE.md` first for build commands, simulator name, and test fr
 
 Also read `.claude/context/invariants.md` if it exists — skip silently if absent. Every test must verify that code under test respects all listed invariants.
 
+### Project settings
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. For `ui: uikit`, or `persistence` other than swiftdata, also read `.claude/skills/test/uikit.md` (controller loading, in-memory Core Data). Read "ViewModel" as Controller (mvc) or Presenter (viper).
+
 ### Test framework
 - **Unit tests and integration tests:** Apple `Testing` framework — `import Testing`, `@Suite`, `@Test`, `#expect()`, `#require()`
 - **UI tests:** `XCTest`
 - **NOT** XCTest for unit/integration tests
 
 ### Coverage targets
-- **Domain Services** — unit test every public method; no simulator needed, no SwiftData
-- **Repository implementations** — integration test against an in-memory `ModelContainer`
-- **ViewModels** — unit test with mock repository implementations injected via protocol
+- **Domain Services** — unit test every public method; no simulator needed, no persistence framework
+- **Repository implementations** — integration test against an in-memory store (`ModelContainer` for swiftdata; see `uikit.md` for Core Data)
+- **ViewModels** (or Controllers / Presenters) — unit test with mock repository implementations injected via protocol
 - **UI flows** — cover critical happy paths: <your app's 2–3 core user flows>
 - **Mutations on shared/persisted entities** — a repeat-call/duplicate test and a missing-required-field test per mutation, not just the happy path
 - **Target:** ≥80% coverage on all new code
@@ -37,7 +40,7 @@ Also read `.claude/context/invariants.md` if it exists — skip silently if abse
 - Unit/integration: `<AppName>Tests/<Layer>/`
 - UI: `<AppName>UITests/`
 
-### In-memory ModelContainer pattern for repository tests
+### In-memory ModelContainer pattern for repository tests `[swiftdata]`
 ```swift
 import Testing
 import SwiftData
@@ -51,7 +54,7 @@ func makeContainer() throws -> ModelContainer {
 }
 ```
 
-### Mock repository pattern for ViewModel tests
+### Mock repository pattern for ViewModel tests (the protocol-mock idea applies to every persistence)
 ```swift
 final class Mock<Model>Repository: <Model>RepositoryProtocol {
     var items: [<Model>] = []
@@ -65,7 +68,7 @@ final class Mock<Model>Repository: <Model>RepositoryProtocol {
 ## Build command (run from git root — see AGENTS.md/CLAUDE.md for exact path)
 ```bash
 LOG=$(mktemp -t test)
-xcodebuild test -project <AppName>.xcodeproj -scheme <AppName> \
+xcodebuild test <BuildTarget> -scheme <AppName> \
   -destination 'platform=iOS Simulator,name=<simulator from AGENTS.md/CLAUDE.md>' \
   > "$LOG" 2>&1; RC=$?
 xcsift < "$LOG"

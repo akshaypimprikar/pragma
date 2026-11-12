@@ -1,0 +1,6 @@
+# Fixture for pragma legacy mode (plan C5): a CocoaPods project with no dependencies,
+# so the build needs no network. `pod install` is a no-op here.
+platform :ios, '17.0'
+
+target 'FakeApp-Legacy' do
+end

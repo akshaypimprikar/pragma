@@ -1,7 +1,23 @@
 {
+  "project": {
+    "persistence": "YOUR_PERSISTENCE",
+    "ui": "YOUR_UI",
+    "architecture": "mvvm"
+  },
+  "gates": {
+    "scheme": "YOUR_PROJECT",
+    "build_target": "",
+    "destination": "",
+    "sensitive_paths": "",
+    "app_dir": "YOUR_PROJECT",
+    "ui_tests_dir": "YOUR_PROJECTUITests",
+    "ui_selector_allow": [],
+    "rules": []
+  },
   "release": {
     "paths": [
       "YOUR_PROJECT.xcodeproj/project.pbxproj",
+      "YOUR_PROJECT.xcodeproj/project.xcproj",
       "CHANGELOG.md",
       ".claude/context/feature-log.md"
     ],
@@ -35,13 +51,24 @@
         "CONSTRAINTS.md",
         "docs/superpowers/**"
       ],
-      "evidence": ["gate_summary", "review_verdict", "code_review", "motivating_incident"]
+      "evidence": ["gate_summary", "review_verdict", "motivating_incident"],
+      "small_pr": {
+        "max_changed_lines": 30,
+        "exclude_paths": [".claude/hooks/**", ".claude/skills/gates/**", ".claude/skills/review/**", "scripts/check_*", "scripts/detect_build_target.sh", "scripts/select_simulator.py", "scripts/review_verdict.py", "scripts/install_*", "scripts/pipeline_lanes.json", "scaffold/pipeline_lanes.json", "scaffold/.claude/hooks/**", ".github/**"],
+        "evidence": ["gate_summary", "motivating_incident"]
+      }
     }
   ],
   "default": {
     "name": "docs",
     "evidence": ["gate_summary"]
   },
+  "review_carryover_paths": [
+    "docs/*.md",
+    "docs/pipeline-review/**",
+    "CHANGELOG.md",
+    "README.md"
+  ],
   "carryover_paths": [
     ".claude/context/rejections.md",
     ".claude/context/incidents.md"

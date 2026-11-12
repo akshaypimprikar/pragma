@@ -1,0 +1,39 @@
+name: Legacy canary
+
+# Plan C, C5. Runs the legacy-mode scripts (build-target detection, file registration,
+# the registration gate) against fixtures/FakeApp-Legacy (UIKit + CocoaPods + classic
+# groups) and builds its workspace, so a change that breaks legacy projects fails here.
+# Needs macOS for xcodebuild. No model calls, no cost per run beyond the runner.
+
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'fixtures/FakeApp-Legacy/**'
+      - 'scripts/detect_build_target.sh'
+      - 'scripts/detect_file_registration.sh'
+      - 'scripts/register_files.rb'
+      - 'scripts/check_file_registration.py'
+      - 'scripts/tests/test_legacy_fixture.py'
+      - '.github/workflows/legacy-canary.yml'
+
+concurrency:
+  group: legacy-canary-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  legacy-canary:
+    name: legacy-canary
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install the xcodeproj gem if missing
+        run: ruby -e "require 'xcodeproj'" 2>/dev/null || sudo gem install xcodeproj
+
+      - name: Run the legacy canary
+        run: python3 -m unittest scripts.tests.test_legacy_fixture -v

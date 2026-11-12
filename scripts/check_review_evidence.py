@@ -10,11 +10,14 @@ fork is never laned release, sync or back-merge, and a release/* PR whose
 develop...head compare fails exits 2 instead of guessing.
 
 Evidence items (each SHA-tied item accepts an ancestor SHA when every file
-changed between it and the head is on the config's carryover_paths):
+changed between it and the head is on the config's carryover_paths; a review
+verdict also accepts the config's review_carryover_paths, such as docs):
   gate_summary         "Gates run at <sha>" in the PR body (last occurrence)
   review_verdict       latest "## Review Agent verdict:" review posted by an
                        OWNER, MEMBER or COLLABORATOR is APPROVED and contains
-                       "Reviewed at <sha>"; other accounts' reviews are ignored
+                       "Reviewed at <sha>"; other accounts' reviews are ignored.
+                       A third full-round review (not a `Round confirm`) fails the check (the two-round cap)
+                       unless the PR body has a non-empty "Round cap override:" line
   code_review          a "code-review: <url or 'no issues'> at <sha>" body line
   motivating_incident  a non-empty "Motivating incident:" body line
   synced_from          a non-empty "Synced from:" body line
@@ -38,6 +41,7 @@ SHA = r"([0-9a-f]{40})"
 VERDICT_HEADER = "## Review Agent verdict:"
 # Only verdicts posted by accounts with write-level standing count; anyone else's review is ignored.
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+MAX_VERDICT_REVIEWS = 2
 COMPARE_FILE_LIMIT = 300  # GitHub's cap on files in one compare response
 
 
@@ -53,9 +57,18 @@ def _sha_ok(sha, head_sha, carryover, changed_between):
     return True, f"at {sha[:7]}; later commits touch only carryover paths"
 
 
+def _verdicts(reviews):
+    return [r for r in reviews if (r.get("body") or "").lstrip().startswith(VERDICT_HEADER)
+            and r.get("author_association") in TRUSTED_ASSOCIATIONS]
+
+
+def _rounds(reviews):
+    """Verdict reviews that count against the cap: a `Round confirm` is not a round."""
+    return [r for r in _verdicts(reviews) if not re.search(r"(?m)^Round confirm\b", r["body"])]
+
+
 def _latest_verdict(reviews):
-    verdicts = [r for r in reviews if (r.get("body") or "").lstrip().startswith(VERDICT_HEADER)
-                and r.get("author_association") in TRUSTED_ASSOCIATIONS]
+    verdicts = _verdicts(reviews)
     if not verdicts:
         return None
     return max(verdicts, key=lambda r: r.get("submitted_at") or "")
@@ -69,7 +82,7 @@ def lane_head(pr, repo):
     return head
 
 
-def evaluate(items, head_sha, body, reviews, carryover, changed_between):
+def evaluate(items, head_sha, body, reviews, carryover, changed_between, review_carryover=()):
     """Return [(item, ok, detail)] for each required evidence item."""
     body = body or ""
     results = []
@@ -95,7 +108,12 @@ def evaluate(items, head_sha, body, reviews, carryover, changed_between):
             if not m:
                 results.append((item, False, "latest verdict has no 'Reviewed at <sha>' line"))
                 continue
-            ok, detail = _sha_ok(m.group(1), head_sha, carryover, changed_between)
+            ok, detail = _sha_ok(m.group(1), head_sha, list(carryover) + list(review_carryover), changed_between)
+            count = len(_rounds(reviews))
+            if ok and count > MAX_VERDICT_REVIEWS \
+                    and re.search(r"(?m)^Round cap override:[ \t]*\S", body) is None:
+                ok, detail = False, (f"{count} round reviews exceed the {MAX_VERDICT_REVIEWS}-round cap; "
+                                     "open issues for the remaining findings or add a 'Round cap override: <reason>' body line")
             results.append((item, ok, detail))
         elif item == "code_review":
             found = re.findall(r"(?m)^code-review:\s*\S.*?\bat " + SHA + r"\s*$", body)
@@ -172,8 +190,9 @@ def main(argv=None):
         api = Api(args.repo, token)
         pr = api.get(f"/pulls/{args.pr}")
         head_sha, head, base = pr["head"]["sha"], lane_head(pr, args.repo), pr["base"]["ref"]
-        files = []
+        files, changed_lines = [], 0
         for f in api.paged(f"/pulls/{args.pr}/files"):
+            changed_lines += f.get("additions", 0) + f.get("deletions", 0)
             files.append(f["filename"])
             if f.get("previous_filename"):
                 files.append(f["previous_filename"])
@@ -183,14 +202,14 @@ def main(argv=None):
             if release_changed is None:
                 raise ValueError(f"cannot compare develop...{head_sha[:7]} to lane this release PR")
         lane = check_pr_lane.lane_for(config, base, head, files, release_changed)
-        items = check_pr_lane.evidence_for_change(config, lane, files)
+        items = check_pr_lane.evidence_for_change(config, lane, files, changed_lines)
         reviews = api.paged(f"/pulls/{args.pr}/reviews")
         results = evaluate(items, head_sha, pr.get("body"), reviews, config.get("carryover_paths", []),
-                           lambda sha: api.compare_files(sha, head_sha))
+                           lambda sha: api.compare_files(sha, head_sha), config.get("review_carryover_paths", []))
     except (check_pr_lane.ConfigError, urllib.error.URLError, KeyError, ValueError) as e:
         print(f"check_review_evidence: {e}", file=sys.stderr)
         return 2
-    print(f"lane: {lane} (head {head}, base {base}, {len(files)} changed paths)")
+    print(f"lane: {lane} (head {head}, base {base}, {len(files)} changed paths, {changed_lines} changed lines)")
     if not items:
         print("no evidence required for this lane")
     for item, ok, detail in results:

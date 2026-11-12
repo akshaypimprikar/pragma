@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import check_pr_lane as lane  # noqa: E402
 
 CONFIG = {
-    "release": {"paths": ["App.xcodeproj/project.pbxproj", "CHANGELOG.md"], "evidence": []},
+    "release": {"paths": ["App.xcodeproj/project.pbxproj", "App.xcodeproj/project.xcproj", "CHANGELOG.md"], "evidence": []},
     "sync": {"branch_prefix": "sync/", "paths": [".claude/skills/**", "scaffold/**"], "evidence": ["synced_from"]},
     "lanes": [
         {"name": "app", "paths": ["App/**", "*.xcodeproj/**", "**/*.xctestplan"], "evidence": ["gate_summary"]},
@@ -17,6 +17,68 @@ CONFIG = {
     "default": {"name": "docs", "evidence": []},
     "carryover_paths": [],
 }
+
+
+SMALL = dict(CONFIG, lanes=[CONFIG["lanes"][0], dict(
+    CONFIG["lanes"][1], evidence=["gate_summary", "review_verdict"],
+    small_pr={"max_changed_lines": 30, "evidence": ["gate_summary"]})])
+
+
+class SmallPrTests(unittest.TestCase):
+    def test_small_pipeline_pr_skips_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"], 29), ["gate_summary"])
+
+    def test_at_threshold_keeps_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"], 30),
+                         ["gate_summary", "review_verdict"])
+
+    def test_unknown_line_count_keeps_review(self):
+        self.assertEqual(lane.evidence_for_change(SMALL, "pipeline", ["scripts/a.py"]),
+                         ["gate_summary", "review_verdict"])
+
+    def test_app_lane_pr_never_skips_review(self):
+        self.assertIn("review_verdict", lane.evidence_for_change(SMALL, "app", ["App/a.swift", "scripts/a.py"], 5))
+
+    def test_small_pr_keeps_evidence_another_lane_owes(self):
+        cfg = dict(SMALL, lanes=[{"name": "other", "paths": ["x/**"], "evidence": ["code_review"]}, SMALL["lanes"][1]])
+        self.assertEqual(lane.evidence_for_change(cfg, "pipeline", ["x/b", "scripts/a.py"], 5),
+                         ["gate_summary", "code_review"])
+
+    def test_small_pr_touching_excluded_path_keeps_review(self):
+        cfg = dict(SMALL, lanes=[SMALL["lanes"][0], dict(
+            SMALL["lanes"][1], small_pr={"max_changed_lines": 30, "evidence": ["gate_summary"],
+                                         "exclude_paths": ["scripts/check_*"]})])
+        self.assertIn("review_verdict", lane.evidence_for_change(cfg, "pipeline", ["scripts/check_x.py"], 5))
+        self.assertEqual(lane.evidence_for_change(cfg, "pipeline", ["scripts/other.py"], 5), ["gate_summary"])
+
+    def test_repo_config_scaffold_workflow_keeps_review(self):
+        # The scaffold workflows ship to adopters, so a small edit to one still needs /review (pragma #121).
+        cfg = lane.load_config(os.path.join(os.path.dirname(__file__), "..", "pipeline_lanes.json"))
+        self.assertIn("review_verdict", lane.evidence_for_change(
+            cfg, "pipeline", ["scaffold/.github/workflows/pr-checks.yml"], 5))
+
+    def test_bool_max_changed_lines_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr={"max_changed_lines": True})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+
+    def test_bad_exclude_paths_and_carryover_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(
+            SMALL["lanes"][1], small_pr={"max_changed_lines": 30, "exclude_paths": "scripts/**"})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(dict(SMALL, review_carryover_paths="docs/*.md"))
+
+    def test_non_object_small_pr_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr=5)])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
+
+    def test_bad_small_pr_config_rejected(self):
+        bad = dict(SMALL, lanes=[SMALL["lanes"][0], dict(SMALL["lanes"][1], small_pr={"max_changed_lines": 0})])
+        with self.assertRaises(lane.ConfigError):
+            lane.validate_config(bad)
 
 
 class GlobMatchTests(unittest.TestCase):
@@ -57,6 +119,13 @@ class LaneForTests(unittest.TestCase):
         self.assertEqual(
             self.lane(["App/Model.swift", "CHANGELOG.md"], base="main", head="release/1.5.0",
                       release_changed=["CHANGELOG.md", "App.xcodeproj/project.pbxproj"]),
+            "release",
+        )
+
+    def test_release_lane_accepts_xcproj_version_bump(self):
+        self.assertEqual(
+            self.lane(["App.xcodeproj/project.xcproj", "CHANGELOG.md"], base="main", head="release/1.5.0",
+                      release_changed=["CHANGELOG.md", "App.xcodeproj/project.xcproj"]),
             "release",
         )
 
@@ -157,6 +226,35 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertEqual(out.stdout.strip(), "pipeline")
+
+    def test_git_mode_keeps_non_ascii_and_newline_paths(self):
+        for name in ("Café.swift", "a\nb.swift"):
+            with self.subTest(name=repr(name)), tempfile.TemporaryDirectory() as d:
+                def git(*a):
+                    subprocess.run(["git", *a], cwd=d, check=True, capture_output=True)
+                git("init", "-q", "-b", "develop")
+                git("config", "user.email", "t@example.com")
+                git("config", "user.name", "t")
+                git("config", "core.quotepath", "true")
+                open(os.path.join(d, "README.md"), "w").write("x\n")
+                git("add", ".")
+                git("commit", "-qm", "base")
+                git("checkout", "-qb", "chore/x")
+                os.makedirs(os.path.join(d, "App"))
+                open(os.path.join(d, "App", name), "w").write("x\n")
+                git("add", ".")
+                git("commit", "-qm", "change")
+                cfg = os.path.join(d, "lanes.json")
+                import json
+                json.dump(CONFIG, open(cfg, "w"))
+                script = os.path.join(os.path.dirname(__file__), "..", "check_pr_lane.py")
+                out = subprocess.run(
+                    [sys.executable, script, "--git", "develop", "--head-branch", "chore/x",
+                     "--base-branch", "develop", "--config", cfg],
+                    cwd=d, capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(out.stdout.strip(), "app")
 
     def test_invalid_config_exits_2(self):
         with tempfile.TemporaryDirectory() as d:

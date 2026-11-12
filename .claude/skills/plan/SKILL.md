@@ -45,12 +45,15 @@ The plan must be executable by a subagent with no prior context. Every task need
 **All commands run from:** `<path containing .xcodeproj>`
 ```
 
+## Project settings
+Read `project` in `scripts/pipeline_lanes.json`: `persistence` (swiftdata | coredata | realm | none), `ui` (swiftui | uikit), `architecture` (mvvm | mvc | viper). If the key is absent, assume swiftdata, swiftui, mvvm. Apply the persistence and UI rules below for the configured values, not SwiftData and SwiftUI by default. Read "ViewModel" as Controller (mvc) or Presenter (viper).
+
 ## Architecture Rules to enforce in every task
-- Domain Services: no SwiftData imports
+- Domain Services: no persistence-framework imports (SwiftData, CoreData, RealmSwift)
 - Repository Protocols: Foundation-only imports
 - <type-safety rule from AGENTS.md, e.g. money values: `Decimal`, never `Double`>
 - Simulator: see AGENTS.md/CLAUDE.md — use your project's target device and OS version
-- File inclusion: `PBXFileSystemSynchronizedRootGroup` — no project.pbxproj edits needed
+- File inclusion: `scripts/detect_file_registration.sh . <AppName>` says how — `synchronized` (`PBXFileSystemSynchronizedRootGroup`): no project.pbxproj edits; `classic`: register each new file with `ruby scripts/register_files.rb . <AppName> <files>`; `xcproj` or `stop`: ask the human
 - Test framework: `import Testing` with `@Suite`/`@Test`/`#expect()` — NOT XCTest for unit tests
 
 ## File locations
@@ -59,4 +62,4 @@ The plan must be executable by a subagent with no prior context. Every task need
 - UI tests: `<AppName>UITests/`
 
 ## Done when
-The user reviews and approves the plan. Then hand off to `/feature`. `/feature` is followed by `/test` (coverage-gap audit) and `/gates`; after the PR is open, `/pr-followup` runs `code-review:code-review`, then `/review`.
+The user reviews and approves the plan. Then hand off to `/feature`. `/feature` is followed by `/test` (coverage-gap audit) and `/gates`; after the PR is open, `/pr-followup` runs `code-review` (medium, `app` lane only), then `/review`.

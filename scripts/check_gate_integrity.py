@@ -5,7 +5,7 @@ pass without fixing the underlying violation, rather than a legitimate gate
 or config maintenance change. Every other gate in this pipeline checks the
 code; this one checks that nobody edited the ruler.
 
-Flags, via a single git diff against the base branch:
+Flags, via a git diff against the base branch:
   1. A gate-definition file (see GATE_DEFINITION_FILES/GUARDED_PATH_GLOBS
      below for the exact list — not repeated here so this docstring can't
      drift out of sync with it the way an inline copy already had)
@@ -54,13 +54,18 @@ BRANCH_OVERRIDE = sys.argv[2] if len(sys.argv) > 2 else None
 # core.quotepath=false: without it, git octal-escapes any non-ASCII byte in a
 # path (e.g. "café.swift" -> "caf\303\251.swift") in diff/--name-status
 # output, which would never match a plain-ASCII GATE_DEFINITION_FILES entry
-# or a suppression-scan path check. --src-prefix/--dst-prefix: parse_diff_by_file's
-# a/ b/ header parsing must not silently break under a contributor's global
+# or a suppression-scan path check. --src-prefix/--dst-prefix: diff_by_path's
+# a/ b/ header matching must not silently break under a contributor's global
 # diff.noprefix/diff.mnemonicPrefix git config — applied here, to every
 # git-diff call, not just the narrower text_diff_for() re-fetch below, so a
 # config-dependent header format can't mis-parse (or drop) the main diff
-# every other check reads.
-GIT_DIFF_BASE_ARGS = ("git", "-c", "core.quotepath=false", "diff", "--src-prefix=a/", "--dst-prefix=b/")
+# every other check reads. --literal-pathspecs: text_diff_for() passes changed
+# paths after `--`, and a name like ":(top)x.swift" must name that file, not
+# act as pathspec magic.
+GIT_DIFF_BASE_ARGS = (
+    "git", "-c", "core.quotepath=false", "--literal-pathspecs",
+    "diff", "--src-prefix=a/", "--dst-prefix=b/",
+)
 
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
@@ -70,7 +75,7 @@ GATE_DEFINITION_FILES = (
 # Wider than GATE_DEFINITION_FILES, and used by check #1 only: every file the
 # PreToolUse hook (.claude/hooks/guard_protected_paths.py; scaffold/.claude/hooks/
 # in the pragma repo) blocks on a feature/* branch. The hook stops the edit live but only inside a Claude Code
-# session; a plain commit + push bypasses it, so this list is the CI-side
+# or Codex CLI session; a plain commit + push bypasses it, so this list is the CI-side
 # backstop for the same set. Keep it in step with the hook's PROTECTED_GLOBS.
 # `*` crosses `/` (fnmatch), so nested paths match, and each glob is also
 # tried under any subdirectory (`ios/CLAUDE.md`, `ios/.claude/settings.json`),
@@ -79,6 +84,7 @@ GATE_DEFINITION_FILES = (
 GUARDED_PATH_GLOBS = (
     "scripts/check_*",
     ".claude/skills/*/SKILL.md",
+    ".claude/skills/*/reference.md",
     "AGENTS.md",
     "CLAUDE.md",
     "CONSTRAINTS.md",
@@ -86,7 +92,11 @@ GUARDED_PATH_GLOBS = (
     ".claude/settings.json",
     ".claude/hooks/*",
     "scripts/pipeline_lanes.json",
+    "scripts/detect_build_target.sh",
+    "scripts/select_simulator.py",
     ".github/workflows/*",
+    ".codex/hooks.json",
+    ".codex/config.toml",
 )
 # Suppression/stub detection (checks 3 & 4) is about shipped application
 # code — a doc file describing these exact patterns in prose (this script's
@@ -154,12 +164,16 @@ def run(*args):
         # errors="replace": a diff containing bytes that aren't valid UTF-8
         # (a binary-ish file, or another encoding entirely) must not crash
         # this script outright — decode what's decodable and substitute the
-        # rest, rather than raising UnicodeDecodeError mid-gate-run.
+        # rest, rather than raising UnicodeDecodeError mid-gate-run. Decoded
+        # here, not with text=True: universal newlines would turn a bare "\r"
+        # in a diff line or a path into "\n", which could start a fake
+        # `diff --git` block or break a path match.
         return subprocess.run(
-            args, capture_output=True, text=True, errors="replace", check=True
-        ).stdout
+            args, capture_output=True, check=True
+        ).stdout.decode("utf-8", errors="replace")
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: `{' '.join(args)}` failed — {e.stderr.strip() or e}", file=sys.stderr)
+        err = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+        print(f"ERROR: `{' '.join(args)}` failed — {err or e}", file=sys.stderr)
         # BASE_REF never appears as its own arg — every call site embeds it in a
         # formatted ref spec like f"{BASE_REF}...HEAD" — so this has to search
         # each arg for it as a substring, not check tuple membership.
@@ -202,29 +216,93 @@ def is_test_path(path):
     )
 
 
-def parse_diff_by_file(full_diff):
-    """Split one `git diff` invocation's output into {path: diff_text}."""
+# git's C-style path quoting (quote.c) under core.quotepath=false: control
+# characters and DEL become escapes, `"` and `\` get a backslash, and
+# non-ASCII stays as is.
+CQ_NAMED = {"\a": "a", "\b": "b", "\t": "t", "\n": "n", "\v": "v", "\f": "f", "\r": "r", '"': '"', "\\": "\\"}
+
+
+def git_quoted(prefix, path):
+    """prefix + path as a `diff --git` header prints it: bare, or in quotes with
+    escapes when any character needs one (diff.c quote_two)."""
+    name = prefix + path
+    if not any(c in CQ_NAMED or ord(c) < 0x20 or ord(c) == 0x7F for c in name):
+        return name
+    out = []
+    for c in name:
+        if c in CQ_NAMED:
+            out.append("\\" + CQ_NAMED[c])
+        elif ord(c) < 0x20 or ord(c) == 0x7F:
+            out.append("\\%03o" % ord(c))
+        else:
+            out.append(c)
+    return '"' + "".join(out) + '"'
+
+
+def stop(reason):
+    print(f"Gate integrity could not run — {reason}", file=sys.stderr)
+    sys.exit(2)
+
+
+def changed_files(*diff_args):
+    """[(status, old_path, new_path)] from `git diff -z --name-status`. Fields are
+    NUL-separated, so each path is read exactly as stored, whatever it holds.
+    status is A, D or R; any other letter (M, C, T) counts as M, as before."""
+    fields = run(*GIT_DIFF_BASE_ARGS, "-z", "--name-status", *diff_args).split("\0")
+    entries = []
+    i = 0
+    while i + 1 < len(fields):
+        letter = fields[i][:1]
+        if letter in ("R", "C"):
+            old, new = fields[i + 1], fields[i + 2]
+            i += 3
+        else:
+            old = new = fields[i + 1]
+            i += 2
+        entries.append((letter if letter in ("A", "D", "R") else "M", old, new))
+    return entries
+
+
+def diff_by_path(*diff_args):
+    """({path: diff_text}, changed_files entries) for one diff. Each `diff --git`
+    block is matched to a path from changed_files() by the exact header git
+    prints for that path, never by splitting the header on " b/": a file name
+    can hold " b/" itself (#159). A typechange prints two blocks under one
+    header, and both are kept. A block that matches no path, a header two
+    paths share, or a path with no block stops the run (exit 2) instead of
+    checking the wrong file."""
+    entries = changed_files(*diff_args)
+    path_by_header = {}
+    for _, old, new in entries:
+        header = f"diff --git {git_quoted('a/', old)} {git_quoted('b/', new)}"
+        if header in path_by_header:
+            stop(f"two changed paths share the diff header {header!r}.")
+        path_by_header[header] = new
+    raw = run(*GIT_DIFF_BASE_ARGS, *diff_args)
+    # re.M's ^ follows only "\n", and run() keeps "\r" as is, so a CR or a
+    # Unicode line separator inside a path or a line can't start a block.
+    starts = [m.start() for m in re.finditer(r"^diff --git ", raw, re.M)]
     files = {}
-    current_path = None
-    buf = []
-    for line in full_diff.splitlines(keepends=True):
-        m = re.match(r"^diff --git a/.+ b/(.+)$", line)
-        if m:
-            if current_path is not None:
-                files[current_path] = "".join(buf)
-            current_path = m.group(1)
-            buf = [line]
-        elif current_path is not None:
-            buf.append(line)
-    if current_path is not None:
-        files[current_path] = "".join(buf)
-    return files
+    for start, end in zip(starts, starts[1:] + [len(raw)]):
+        block = raw[start:end]
+        header = block.split("\n", 1)[0]
+        path = path_by_header.get(header)
+        if path is None:
+            stop(f"diff header {header!r} matches no changed path from `git diff --name-status`.")
+        files[path] = files.get(path, "") + block
+    missing = [new for _, _, new in entries if new not in files]
+    if missing:
+        stop("no diff block found for: " + ", ".join(missing))
+    return files, entries
 
 
 def find_suppressions(path, diff):
     hits = []
     test_path = is_test_path(path)
-    for line in diff.splitlines():
+    # split("\n"), not splitlines(): git ends diff lines with "\n" only, and
+    # splitlines() also breaks on "\r", "\x0b", U+2028 and others, which cut
+    # the "+" off the text after them so a marker there was never checked (#170).
+    for line in diff.split("\n"):
         if not line.startswith("+") or line.startswith("+++"):
             continue
         for pat in UNAMBIGUOUS_SUPPRESSION_PATTERNS:
@@ -241,7 +319,7 @@ def find_stubs(path, diff):
     if is_test_path(path):
         return []
     hits = []
-    for line in diff.splitlines():
+    for line in diff.split("\n"):  # not splitlines(): see find_suppressions
         if not line.startswith("+") or line.startswith("+++"):
             continue
         content = line[1:]
@@ -310,7 +388,7 @@ def paired_threshold_drops(diff):
         removed_buf.clear()
         added_buf.clear()
 
-    for line in diff.splitlines():
+    for line in diff.split("\n"):  # not splitlines(): see find_suppressions
         if line.startswith("-") and not line.startswith("---"):
             removed_buf.append(line)
         elif line.startswith("+") and not line.startswith("+++"):
@@ -321,36 +399,12 @@ def paired_threshold_drops(diff):
     return drops
 
 
-def file_status(diff_text):
-    """Derive a name-status-style letter (A/D/R/M) from one file's own diff
-    block instead of a second `git diff --name-status` subprocess call over
-    the exact same {BASE_REF}...HEAD range — the block's own header lines
-    (new file mode / deleted file mode / rename from) already say this."""
-    for line in diff_text.splitlines()[:8]:
-        if line.startswith("new file mode"):
-            return "A"
-        if line.startswith("deleted file mode"):
-            return "D"
-        if line.startswith("rename from "):
-            return "R"
-    return "M"
-
-
-def rename_source(diff_text):
-    """The old path if this file's diff block is a rename, else None. Reads only the
-    header lines, like file_status."""
-    for line in diff_text.split("\n", 8)[:8]:
-        if line.startswith("rename from "):
-            return line[len("rename from "):]
-    return None
-
-
 violations = []
 branch = current_branch()
 
-full_diff = run(*GIT_DIFF_BASE_ARGS, f"{BASE_REF}...HEAD")
-diff_by_file = parse_diff_by_file(full_diff)
-status_by_path = {path: file_status(diff) for path, diff in diff_by_file.items()}
+diff_by_file, entries = diff_by_path(f"{BASE_REF}...HEAD")
+status_by_path = {new: status for status, _, new in entries}
+rename_sources = {new: old for status, old, new in entries if status == "R"}
 
 # Extensions git's own binary-content heuristic correctly calls binary —
 # real assets, never worth a forced-text re-fetch.
@@ -370,8 +424,7 @@ def text_diff_for(*paths):
     # come from GIT_DIFF_BASE_ARGS.
     if not paths:
         return {}
-    raw = run(*GIT_DIFF_BASE_ARGS, "--text", f"{BASE_REF}...HEAD", "--", *paths)
-    return parse_diff_by_file(raw)
+    return diff_by_path("--text", f"{BASE_REF}...HEAD", "--", *paths)[0]
 
 
 # Re-fetch, forced to text, any changed file that (a) isn't a genuine binary
@@ -403,9 +456,8 @@ elif branch.startswith("feature/"):
     # A guarded file moved off its protected path shows up only under its new name,
     # so check the rename source too (unless the new name is itself guarded and
     # already listed).
-    for path, diff in diff_by_file.items():
-        source = rename_source(diff)
-        if source and is_guarded_path(source) and not is_guarded_path(path):
+    for path, source in rename_sources.items():
+        if is_guarded_path(source) and not is_guarded_path(path):
             touched_defs.append(f"{source} (renamed to {path})")
     if touched_defs:
         violations.append(

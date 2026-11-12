@@ -80,8 +80,8 @@ PY
 }
 
 changed_swift() {  # existing .swift files changed on the branch; --diff-filter passes through
-    git -c core.quotepath=false diff "$BASE"...HEAD --name-only "$@" -- '*.swift' |
-        while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done
+    git -c core.quotepath=false diff "$BASE"...HEAD -z --name-only "$@" -- '*.swift' |
+        while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\n' "$f"; done
 }
 
 # ── Gate 0 — build-relevant change check (decides whether Gates 1-2 run) ─────
@@ -90,6 +90,9 @@ GATE0_FILES=$(
     git -c core.quotepath=false diff "$BASE"...HEAD --name-only -- '*.swift' '*.xcodeproj/**' '*.xcworkspace/**' '*.xcconfig' '*Info.plist' '*.entitlements' '*Package.resolved' '*Package.swift' '*.xctestplan'
 )
 NEW_SWIFT=$(changed_swift --diff-filter=A)
+# The gates pass paths one per line, so a name with a newline can't be checked: fail it in every run.
+NL_NAMES=$(git diff "$BASE"...HEAD -z --name-only | LC_ALL=C tr '\n\0' '\001\n' | LC_ALL=C grep -c $'\001')
+[ "$NL_NAMES" -gt 0 ] && fail_row "File names — $NL_NAMES changed path(s) have a newline in the name; rename them"
 if wants 1 || wants 2; then
     section "Gate 0 — build-relevant changes"
     if [ -n "$GATE0_FILES" ]; then echo "$GATE0_FILES"; else echo "none — Gates 1 and 2 are skipped"; fi
@@ -268,7 +271,7 @@ def git(*a):
 out = []
 # New protocols with at most one conforming type.
 proto_decl = re.compile(r"^((public|internal|package|private|fileprivate|open|nonisolated|@[A-Za-z]+) )*protocol (\w+)")
-added = [f for f in git("diff", f"{base}...HEAD", "--name-only", "--diff-filter=A", "--", "*.swift").split("\n") if f]
+added = [f for f in git("diff", f"{base}...HEAD", "-z", "--name-only", "--diff-filter=A", "--", "*.swift").split("\0") if f]
 for path in added:
     try:
         lines = open(path).read().splitlines()
@@ -346,8 +349,8 @@ except (OSError, ValueError) as e:
 def as_list(v):
     return [v] if isinstance(v, str) else list(v or [])
 def swift(filter_=None):
-    args = ["diff", f"{base}...HEAD", "--name-only"] + ([f"--diff-filter={filter_}"] if filter_ else []) + ["--", "*.swift"]
-    return [f for f in git(*args).split("\n") if f]
+    args = ["diff", f"{base}...HEAD", "-z", "--name-only"] + ([f"--diff-filter={filter_}"] if filter_ else []) + ["--", "*.swift"]
+    return [f for f in git(*args).split("\0") if f]
 changed, added = swift("d"), swift("A")
 rules = [{"name": "No try!/as! in production code", "pattern": r"\btry!|as!", "exclude": "Tests/"}] + list(gates.get("rules", []))
 violations, accepted = [], []
@@ -375,8 +378,8 @@ for rule in rules:
 app_dir, ui_dir = gates.get("app_dir", ""), gates.get("ui_tests_dir", "")
 if app_dir and ui_dir and not app_dir.startswith("YOUR_"):
     sel = re.compile(r'app\.(?:buttons|textFields|staticTexts)\["([^"]*)"\]')
-    ui_files = [f for f in git("ls-files", "--", f"{ui_dir}/*.swift").split("\n") if f]
-    app_files = [f for f in git("ls-files", "--", f"{app_dir}/*.swift").split("\n") if f]
+    ui_files = [f for f in git("ls-files", "-z", "--", f"{ui_dir}/*.swift").split("\0") if f]
+    app_files = [f for f in git("ls-files", "-z", "--", f"{app_dir}/*.swift").split("\0") if f]
     ui_text = "".join(open(f, errors="replace").read() for f in ui_files)
     app_text = "".join(open(f, errors="replace").read() for f in app_files)
     typed = set(re.findall(r'typeText\("([^"]*)"\)', ui_text))

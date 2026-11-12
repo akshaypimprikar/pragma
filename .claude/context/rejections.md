@@ -314,3 +314,9 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/check_gate_integrity.py:415
 **Caught by:** this review
+
+## 2026-11-12 — PR#175 — Gate script still reads quoted newline paths (same root cause as #160)
+**What was wrong:** `check_gates.sh`'s `changed_swift` (`while read f; [ -f "$f" ]`) and Gate 10's `swift()` read `git diff --name-only` without `-z`; git quotes a name with a newline, tab, `"` or `\` even with `core.quotepath=false` (`"App/a\nb.swift"`), so that file is silently skipped by Gates 3, 6, 7, 8 and 10. The PR fixed only the lane classifier.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:82
+**Caught by:** this review

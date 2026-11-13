@@ -320,3 +320,21 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/check_gates.sh:82
 **Caught by:** this review
+
+## 2026-11-12 — PR#183 — Gate 10 diff-scope overclaim reintroduced in parallel-review Check 1 (repeats PR#56 Round 1)
+**What was wrong:** `parallel-review/SKILL.md` Check 1 now says `scripts/check_gates.sh --only 10` "reads the committed `git diff develop...HEAD`, the same scope this command needs", and the PR deleted the old text noting that the UI-selector check scans the whole tree. `check_gates.sh` (UI-selector block, ~lines 378-389) reads `git ls-files` for all of the UI-test and app dirs and now emits `[FAIL] UI selector: ...`, so a selector mismatch outside the branch diff fails Gate 10 and, via the Check 1 rule, forces `FIX BEFORE /gates`. Same overclaim as the PR#56 Round 1 entry.
+**Rule violated:** repeats the 2026-09-08 PR#56 Round 1 entry (Gate 10 diff-scope overclaim); no formal rule beyond that entry
+**File:** .claude/skills/parallel-review/SKILL.md:30
+**Caught by:** this review
+
+## 2026-11-12 — PR#183 — Memory path rule in pipeline-review is incomplete and contradicts trim-context
+**What was wrong:** `pipeline-review/SKILL.md:40` tells the reviewer to build the memory path as `<launch-dir-with-slashes-as-dashes>`. `trim-context/SKILL.md` (memory path rule, `sed 's/[^A-Za-z0-9]/-/g'`) says every non-alphanumeric character becomes `-`, so a launch directory with a `.`, space or parenthesis gives a wrong path and the reviewer would wrongly report "no memory".
+**Rule violated:** no formal rule, caught in review
+**File:** .claude/skills/pipeline-review/SKILL.md:40
+**Caught by:** this review
+
+## 2026-11-12 — PR#183 — False "all clear" leak-sweep claim in the committed pipeline-review report
+**What was wrong:** `docs/pipeline-review/2026-11-12.md` "All clear" bullet says apart from the High, no FinanceTracker names or `akshay*` strings appear in `.claude/skills/`, `scaffold/` or `scripts/`. `scripts/slim_simulator.sh:7` names FinanceTracker and `.claude/skills/trim-context/SKILL.md:59` names `akshaypimprikar.dev`, both shipped files.
+**Rule violated:** no formal rule, caught in review
+**File:** docs/pipeline-review/2026-11-12.md:44
+**Caught by:** this review

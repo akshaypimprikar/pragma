@@ -280,11 +280,11 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 ## Pipeline
 
-Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`code-review:code-review\` → \`/review\`, at most 2 rounds) → \`/release\` → \`main\`.
+Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`app\` lane: \`code-review\` at medium → \`/review\`; \`pipeline\` lane: \`/review\` only; one round by default) → \`/release\` → \`main\`.
 
 ## Merge rule
 
-No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: gate summary, \`/review\` APPROVED and \`code-review:\` line at the head SHA, motivating incident. The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
+No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: every lane but \`release\` needs the gate summary; \`app\` also needs \`/review\` APPROVED and a \`code-review:\` line at the head SHA; \`pipeline\` also needs \`/review\` APPROVED at the head SHA (not on a small \`pipeline\` PR) and a motivating incident; \`docs\` needs nothing more. The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
 CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"
@@ -307,7 +307,7 @@ echo -e "  2. Seed ${CYAN}.claude/context/invariants.md${RESET} with your non-ne
 echo -e "  3. Review ${CYAN}CONSTRAINTS.md${RESET} — Gate 11 (gate integrity) is on by default and will flag any in-flight feature/* branch already editing gates.md/CONSTRAINTS.md/a check_*.py script; uncomment opt-in dimensions as you adopt them"
 echo -e "  4. Replace \`YOUR_SIMULATOR\` in CI workflows if you use a non-default device"
 if [[ "$INSTALL_GUARD_HOOK" -eq 1 ]]; then
-    echo -e "  5. The guard hook blocks edits to skills, AGENTS.md/CLAUDE.md, CONSTRAINTS.md, .claude/settings.json and .claude/hooks/ on feature/* branches — make those changes on a chore/* or fix/* branch"
+    echo -e "  5. The guard hook blocks edits to skills, AGENTS.md/CLAUDE.md, CONSTRAINTS.md, invariants.md, .claude/settings.json, .claude/hooks/, scripts/check_*, scripts/pipeline_lanes.json, scripts/detect_build_target.sh, scripts/select_simulator.py, .github/workflows/ and .codex/ hook config on feature/* branches — make those changes on a chore/* or fix/* branch"
 fi
 echo -e "  Then run your first feature:"
 echo ""

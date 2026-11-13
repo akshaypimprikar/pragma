@@ -65,17 +65,20 @@ SCOPED_LAYER_DIRS = load_scoped_layer_dirs(
 # Adjust to your test target's root directory name(s).
 TEST_ROOT = "Tests/"
 
+# core.quotepath=false: without it, git wraps any path containing a
+# non-ASCII byte in literal quotes and octal-escapes it (e.g.
+# "café.swift" -> "\"caf\\303\\251.swift\""), corrupting every basename
+# comparison below for that file — verified empirically, not assumed.
+# Shared by every git call below via explicit unpacking, not a run()
+# that silently discards and replaces its first argument.
+GIT_BASE_ARGS = ("git", "-c", "core.quotepath=false")
+
 
 def run(*args):
     # errors="replace": non-UTF-8 bytes in a commit message or path must not
-    # crash this script outright — decode what's decodable, substitute the
-    # rest. core.quotepath=false: without it, git wraps any path containing a
-    # non-ASCII byte in literal quotes and octal-escapes it (e.g.
-    # "café.swift" -> "\"caf\\303\\251.swift\""), corrupting every basename
-    # comparison below for that file — verified empirically, not assumed.
+    # crash this script outright — decode what's decodable, substitute the rest.
     return subprocess.run(
-        ("git", "-c", "core.quotepath=false") + args[1:],
-        capture_output=True, text=True, errors="replace", check=True,
+        args, capture_output=True, text=True, errors="replace", check=True,
     ).stdout
 
 
@@ -85,17 +88,17 @@ def commit_list():
     # (merge-base diff). Triple-dot here would pull in develop-only commits
     # whenever develop advances after this branch was cut, corrupting the
     # commit ordering this script's violation detection depends on.
-    out = run("git", "log", f"{BASE_REF}..HEAD", "--reverse", "--pretty=format:%H")
+    out = run(*GIT_BASE_ARGS, "log", f"{BASE_REF}..HEAD", "--reverse", "--pretty=format:%H")
     return [line for line in out.splitlines() if line]
 
 
 def added_files(sha):
-    out = run("git", "show", "--diff-filter=A", "--name-only", "--pretty=format:", sha)
+    out = run(*GIT_BASE_ARGS, "show", "--diff-filter=A", "--name-only", "--pretty=format:", sha)
     return [line for line in out.splitlines() if line]
 
 
 def all_test_files():
-    out = run("git", "ls-tree", "-r", "--name-only", "HEAD")
+    out = run(*GIT_BASE_ARGS, "ls-tree", "-r", "--name-only", "HEAD")
     return [line for line in out.splitlines() if TEST_ROOT in line and line.endswith(".swift")]
 
 
@@ -104,7 +107,7 @@ def repo_has_any_scoped_file():
     # legitimately touches no scoped layer today" from "SCOPED_LAYER_DIRS
     # still holds someone else's project's layer names and will never match
     # anything here" — the latter must not look like a clean pass.
-    out = run("git", "ls-tree", "-r", "--name-only", "HEAD")
+    out = run(*GIT_BASE_ARGS, "ls-tree", "-r", "--name-only", "HEAD")
     return any(any(seg in line for seg in SCOPED_LAYER_DIRS) for line in out.splitlines())
 
 

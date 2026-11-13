@@ -37,7 +37,7 @@ Count lines in `AGENTS.md` (or `CLAUDE.md`, for a project still on the pre-AGENT
 If over budget, list the specific sections that could be trimmed. Severity: **Medium** if 51–60 lines, **High** if >60 lines.
 
 ### 4. Memory staleness
-Read every file in the memory directory for the directory Claude Code was launched from: `~/.claude/projects/<launch-dir-with-slashes-as-dashes>/memory/`. If you launch from a parent folder that holds several projects, that is the parent's directory, not this project's (which may exist but be empty).
+Read every file in the memory directory for the directory Claude Code was launched from: `~/.claude/projects/<launch-dir path with every non-alphanumeric character replaced by ->/memory/` (the `sed` in `trim-context/SKILL.md` computes it). If you launch from a parent folder that holds several projects, that is the parent's directory, not this project's (which may exist but be empty).
 Flag any memory that:
 - References a branch, PR, or task that no longer exists in `git log` or `gh pr list`
 - Describes a failure mode that has since been fixed in the skill files (the fix is the source of truth)
@@ -54,7 +54,7 @@ Check whether the following gates exist as skill files or documented steps in th
 | CHANGELOG incremental update | Step in `/feature` | High |
 | `/test` before `/gates`; `code-review` before `/review` (`app` lane only) | `feature/SKILL.md` Done-when + `pr-followup/SKILL.md` + `AGENTS.md`/`CLAUDE.md` | High |
 | Lane config and required checks (`gates`, `review-evidence`) | `scripts/pipeline_lanes.json`, `.github/workflows/gates.yml`, `.github/workflows/review-evidence.yml` | Critical |
-| Coverage gate (Gate 6, `scripts/check_coverage.py`) | `scripts/check_gates.sh` | Medium |
+| Coverage gate (Gate 6) | `scripts/check_gates.sh` | Medium |
 | Security check for sensitive PRs | `security-review` skill reference | Medium |
 | Session recovery command (`/status`) | `.claude/skills/status/SKILL.md` | Low |
 

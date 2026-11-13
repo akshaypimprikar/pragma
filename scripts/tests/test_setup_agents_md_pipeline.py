@@ -12,6 +12,7 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 SETUP = os.path.join(ROOT, "scripts", "setup.sh")
+PR_FOLLOWUP = os.path.join(ROOT, ".claude", "skills", "pr-followup", "SKILL.md")
 
 
 def generated_agents_md():
@@ -41,7 +42,17 @@ class GeneratedAgentsMdPipelineTests(unittest.TestCase):
 
     def test_code_review_line_is_app_lane_only(self):
         line = next(l for l in self.body.splitlines() if "Each PR has a lane" in l)
-        self.assertIn("\\`code-review:\\` line at the head SHA (\\`app\\` only)", line)
+        self.assertIn("\\`app\\` also needs \\`/review\\` APPROVED and a \\`code-review:\\` line", line)
+        pipeline = line.split("\\`pipeline\\` also needs", 1)[1].split(";", 1)[0]
+        self.assertNotIn("code-review", pipeline)
+
+    def test_pr_followup_still_says_what_the_generated_line_claims(self):
+        # The generated line restates /pr-followup; fail here when the skill changes so it is re-checked.
+        with open(PR_FOLLOWUP, encoding="utf8") as f:
+            skill = f.read()
+        self.assertIn("Use the built-in `code-review` skill, not the `code-review:code-review` plugin.", skill)
+        self.assertIn("A `pipeline` PR gets `/review` alone.", skill)
+        self.assertRegex(skill, r"one round")
 
 
 if __name__ == "__main__":

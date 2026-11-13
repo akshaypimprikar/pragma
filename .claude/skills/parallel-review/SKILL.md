@@ -27,7 +27,7 @@ Also read the following files if they exist — skip silently if absent:
 ### Check 1 — Architecture compliance (`/gates`' Gate 10, pre-gates mode)
 `/review`'s own Architecture section defers to `/gates` having already run and expects a PR gate summary to check against — neither exists yet at this pre-PR, pre-`/gates` point, so run the actual checks instead of that deferral:
 
-- **Gate 10 — Architecture & layer-rule compliance**: `scripts/check_gates.sh --only 10`, with Gate 10's pass/fail criteria from `.claude/skills/gates/SKILL.md`. It reads the committed `git diff develop...HEAD`, the same scope this command needs, and stops with exit 3 on a dirty tree, so commit first.
+- **Gate 10 — Architecture & layer-rule compliance**: `scripts/check_gates.sh --only 10`, with Gate 10's pass/fail criteria from `.claude/skills/gates/SKILL.md`. Its layer-rule checks read the committed `git diff develop...HEAD`, the same scope this command needs, but its UI-selector check scans every tracked UI-test and app file (`git ls-files`), so a selector failure can come from code this branch didn't touch; `/gates` fails on it all the same. It stops with exit 3 on a dirty tree, so commit first.
 - **Design compliance checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — only if `Views/` or UI components are touched.
 - **Code quality checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — unconditional, unlike Design compliance.
 

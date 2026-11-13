@@ -280,11 +280,11 @@ Views → ViewModels (@Observable) → Domain Services → Repository Protocols 
 
 ## Pipeline
 
-Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`code-review:code-review\` → \`/review\`, at most 2 rounds) → \`/release\` → \`main\`.
+Standard pipeline: \`/spec\` → \`/plan\` → \`/feature\` → \`/test\` (coverage-gap audit) → \`/gates\` → PR to \`develop\` → \`/pr-followup\` (\`app\` lane: \`code-review\` at medium → \`/review\`; \`pipeline\` lane: \`/review\` only; one round by default) → \`/release\` → \`main\`.
 
 ## Merge rule
 
-No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: gate summary, \`/review\` APPROVED and \`code-review:\` line at the head SHA, motivating incident. The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
+No command merges a PR automatically. Each PR has a lane (\`scripts/check_pr_lane.py\`, config \`scripts/pipeline_lanes.json\`: \`app\`, \`pipeline\`, \`docs\`, \`release\`) that sets the evidence it needs: gate summary, \`/review\` APPROVED at the head SHA, a \`code-review:\` line at the head SHA (\`app\` only), motivating incident (\`pipeline\`). The required checks \`gates\` and \`review-evidence\` decide mergeability, then the user merges. \`hotfix/*\` PRs are laned by their paths, so an app hotfix needs the full \`app\` evidence on both its \`main\` and \`develop\` PRs.
 CLAUDEMD
     success "AGENTS.md generated"
     echo '@AGENTS.md' > "$CLAUDE_MD"

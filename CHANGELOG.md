@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **The AGENTS.md that `setup.sh` generates described an old review pipeline.** It said `/pr-followup` runs the `code-review:code-review` plugin with at most 2 rounds, and that every lane needs a `code-review:` line. It now matches `/pr-followup`: the built-in `code-review` at medium then `/review` on the `app` lane, `/review` only on the `pipeline` lane, one round by default, and a `code-review:` line on the `app` lane only. The README's `/pr-followup` row is fixed the same way. `scripts/tests/test_setup_agents_md_pipeline.py` covers it. Existing installs: edit the two lines in your `AGENTS.md` by hand.
+- **`/sync-workflow` shipped the maintainer's app name and home path** in its leak-check example. It now uses placeholders.
+- **`/parallel-review` Check 1 pointed at Gate 10 commands that moved into `scripts/check_gates.sh`.** It now runs `scripts/check_gates.sh --only 10`.
+- **Gate 11 check 5 (lowered coverage threshold) read only `gates/SKILL.md`, `CONSTRAINTS.md` and `deterministic-pr-gates`.** `GATE_DEFINITION_FILES` now also covers `AGENTS.md`, `CLAUDE.md` and `.claude/context/invariants.md`, so a lowered `%` there is flagged too. `scripts/tests/test_gate_definition_files.py` checks the list and that every entry is guarded.
+- **Doc fixes:** `/review` documents that a non-advisory MEDIUM must set a flag (`review_verdict.py` exits 2 otherwise) and names `gates.yml` for the base-branch gate run; `gates/reference.md` describes `check_gates.sh` output instead of the old `GATE 1 PASS` strings and lists every guarded path; `/pipeline-review` reads the launch directory's memory folder and checks the Gate 6 coverage script instead of the `ios-coverage` skill. `check_tdd_commit_order.py` shares one `GIT_BASE_ARGS` tuple (no behaviour change).
+- **Correction to 2.1.2:** the "Install links each skill into `.agents/skills/`" entry says a full Codex run of a skill is still to come. One was done on 2026-11-01/02: 24 scored runs of `/review` (12 Codex, 12 Claude).
+
 ## [2.1.2] — 2026-11-12
 
 ### Added

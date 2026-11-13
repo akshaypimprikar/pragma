@@ -198,7 +198,7 @@ The built-in spec modes are not bad. They are a reasonable default for teams tha
 | `/gates` | Makes sure that the build passes, the full test suite passes, and the architecture follows the rules, before you open a PR |
 | `/review` | Reviews a PR for architecture compliance. Posts its verdict as a real GitHub review. |
 | `/test` | Audits a feature branch for coverage gaps and adds the missing tests. Runs after `/feature` and before `/gates`. |
-| `/pr-followup` | Runs `code-review:code-review` and then `/review` right after a PR opens, and records both in the PR body for the `review-evidence` check. |
+| `/pr-followup` | Right after a PR opens, runs the built-in `code-review` at medium (`app` lane only) and then `/review`, one round by default, and records them in the PR body for the `review-evidence` check. |
 | `/bugfix "description"` | Writes a regression test first, then the fix. Always test first. |
 | `/release 1.0.0` | Bumps the version, updates the changelog, opens a PR to main, and creates a git tag |
 

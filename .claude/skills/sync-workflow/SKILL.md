@@ -78,7 +78,7 @@ git -C <pragma path> add .claude/skills/ scaffold/
 ```bash
 git -C <pragma path> diff --cached | grep -E '^\+' | grep -iE '<your real app name>|/Users/|iPhone [0-9]+|<a concrete ViewModel or Repository name>'
 ```
-Fill in the alternation with your actual project's literal identifiers before running — e.g. FinanceTracker's own copy of this check greps for `FinanceTracker|/Users/akshaypimprikar|iPhone 17|AccountViewModel|SwiftData[A-Z]\w*Repository`. Searching for the placeholder text itself (`<AppName>` etc.) catches nothing; it's the literal values a leak would introduce that this check needs. A worked example in prose is fine (pragma's own files already do this, e.g. `/gates feature/recurring-transactions`). A hardcoded value standing in for what should be a `<placeholder>` is not — generalize it before committing.
+Fill in the alternation with your actual project's literal identifiers before running — e.g. `<AppName>|/Users/<you>|iPhone <N>|<ConcreteViewModel>|<ConcreteRepository>`, with each placeholder replaced by your project's real value. Searching for the placeholder text itself (`<AppName>` etc.) catches nothing; it's the literal values a leak would introduce that this check needs. A worked example in prose is fine (pragma's own files already do this, e.g. `/gates feature/recurring-transactions`). A hardcoded value standing in for what should be a `<placeholder>` is not — generalize it before committing.
 
 **b. `<placeholder>` convention held where your project's source used a concrete name:**
 For every newly templated section (an architecture rule, a gate), confirm it uses

@@ -69,6 +69,9 @@ GIT_DIFF_BASE_ARGS = (
 
 GATE_DEFINITION_FILES = (
     ".claude/skills/gates/SKILL.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude/context/invariants.md",
     "CONSTRAINTS.md",
     ".claude/skills/deterministic-pr-gates/SKILL.md",
 )

@@ -27,7 +27,7 @@ Also read the following files if they exist — skip silently if absent:
 ### Check 1 — Architecture compliance (`/gates`' Gate 10, pre-gates mode)
 `/review`'s own Architecture section defers to `/gates` having already run and expects a PR gate summary to check against — neither exists yet at this pre-PR, pre-`/gates` point, so run the actual checks instead of that deferral:
 
-- **Gate 10 — Architecture & layer-rule compliance**, from `.claude/skills/gates/SKILL.md` directly, using Gate 10's own pass/fail criteria. Most of its commands already use `git diff develop...HEAD`, the same scope this command needs — except the UI-selector-listing command, which scans all of `<AppName>UITests/*.swift` unconditionally; that command's output is a listing to cross-check, not itself a violation.
+- **Gate 10 — Architecture & layer-rule compliance**: `scripts/check_gates.sh --only 10`, with Gate 10's pass/fail criteria from `.claude/skills/gates/SKILL.md`. Its layer-rule checks read the committed `git diff develop...HEAD`, the same scope this command needs, but its UI-selector check scans every tracked UI-test and app file (`git ls-files`), so a selector failure can come from code this branch didn't touch; `/gates` fails on it all the same. It stops with exit 3 on a dirty tree, so commit first.
 - **Design compliance checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — only if `Views/` or UI components are touched.
 - **Code quality checks**, from `.claude/skills/review/SKILL.md`, scoped to `git diff develop...HEAD` — unconditional, unlike Design compliance.
 
@@ -54,7 +54,7 @@ Verdict: APPROVED | CHANGES REQUESTED
 ## Combined verdict
 READY FOR /gates | READY FOR /gates (pending your own code-review:code-review pass) | FIX BEFORE /gates: <deduplicated list — same file:line flagged by both checks reported once>
 ```
-Rule: any Check 1 failure (verdict is `CHANGES REQUESTED`, or any Gate 10 command fails its own pass/fail criteria) forces `FIX BEFORE /gates` — these are the same rules `/gates` will enforce as hard blockers. For Check 2, any Critical or High `code-review:code-review` finding also forces `FIX BEFORE /gates`; Medium/Low-only findings don't block. Use the middle, qualified verdict only when Check 2 never actually ran (the `disable-model-invocation` case) and Check 1 is otherwise clean. Only emit the plain `READY FOR /gates` when both checks ran and are clean (or Medium/Low-only).
+Rule: any Check 1 failure (verdict is `CHANGES REQUESTED`, or Gate 10 fails) forces `FIX BEFORE /gates` — these are the same rules `/gates` will enforce as hard blockers. For Check 2, any Critical or High `code-review:code-review` finding also forces `FIX BEFORE /gates`; Medium/Low-only findings don't block. Use the middle, qualified verdict only when Check 2 never actually ran (the `disable-model-invocation` case) and Check 1 is otherwise clean. Only emit the plain `READY FOR /gates` when both checks ran and are clean (or Medium/Low-only).
 
 ## Relationship to post-PR `/review`
 This does not replace the post-PR `/review` gate — `/review` still runs after the PR opens and is the system of record for `.claude/context/rejections.md` and the merge decision. `/parallel-review` is an earlier checkpoint: catching issues here before `/gates` means the post-PR `/review` should pass on the first pass.

@@ -1,13 +1,13 @@
 # Gates — reference
 
-Background for `SKILL.md`. `SKILL.md` holds every gate command, threshold and pass rule, and `/review` re-runs it as written. This file restates a few rules only to explain them (Gate 2's zero-test failure, the `/loop` stop condition), so edit both files together.
+Background for `SKILL.md`. `scripts/check_gates.sh` (Gates 0–11) and `SKILL.md` hold every gate command, threshold and pass rule, and `/review` re-runs the deterministic ones. This file restates a few rules only to explain them (Gate 2's zero-test failure, the `/loop` stop condition), so edit both files together.
 
 ## Gate 1 — why no pipeline; Xcode 27 advisory
 
 `xcodebuild` writes to a log file and `xcsift` reads that file afterwards — there is no pipeline, so
 its own exit status is captured directly (a `| xcsift` pipeline hides it unless `pipefail`,
 `PIPESTATUS` (bash) or `pipestatus` (zsh) is used, and `2>&1 | xcsift` on an empty or crashed run
-prints a clean-looking summary). Pass: `GATE 1 PASS` — non-empty log, exit 0, and the `BUILD SUCCEEDED`
+prints a clean-looking summary). Pass: the script prints `[✓] Build` — non-empty log, exit 0, and the `BUILD SUCCEEDED`
 marker. Fail: anything else — an empty log or a non-zero exit is a failure, never "no errors seen".
 Stop immediately — a test run on a broken build is meaningless.
 
@@ -18,7 +18,7 @@ for the two known Xcode 27 patterns.
 
 ## Gate 2 — why zero executed tests fails
 
-Pass: `GATE 2 PASS` with an executed-test count above zero. The count is required because
+Pass: the script prints `[✓] Tests — N tests executed` with N above zero. The count is required because
 `xcodebuild test` can report `** TEST SUCCEEDED **` with exit 0 when a test filter or scheme change
 matches nothing. The count is read from per-test-case result lines: `Test Case '…' passed` / `Test case '…' passed`,
 and `✔ Test "…" passed …` for Swift Testing's own console format. On Xcode 27, `xcodebuild test` prints
@@ -59,7 +59,7 @@ To drive the full feature-to-PR cycle autonomously (no interval = Claude self-pa
 
 Gates 0–11 are agent-instruction checks, so an agent under pressure to make a stuck gate pass could edit a gate definition instead of fixing the violation, then report a clean summary. This is most likely in an unattended `/loop` run with no human turn in between. Two layers close that:
 
-- **Live block:** `.claude/hooks/guard_protected_paths.py`, a native `PreToolUse` hook installed by `setup.sh` and `/pragma:init` (`--no-guard-hook` opts out). On a `feature/*` branch it blocks `Write`, `Edit` and `MultiEdit`, and, best effort, `Bash` writes, to skills (`.claude/skills/*/SKILL.md`, `.claude/skills/*/reference.md`), `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/context/invariants.md`, `.claude/settings.json`, `.claude/hooks/*` and `scripts/check_*`, at the repo root or under any subdirectory (a Claude project inside a monorepo). The fix is to make that change on a `chore/*` or `fix/*` branch.
+- **Live block:** `.claude/hooks/guard_protected_paths.py`, a native `PreToolUse` hook installed by `setup.sh` and `/pragma:init` (`--no-guard-hook` opts out). On a `feature/*` branch it blocks `Write`, `Edit` and `MultiEdit`, and, best effort, `Bash` writes, to every path in `GUARDED_PATH_GLOBS` (`scripts/check_gate_integrity.py`): skills (`.claude/skills/*/SKILL.md`, `.claude/skills/*/reference.md`), `AGENTS.md`, `CLAUDE.md`, `CONSTRAINTS.md`, `.claude/context/invariants.md`, `.claude/settings.json`, `.claude/hooks/*`, `scripts/check_*`, `scripts/pipeline_lanes.json`, `scripts/detect_build_target.sh`, `scripts/select_simulator.py`, `.github/workflows/*`, `.codex/hooks.json` and `.codex/config.toml`, at the repo root or under any subdirectory (a Claude project inside a monorepo). The fix is to make that change on a `chore/*` or `fix/*` branch.
 - **CI backstop:** Gate 11's check 1 (`scripts/check_gate_integrity.py`) flags the same set of files on a `feature/*` PR, through `GUARDED_PATH_GLOBS`. The `gates` job (`.github/workflows/gates.yml`) runs on every PR, so a PR that only touches them still runs it. A step in that job runs the hook's self-test, which fails if the hook's glob list and the script's differ (it runs the PR's own copy, so it catches an honest slip, not a deliberate one). This catches a plain commit and push that never went through Claude Code.
 
 What is not covered: the hook's Bash detection is a best-effort parse, so `python -c`, interpreter heredocs, variable or glob expansion (including `cd $VAR`), `find -exec` or `-delete`, `xargs rm` fed from stdin, `git checkout <ref> -- file`, `git restore` and `rm -rf <dir that only contains a nested project>` are not detected. A symlink that already exists is followed; one created and written through in the same command is not. The hook only runs in sessions that load the project's own `.claude/settings.json`: verified 2026-09-23 that a session started from a parent directory did not fire it, so start Claude Code from the project root. The CI backstop applies either way. The hook fails open on bad input, no git repo or a detached HEAD, and it allows every edit off `feature/*`. Neither layer catches an agent that renames its branch away from `feature/*`. `.claude/settings.local.json` is not on the list. Pattern sourced from `karanb192/claude-code-hooks`'s "config-guard" hook, surfaced in the 2026-09-08 Agentic AI Intelligence Report.

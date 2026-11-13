@@ -79,7 +79,7 @@ coverage pass is too expensive to repeat here. Everything else that is cheap and
    whether to trust it".
 2. **Re-run the deterministic gates at that SHA and compare to the summary.** Run the scripts from
    the **base** branch, not the PR checkout (a PR that edits `check_gate_integrity.py` must not be
-   judged by its own edited copy ), and pass the PR's branch name because
+   judged by its own edited copy — the `gates` job in `gates.yml` does the same), and pass the PR's branch name because
    a `gh pr checkout`/worktree HEAD may be detached, which makes the integrity script silently skip
    its `feature/*` check:
    ```bash
@@ -212,7 +212,7 @@ Merge its output into the verdict:
   is listed in the posted verdict — never dropped silently.
 - Decide which accepted findings block with `scripts/review_verdict.py`, not by judgment. Pipe it a JSON list
   of the accepted findings (dismissed ones may be left out): `{"id", "severity", "in_diff", "advisory",
-  "depends_on_unchanged", "guard_bypass"}`, flags default false. `in_diff` means a defect in lines this PR adds
+  "depends_on_unchanged", "guard_bypass"}`, flags default false, except that a MEDIUM that is not advisory must set one of the three explicitly (the script exits 2 otherwise). `in_diff` means a defect in lines this PR adds
   or changes. `depends_on_unchanged` means unchanged code the PR's change needs to work. `guard_bypass` means
   a concrete input or sequence that bypasses a guard in `.claude/hooks/`, `gates`, `review` or
   `scripts/check_*`. It prints a findings verdict, the blocking ids and the ids that get an issue instead (a failed gate-verification check still forces CHANGES REQUESTED, whatever the script prints): HIGH always

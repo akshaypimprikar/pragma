@@ -4,7 +4,7 @@
 # Best-effort: disables ~170 non-essential simulator background daemons
 # (Siri, Spotlight, widgets, iCloud, photo analysis, etc.) via SimSlim
 # (https://github.com/MobAI-App/simslim) to cut per-simulator memory
-# footprint — measured on a real production test run (FinanceTracker,
+# footprint — measured on a real production test run (a SwiftUI app,
 # full unit + UI suite, 2026-09): 2.62GB -> 0.83GB idle (~3x), 35s -> 9s
 # boot, zero test failures across unit tests and 7 UI test suites,
 # including one that exercises real UNUserNotificationCenter delivery.

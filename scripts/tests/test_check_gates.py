@@ -261,6 +261,54 @@ class CheckGatesTests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.row(summary, "Branch naming").startswith("[✓]"))
 
+    def test_same_named_test_is_paired_by_folder(self):
+        # pragma #161: tests were keyed by basename, so AcceptanceTests/ (listed first, older than the branch)
+        # hid AppTests/Services/NewThingTests.swift, committed after the implementation.
+        git(self.repo, "checkout", "-q", "develop")
+        self.commit({"AcceptanceTests/NewThingTests.swift": "final class NewThingTests {}\n"})
+        git(self.repo, "checkout", "-q", "chore/x")
+        git(self.repo, "rebase", "-q", "develop")
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"}, "green")
+        self.commit({"AppTests/Services/NewThingTests.swift": "final class NewThingTests {}\n"}, "red, too late")
+        rc, summary, out = self.run_gates("--only", "9")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("test file AppTests/Services/NewThingTests.swift committed AFTER implementation", out)
+
+    def test_ambiguous_same_named_tests_fail(self):
+        self.commit({"AcceptanceTests/NewThingTests.swift": "final class NewThingTests {}\n",
+                     "BetaTests/NewThingTests.swift": "final class NewThingTests {}\n"}, "red")
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"}, "green")
+        rc, summary, out = self.run_gates("--only", "9")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("2 test files are named NewThingTests.swift and none mirrors its folders", out)
+
+    def cut_release(self, release_files):
+        # main at the base commit; develop gains a new untested Swift file (gated in its own PR); then
+        # release/1.0.0 renames [Unreleased], as /release step 3 does.
+        git(self.repo, "checkout", "-q", "develop")
+        git(self.repo, "branch", "main")
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"}, "feature")
+        git(self.repo, "checkout", "-q", "-b", "release/1.0.0")
+        self.commit(dict({"CHANGELOG.md": "# Changelog\n\n## [1.0.0] — 2026-11-14\n- Something\n"}, **release_files), "release")
+
+    def test_release_branch_checks_only_the_release_commit(self):
+        # pragma #182: with --base main every gate saw all of develop, and Gate 5 always failed.
+        self.cut_release({})
+        rc, summary, out = self.run_gates(FAKE_XCODEBUILD="fail")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Lane: release", summary)
+        self.assertEqual(self.row(summary, "Build"), "[–] Build — N/A (release/*: checked in each PR to develop)")
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[–] CHANGELOG — N/A (release renames [Unreleased])")
+        for name in ("Tests", "Coverage", "Security", "Abstraction bloat", "RED-before-GREEN"):
+            self.assertIn("— N/A (release/*: checked in each PR to develop)", self.row(summary, name))
+        self.assertEqual(len(summary.splitlines()), 3 + 11, summary)
+
+    def test_release_branch_still_checks_the_release_commit_itself(self):
+        self.cut_release({"App/Services/Existing.swift": "struct Existing {} // TODO: remove\n"})
+        rc, summary, out = self.run_gates("--only", "3")
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.row(summary, "No TODO/FIXME/HACK").startswith("[✗]"))
+
     def test_empty_unreleased_above_a_release_fails_changelog(self):
         # FinanceTracker PR#201 F1: a fixed-size window read the previous release's bullets as Unreleased entries.
         self.commit({"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n\n### Added\n\n## [1.0.0]\n- Old entry\n"})

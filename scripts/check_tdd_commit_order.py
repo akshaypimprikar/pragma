@@ -111,6 +111,24 @@ def repo_has_any_scoped_file():
     return any(any(seg in line for seg in SCOPED_LAYER_DIRS) for line in out.splitlines())
 
 
+def shared_folder_suffix(source, test):
+    """How many trailing folders two paths share: App/Models/A.swift and AppTests/Models/ATests.swift share 1."""
+    a, b = source.split("/")[:-1], test.split("/")[:-1]
+    n = 0
+    while n < min(len(a), len(b)) and a[-1 - n] == b[-1 - n]:
+        n += 1
+    return n
+
+
+def pick_test(source, candidates):
+    """The test file whose folders mirror the source's most closely, or None when two tie (pragma #161: keying
+    by basename alone paired a source with whichever same-named test file git listed first)."""
+    scored = sorted(((shared_folder_suffix(source, c), c) for c in candidates), reverse=True)
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None
+    return scored[0][1]
+
+
 commits = commit_list()
 if not commits:
     print(f"No commits ahead of {BASE_REF} — nothing to check.")
@@ -118,7 +136,7 @@ if not commits:
 
 test_files_by_basename = {}
 for path in all_test_files():
-    test_files_by_basename.setdefault(path.rsplit("/", 1)[-1], path)
+    test_files_by_basename.setdefault(path.rsplit("/", 1)[-1], []).append(path)
 
 first_added_index = {}
 added_per_commit = []
@@ -136,9 +154,17 @@ for i, files in enumerate(added_per_commit):
             continue
         base = f.rsplit("/", 1)[-1]
         test_basename = base[: -len(".swift")] + "Tests.swift"
-        test_path = test_files_by_basename.get(test_basename)
-        if test_path is None:
+        candidates = test_files_by_basename.get(test_basename)
+        if not candidates:
             continue  # no matching test file at all — your coverage gate catches this, not this one
+        test_path = pick_test(f, candidates)
+        if test_path is None:
+            checked += 1
+            violations.append(
+                f"{f} — {len(candidates)} test files are named {test_basename} and none mirrors its folders "
+                f"({', '.join(candidates)}) — move or rename one so the pairing is unambiguous"
+            )
+            continue
         test_index = first_added_index.get(test_path)
         if test_index is None:
             continue  # test file predates this branch — not a new-file case

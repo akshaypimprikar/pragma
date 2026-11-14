@@ -22,6 +22,9 @@ Every deterministic check lives in one script, so no model transcribes a result:
 ```bash
 scripts/check_gates.sh            # --base main on release/* and hotfix/* (the default there); --branch <name> on a detached HEAD
 ```
+On `release/*` the script runs in release mode: the gates diff against `develop`, so they see only the release
+commit (every other commit was gated in its own PR to `develop`), and Gates 1-2 and 5-9 print `[–] ... — N/A`.
+The `Lane:` line still uses the PR's base, `main`.
 It runs the pre-step and Gates 0–11 in order, prints each gate's details, and ends with the Gate summary block
 (`Gates run at <sha>`, `Lane:`, one line per gate). Paste that block into the PR body as printed; never retype or
 edit it. Exit 0: every blocking gate passed. Exit 1: a blocking gate failed — fix it, commit, and re-run.
@@ -86,7 +89,8 @@ Fail: section missing or empty — create the section and add a one-line summary
 GREEN (implementation) commit carries user-facing content — summarize those, skipping RED (test-only) commits.
 Commit it and re-run the script.
 N/A: a PR that changes only `.claude/context/feature-log.md` (`/release` puts its entry in the release commit);
-the script reports `[–] CHANGELOG — N/A (feature-log only)`.
+the script reports `[–] CHANGELOG — N/A (feature-log only)`. On `release/*` it reports
+`[–] CHANGELOG — N/A (release renames [Unreleased])`, because `/release` turns that section into the version heading.
 
 ### Gate 6 — Coverage (conditional: new Swift files on branch)
 Each new non-test `.swift` file must reach ≥80% line coverage in Gate 2's result bundle (`xccov`). Skipped:
@@ -113,6 +117,8 @@ Runs `scripts/check_tdd_commit_order.py <base>`. For every new file in a layer w
 Services; viper: Presenters, Interactors, Entities — set `project.architecture` in `scripts/pipeline_lanes.json`,
 or list your own folders in `project.scoped_layer_dirs`) that has a matching test file, the test file must be
 added in a strictly earlier commit than the implementation. Why from git history: `reference.md` § Gate 9.
+When several test files share that name, the one whose folders mirror the source file's is used; a tie fails
+and names the files, so move or rename one.
 Fail: fix by re-doing the task as two commits (test-only, confirm it fails, then implementation). Exit 2
 (unconfigured — the layer names match nothing in this repo) is reported `[✗]`, never a pass. A branch that adds
 no `.swift` file has nothing to check, so the script skips the gate without running the TDD script; an
@@ -160,7 +166,7 @@ from a new one. With no `rules` set, the summary line says `generic checks only 
 project should have at least its layer-separation and type-safety rules here.
 
 ### Gate 11 — Gate integrity (floor-guard)
-Runs `scripts/check_gate_integrity.py <base> <branch>` (`main` on `release/*` and `hotfix/*`). Detects
+Runs `scripts/check_gate_integrity.py <base> <branch>` (`develop` on `release/*`, `main` on `hotfix/*`). Detects
 gate-weakening — a gate-definition file edited on a `feature/*` branch, a test deleted instead of fixed, a new
 suppression marker, an unfinished stub, or a lowered threshold — rather than code-quality issues. It catches the
 diff-detectable half of "Guard against self-modifying guardrail files" below. The exact pattern list lives in

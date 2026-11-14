@@ -46,7 +46,7 @@ The stop condition below must match the gate list in `SKILL.md`. Change both in 
 
 If any gate fails and needs iterative fixes, run this as a separate top-level command (not from within this agent):
 ```
-/loop Fix failing gates and re-check. Stop when all blocking gates pass (Gates 1–11, 10 blocking; Gate 8 abstraction bloat is advisory, `[i]` only, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated (or Gate 5 N/A on a feature-log-only PR), coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
+/loop Fix failing gates and re-check. Stop when all blocking gates pass (Gates 1–11, 10 blocking; Gate 8 abstraction bloat is advisory, `[i]` only, never blocks): tree clean and SHA recorded, build succeeds, all tests pass with a non-zero executed count, no TODO/FIXME/HACK in changed files, branch name valid, CHANGELOG Unreleased section populated (or Gate 5 N/A on a feature-log-only PR or a `release/*` branch; a row the script prints as N/A on a release-lane branch counts as met), coverage ≥80% on new files, security review clean, RED commit precedes GREEN commit for every new file in a scoped layer, architecture & layer-rule compliance clean, gate integrity clean.
 ```
 Claude iterates on fixes and re-checks until all conditions hold. Keep the condition deterministic and verifiable — exit-code or grep-checkable facts only. "implement the feature correctly" is not verifiable and risks the loop satisfying the literal wording without a real fix.
 

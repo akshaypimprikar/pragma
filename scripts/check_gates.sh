@@ -6,7 +6,8 @@
 # candidates, and writing candidate invariants. See .claude/skills/gates/SKILL.md.
 #
 # Usage: scripts/check_gates.sh [--base REF] [--branch NAME] [--only N,N,...] [--config PATH]
-#   --base    ref to diff against (default: main for release/* and hotfix/*, else develop)
+#   --base    the PR's base, for the lane (default: main for release/* and hotfix/*, else develop). The gates diff
+#             against it, except on release/*: there they diff against develop (release mode, below)
 #   --branch  branch name to check (default: the current branch; pass it on a detached HEAD)
 #   --only    run only these gates, e.g. 3,4,5,10 (what /review re-runs)
 #   --config  pipeline config (default: scripts/pipeline_lanes.json), read from its "gates" key
@@ -25,7 +26,7 @@ while [ $# -gt 0 ]; do
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "check_gates.sh: $1 needs a value" >&2; exit 2; }
             case "$1" in --base) BASE=$2 ;; --branch) BRANCH=$2 ;; --only) ONLY=$2 ;; --config) CONFIG=$2 ;; esac
             shift 2 ;;
-        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
         *) echo "check_gates.sh: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -38,7 +39,22 @@ if [ -z "$BASE" ]; then
     case "$BRANCH" in release/*|hotfix/*) BASE=main ;; *) BASE=develop ;; esac
 fi
 git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "check_gates.sh: base ref '$BASE' not found (git fetch first?)" >&2; exit 2; }
-BASE_NAME=${BASE#origin/}
+LANE_BASE=$BASE
+
+# Release mode (pragma #182): on release/* the gates check only the release commit(s), develop...HEAD. Every other
+# commit was gated in its own PR to develop. /release renames [Unreleased], so Gate 5 reports N/A; Gates 1-2 and
+# 6-9 report N/A too when the lane is `release` (see RELEASE_LANE below).
+# The lane still comes from the PR's base (main).
+RELEASE=0
+case "$BRANCH" in
+    release/*)
+        RELEASE=1
+        # origin/develop first, as LANE_REF prefers origin/<base>: a stale local develop would make the
+        # release commit look like it carries develop's commits, and the lane read `app`.
+        BASE=origin/develop
+        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || BASE=develop
+        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "check_gates.sh: release mode needs origin/develop or develop (git fetch first?)" >&2; exit 2; } ;;
+esac
 
 wants() {  # wants N: true when gate N is selected
     [ -z "$ONLY" ] && return 0
@@ -60,7 +76,23 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/check_gates.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 SUMMARY=""; FAILED=0; SECURITY_PENDING=0
+
+# ── Lane (needed up front: release mode's N/A rows apply only to the release lane) ──
+LANE_REF=$LANE_BASE
+case "$LANE_BASE" in origin/*) ;; *) git rev-parse --verify -q "origin/$LANE_BASE^{commit}" >/dev/null && LANE_REF="origin/$LANE_BASE" ;; esac
+# On release/* the lane script also diffs develop...HEAD; pass the develop ref release mode resolved.
+LANE=$(python3 scripts/check_pr_lane.py --git "$LANE_REF" --head-branch "$BRANCH" --base-branch "${LANE_BASE#origin/}" --config "$CONFIG" \
+    --develop-ref "$([ "$RELEASE" -eq 1 ] && echo "$BASE" || echo origin/develop)" 2>"$TMP/lane.err") ||
+    LANE="unknown ($(tail -n 1 "$TMP/lane.err"))"
+# Gates 1-2 and 6-9 are N/A only when the release branch carries release changes alone (lane `release`);
+# a release/* commit that adds code is gated like any other PR, against develop (#233 review).
+RELEASE_LANE=0
+[ "$RELEASE" -eq 1 ] && [ "$LANE" = release ] && RELEASE_LANE=1
 row() { SUMMARY="${SUMMARY}$1"$'\n'; }
+release_na() {  # release_na NAME [WHY]: on release/*, print the gate's N/A row and succeed; otherwise fail
+    [ "$RELEASE_LANE" -eq 1 ] || return 1
+    row "[–] $1 — N/A (${2:-release/*: checked in each PR to develop})"
+}
 fail_row() { row "[✗] $1"; FAILED=1; }
 section() { printf '\n--- %s ---\n' "$1"; }
 
@@ -95,7 +127,8 @@ NL_NAMES=$(git diff "$BASE"...HEAD -z --name-only | LC_ALL=C tr '\n\0' '\001\n' 
 [ "$NL_NAMES" -gt 0 ] && fail_row "File names — $NL_NAMES changed path(s) have a newline in the name; rename them"
 if wants 1 || wants 2; then
     section "Gate 0 — build-relevant changes"
-    if [ -n "$GATE0_FILES" ]; then echo "$GATE0_FILES"; else echo "none — Gates 1 and 2 are skipped"; fi
+    if [ "$RELEASE_LANE" -eq 1 ]; then echo "release/* — Gates 1 and 2 are N/A"
+    elif [ -n "$GATE0_FILES" ]; then echo "$GATE0_FILES"; else echo "none — Gates 1 and 2 are skipped"; fi
 fi
 
 # ── Gates 1-2 — build and full test suite ────────────────────────────────────
@@ -122,7 +155,10 @@ xcode_setup() {  # sets TARGET and DEST; prints why and returns 1 when it can't
 show_log() { if command -v xcsift >/dev/null 2>&1; then xcsift < "$1"; else tail -n 40 "$1"; fi; }
 
 if wants 1 || wants 2; then
-    if [ -z "$GATE0_FILES" ]; then
+    if [ "$RELEASE_LANE" -eq 1 ]; then
+        wants 1 && release_na "Build"
+        wants 2 && release_na "Tests"
+    elif [ -z "$GATE0_FILES" ]; then
         wants 1 && row "[–] Build — skipped (no build-relevant changes)"
         wants 2 && row "[–] Tests — skipped (no build-relevant changes)"
     elif ! WHY=$(xcode_setup); then
@@ -183,7 +219,7 @@ if wants 4; then
 fi
 
 # ── Gate 5 — CHANGELOG.md has Unreleased entries ─────────────────────────────
-if wants 5; then
+if wants 5 && ! { [ "$RELEASE" -eq 1 ] && row "[–] CHANGELOG — N/A (release renames [Unreleased])"; }; then
     # Only the [Unreleased] section itself: stop at the next "## " heading, so an empty section
     # never borrows the previous release's bullets. "###" subheadings, CRLF blank lines and
     # Keep-a-Changelog link definitions ("[1.0.0]: https://...") are not entries.
@@ -195,7 +231,7 @@ if wants 5; then
 fi
 
 # ── Gate 6 — coverage of new Swift files (≥80% each) ─────────────────────────
-if wants 6; then
+if wants 6 && ! release_na "Coverage"; then
     if [ -z "$NEW_SWIFT" ]; then row "[–] Coverage — skipped (no new files)"
     elif [ ! -d "$TMP/gate2.xcresult" ]; then
         if wants 2; then fail_row "Coverage — no coverage data (Gate 2 did not run with coverage)"
@@ -247,7 +283,7 @@ PY
 fi
 
 # ── Gate 7 — security trigger ────────────────────────────────────────────────
-if wants 7; then
+if wants 7 && ! release_na "Security"; then
     PATTERN=$(cfg sensitive_paths)
     if [ -z "$PATTERN" ]; then row "[–] Security — skipped (gates.sensitive_paths not configured)"
     else
@@ -262,7 +298,7 @@ if wants 7; then
 fi
 
 # ── Gate 8 — abstraction bloat / duplication (advisory) ──────────────────────
-if wants 8; then
+if wants 8 && ! release_na "Abstraction bloat"; then
     G8=$(python3 - "$BASE" <<'PY'
 import re, subprocess, sys
 base = sys.argv[1]
@@ -320,7 +356,7 @@ PY
 fi
 
 # ── Gate 9 — RED-before-GREEN commit order ───────────────────────────────────
-if wants 9; then
+if wants 9 && ! release_na "RED-before-GREEN commit order"; then
     if [ -z "$NEW_SWIFT" ]; then row "[–] RED-before-GREEN commit order — skipped (no new Swift files)"
     elif [ ! -f scripts/check_tdd_commit_order.py ]; then fail_row "RED-before-GREEN commit order — script missing"
     else
@@ -419,10 +455,6 @@ if wants 11; then
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
-LANE_REF=$BASE
-case "$BASE" in origin/*) ;; *) git rev-parse --verify -q "origin/$BASE^{commit}" >/dev/null && LANE_REF="origin/$BASE" ;; esac
-LANE=$(python3 scripts/check_pr_lane.py --git "$LANE_REF" --head-branch "$BRANCH" --base-branch "$BASE_NAME" --config "$CONFIG" 2>"$TMP/lane.err") ||
-    LANE="unknown ($(tail -n 1 "$TMP/lane.err"))"
 
 printf '\n=== Gate summary (paste into the PR body) ===\n'
 echo "Gates run at $SHA"

@@ -338,3 +338,15 @@
 **Rule violated:** no formal rule, caught in review
 **File:** docs/pipeline-review/2026-11-12.md:44
 **Caught by:** this review
+
+## 2026-11-14 — PR#195 — Release-mode tests could not fail on the base switch
+**What was wrong:** `test_release_branch_checks_only_the_release_commit` and `..._still_checks_the_release_commit_itself` passed with release mode keeping `BASE=main` for every gate: the develop commit tripped no gate, and the N/A rows come from `RELEASE=1`, not the base switch.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/tests/test_check_gates.py:302
+**Caught by:** this review
+
+## 2026-11-14 — PR#195 — Release mode preferred a stale local develop
+**What was wrong:** release mode set the gates' base and the lane's `--develop-ref` to local `develop` whenever it existed; when it lags `origin/develop`, the lane reads `app` instead of `release` and Gate 3 flags develop commits already gated.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:48
+**Caught by:** this review

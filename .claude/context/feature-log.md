@@ -8,6 +8,11 @@
 **Key architectural decisions:** <brief note or "none">
 -->
 
+## v2.1.3 — 2026-11-14
+**Features added:** Fix release, no new features. The AGENTS.md that `setup.sh` generates now matches `/pr-followup` (built-in `code-review` at medium then `/review` on the `app` lane, `/review` only on `pipeline`, one round), and its Merge rule covers app+pipeline PRs and the configured `sync` lane; shipped files no longer name the maintainer's app or home folder; `/parallel-review` Check 1 runs `scripts/check_gates.sh --only 10`; Gate 11's lowered-threshold check also reads `AGENTS.md`, `CLAUDE.md` and `.claude/context/invariants.md`; README and `gates/reference.md` guard lists name every guarded path; doc fixes in `/review`, `/pipeline-review` and `gates/reference.md`.
+**Key files changed:** `scripts/setup.sh`, `scripts/check_gate_integrity.py`, `scripts/slim_simulator.sh`, `scripts/tests/test_setup_agents_md_pipeline.py` (new), `scripts/tests/test_gate_definition_files.py` (new), `.claude/skills/{parallel-review,pipeline-review,review,gates,trim-context,sync-workflow}/`, `README.md`
+**Key architectural decisions:** none
+
 ## v2.1.2 — 2026-11-12
 **Features added:** `/gates` runs as one script (`scripts/check_gates.sh`) that prints the Gate summary itself; guard hook also runs in Codex CLI and skills are linked into `.agents/skills/`; review stage contract (`scripts/review.schema.json`, `scripts/check_review_contract.py`); opt-in install of Apple's Xcode 27 Agent Skills; legacy-project mode C1-C6 (`-workspace` detection, classic-group file registration, architecture-neutral `/spec` `/plan` `/feature` `/test`, UIKit `/design`, `FakeApp-Legacy` CI canary, README scope/FAQ); gate-runner fail-open fixes (Gate 7 security exit 4, Gate 10 crash row, non-ASCII/newline paths in `check_pr_lane.py` and `check_gates.sh`); gate-integrity path parsing (#159, #170); hardware-exception boundary match; `/pragma:init` copies `check_gates.sh` and the file-registration scripts (#133).
 **Key files changed:** `scripts/check_gates.sh`, `scripts/check_gate_integrity.py`, `scripts/check_pr_lane.py`, `scripts/check_coverage.py`, `scripts/check_review_contract.py`, `scripts/review.schema.json`, `scripts/pipeline_lanes.json`, `.claude/hooks/`, `.claude/skills/gates/`, `.claude/skills/review/`, `.claude/commands/init.md`, `setup.sh`, `scaffold/`, `README.md`.

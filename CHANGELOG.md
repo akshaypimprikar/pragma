@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Re-wrapped `pr-followup/SKILL.md:10`,** which the #190-era port had left as one over-long line (FinanceTracker #229). Synced from FinanceTracker.
 - **`/pr-followup`'s invocation note now says step 3 applies on the `app` lane** and is set off as its own paragraph, matching FinanceTracker. The 2026-11-12 pipeline-review report now notes that its 2.1.2 port item was only partly done (FinanceTracker #226 ported (a); #228 ported (b)-(d)).
 
 ## [2.1.3] — 2026-11-14

@@ -7,7 +7,8 @@ disable-model-invocation: true
 # PR Followup Agent
 
 Runs the review chain for the PR's lane immediately after a PR is opened, and records each
-result where the `review-evidence` CI check reads it (`scripts/check_review_evidence.py`). A `pipeline` PR gets `/review` alone.
+result where the `review-evidence` CI check reads it (`scripts/check_review_evidence.py`).
+A `pipeline` PR gets `/review` alone.
 An `app` PR gets the built-in `code-review` (at `medium` effort) and then `/review`. The
 `docs`, `release` and `sync` lanes get neither.
 

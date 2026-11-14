@@ -23,8 +23,8 @@ Every deterministic check lives in one script, so no model transcribes a result:
 scripts/check_gates.sh            # --base main on release/* and hotfix/* (the default there); --branch <name> on a detached HEAD
 ```
 On `release/*` the script runs in release mode: the gates diff against `origin/develop` (local `develop` if there is no remote), so they see only the release
-commit (every other commit was gated in its own PR to `develop`), and Gates 1-2 and 5-9 print `[–] ... — N/A`.
-The `Lane:` line still uses the PR's base, `main`.
+commit (every other commit was gated in its own PR to `develop`). Gate 5 prints `N/A`, and so do Gates 1-2 and 6-9
+when the lane is `release`; a release commit that adds code is gated as usual. The `Lane:` line still uses `main`.
 It runs the pre-step and Gates 0–11 in order, prints each gate's details, and ends with the Gate summary block
 (`Gates run at <sha>`, `Lane:`, one line per gate). Paste that block into the PR body as printed; never retype or
 edit it. Exit 0: every blocking gate passed. Exit 1: a blocking gate failed — fix it, commit, and re-run.

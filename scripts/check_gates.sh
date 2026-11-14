@@ -42,7 +42,8 @@ git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "check_gates.sh:
 LANE_BASE=$BASE
 
 # Release mode (pragma #182): on release/* the gates check only the release commit(s), develop...HEAD. Every other
-# commit was gated in its own PR to develop, and /release renames [Unreleased], so Gates 1-2 and 5-9 report N/A.
+# commit was gated in its own PR to develop. /release renames [Unreleased], so Gate 5 reports N/A; Gates 1-2 and
+# 6-9 report N/A too when the lane is `release` (see RELEASE_LANE below).
 # The lane still comes from the PR's base (main).
 RELEASE=0
 case "$BRANCH" in
@@ -75,9 +76,21 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/check_gates.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 SUMMARY=""; FAILED=0; SECURITY_PENDING=0
+
+# ── Lane (needed up front: release mode's N/A rows apply only to the release lane) ──
+LANE_REF=$LANE_BASE
+case "$LANE_BASE" in origin/*) ;; *) git rev-parse --verify -q "origin/$LANE_BASE^{commit}" >/dev/null && LANE_REF="origin/$LANE_BASE" ;; esac
+# On release/* the lane script also diffs develop...HEAD; pass the develop ref release mode resolved.
+LANE=$(python3 scripts/check_pr_lane.py --git "$LANE_REF" --head-branch "$BRANCH" --base-branch "${LANE_BASE#origin/}" --config "$CONFIG" \
+    --develop-ref "$([ "$RELEASE" -eq 1 ] && echo "$BASE" || echo origin/develop)" 2>"$TMP/lane.err") ||
+    LANE="unknown ($(tail -n 1 "$TMP/lane.err"))"
+# Gates 1-2 and 6-9 are N/A only when the release branch carries release changes alone (lane `release`);
+# a release/* commit that adds code is gated like any other PR, against develop (#233 review).
+RELEASE_LANE=0
+[ "$RELEASE" -eq 1 ] && [ "$LANE" = release ] && RELEASE_LANE=1
 row() { SUMMARY="${SUMMARY}$1"$'\n'; }
 release_na() {  # release_na NAME [WHY]: on release/*, print the gate's N/A row and succeed; otherwise fail
-    [ "$RELEASE" -eq 1 ] || return 1
+    [ "$RELEASE_LANE" -eq 1 ] || return 1
     row "[–] $1 — N/A (${2:-release/*: checked in each PR to develop})"
 }
 fail_row() { row "[✗] $1"; FAILED=1; }
@@ -114,7 +127,7 @@ NL_NAMES=$(git diff "$BASE"...HEAD -z --name-only | LC_ALL=C tr '\n\0' '\001\n' 
 [ "$NL_NAMES" -gt 0 ] && fail_row "File names — $NL_NAMES changed path(s) have a newline in the name; rename them"
 if wants 1 || wants 2; then
     section "Gate 0 — build-relevant changes"
-    if [ "$RELEASE" -eq 1 ]; then echo "release/* — Gates 1 and 2 are N/A"
+    if [ "$RELEASE_LANE" -eq 1 ]; then echo "release/* — Gates 1 and 2 are N/A"
     elif [ -n "$GATE0_FILES" ]; then echo "$GATE0_FILES"; else echo "none — Gates 1 and 2 are skipped"; fi
 fi
 
@@ -142,7 +155,7 @@ xcode_setup() {  # sets TARGET and DEST; prints why and returns 1 when it can't
 show_log() { if command -v xcsift >/dev/null 2>&1; then xcsift < "$1"; else tail -n 40 "$1"; fi; }
 
 if wants 1 || wants 2; then
-    if [ "$RELEASE" -eq 1 ]; then
+    if [ "$RELEASE_LANE" -eq 1 ]; then
         wants 1 && release_na "Build"
         wants 2 && release_na "Tests"
     elif [ -z "$GATE0_FILES" ]; then
@@ -206,7 +219,7 @@ if wants 4; then
 fi
 
 # ── Gate 5 — CHANGELOG.md has Unreleased entries ─────────────────────────────
-if wants 5 && ! release_na "CHANGELOG" "release renames [Unreleased]"; then
+if wants 5 && ! { [ "$RELEASE" -eq 1 ] && row "[–] CHANGELOG — N/A (release renames [Unreleased])"; }; then
     # Only the [Unreleased] section itself: stop at the next "## " heading, so an empty section
     # never borrows the previous release's bullets. "###" subheadings, CRLF blank lines and
     # Keep-a-Changelog link definitions ("[1.0.0]: https://...") are not entries.
@@ -442,12 +455,6 @@ if wants 11; then
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
-LANE_REF=$LANE_BASE
-case "$LANE_BASE" in origin/*) ;; *) git rev-parse --verify -q "origin/$LANE_BASE^{commit}" >/dev/null && LANE_REF="origin/$LANE_BASE" ;; esac
-# On release/* the lane script also diffs develop...HEAD; pass the develop ref release mode resolved.
-LANE=$(python3 scripts/check_pr_lane.py --git "$LANE_REF" --head-branch "$BRANCH" --base-branch "${LANE_BASE#origin/}" --config "$CONFIG" \
-    --develop-ref "$([ "$RELEASE" -eq 1 ] && echo "$BASE" || echo origin/develop)" 2>"$TMP/lane.err") ||
-    LANE="unknown ($(tail -n 1 "$TMP/lane.err"))"
 
 printf '\n=== Gate summary (paste into the PR body) ===\n'
 echo "Gates run at $SHA"

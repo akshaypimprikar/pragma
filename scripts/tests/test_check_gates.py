@@ -313,6 +313,15 @@ class CheckGatesTests(unittest.TestCase):
         self.assertIn("Lane: release", summary)
         self.assertEqual(self.row(summary, "No TODO/FIXME/HACK"), "[✓] No TODO/FIXME/HACK")
 
+    def test_release_branch_that_adds_code_is_gated(self):
+        # FinanceTracker #233 review: a release/* commit adding untested code got N/A rows and exit 0.
+        self.cut_release({"App/Services/Big.swift": "struct Big {}\n"})
+        rc, summary, out = self.run_gates()
+        self.assertNotIn("Lane: release", summary)
+        self.assertEqual(self.row(summary, "Build"), "[✓] Build")
+        self.assertEqual(self.row(summary, "CHANGELOG"), "[–] CHANGELOG — N/A (release renames [Unreleased])")
+        self.assertNotIn("N/A (release/*", self.row(summary, "Coverage"))
+
     def test_release_branch_still_checks_the_release_commit_itself(self):
         self.cut_release({"App/Services/Existing.swift": "struct Existing {} // TODO: remove\n"})
         rc, summary, out = self.run_gates("--only", "3")

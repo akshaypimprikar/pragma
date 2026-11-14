@@ -303,6 +303,16 @@ class CheckGatesTests(unittest.TestCase):
         for name in ("Tests", "Coverage", "Security", "Abstraction bloat", "RED-before-GREEN"):
             self.assertIn("— N/A (release/*: checked in each PR to develop)", self.row(summary, name))
 
+    def test_release_mode_prefers_origin_develop_over_a_stale_local_develop(self):
+        # #195 review F2: a local develop behind origin/develop made develop's commits look like release changes.
+        self.cut_release({})
+        git(self.repo, "update-ref", "refs/remotes/origin/develop", "develop")
+        git(self.repo, "branch", "-f", "develop", "main")
+        rc, summary, out = self.run_gates("--only", "3")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Lane: release", summary)
+        self.assertEqual(self.row(summary, "No TODO/FIXME/HACK"), "[✓] No TODO/FIXME/HACK")
+
     def test_release_branch_still_checks_the_release_commit_itself(self):
         self.cut_release({"App/Services/Existing.swift": "struct Existing {} // TODO: remove\n"})
         rc, summary, out = self.run_gates("--only", "3")

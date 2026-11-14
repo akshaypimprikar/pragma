@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.1.3] — 2026-11-14
 
 ### Fixed
 - **The AGENTS.md that `setup.sh` generates described an old review pipeline.** It said `/pr-followup` runs the `code-review:code-review` plugin with at most 2 rounds, and that every lane needs a `code-review:` line. It now matches `/pr-followup`: the built-in `code-review` at medium then `/review` on the `app` lane, `/review` only on the `pipeline` lane, one round by default, and a `code-review:` line on the `app` lane only. The README's `/pr-followup` row is fixed the same way, the generated Merge rule says which lanes need `/review`, and the README and `setup.sh` guard lists name every guarded path. `scripts/tests/test_setup_agents_md_pipeline.py` covers it. Existing installs: edit the two lines in your `AGENTS.md` by hand.

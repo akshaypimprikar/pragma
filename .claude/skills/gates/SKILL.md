@@ -75,7 +75,7 @@ fail-closed on purpose.
 Every hit in a changed `.swift` file is listed with its line. Pass: none.
 
 ### Gate 4 — Branch naming convention
-Pass: `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*` or `chore/*`. Anything else
+Pass: `feature/*`, `fix/*`, `hotfix/*`, `release/*`, `spec/*`, `design/*`, `ci/*`, `chore/*` or `sync/*` (the `/sync-workflow` branch). Anything else
 (including `main`, `develop`, a detached HEAD without `--branch`) fails — ask the user to rename.
 
 ### Gate 5 — CHANGELOG.md has Unreleased entries

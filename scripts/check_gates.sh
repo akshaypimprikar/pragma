@@ -177,8 +177,8 @@ fi
 # ── Gate 4 — branch naming ───────────────────────────────────────────────────
 if wants 4; then
     case "$BRANCH" in
-        feature/*|fix/*|hotfix/*|release/*|spec/*|design/*|ci/*|chore/*) row "[✓] Branch naming" ;;
-        *) fail_row "Branch naming — '${BRANCH:-detached HEAD}' is not feature/, fix/, hotfix/, release/, spec/, design/, ci/ or chore/" ;;
+        feature/*|fix/*|hotfix/*|release/*|spec/*|design/*|ci/*|chore/*|sync/*) row "[✓] Branch naming" ;;
+        *) fail_row "Branch naming — '${BRANCH:-detached HEAD}' is not feature/, fix/, hotfix/, release/, spec/, design/, ci/, chore/ or sync/" ;;
     esac
 fi
 

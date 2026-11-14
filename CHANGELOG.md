@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Branch-prefix lists now name every prefix Gate 4 accepts (#193).** `/status` maps `sync/*` to `/sync-workflow`; the README's Branch Strategy block adds `design/*`, `chore/*`, `ci/*` and `sync/*`; the `work` comment in `formal/PipelineLanes.tla` adds `design/*` and `ci/*` (comment only, the model is unchanged).
 - **Gate 4 (branch naming) now accepts `sync/*`.** `/sync-workflow` creates `sync/<date>` and `pipeline_lanes.json` defines a `sync` lane on that prefix, but Gate 4 rejected it, so local `/gates` failed on every sync branch. Found during the 2026-11-14 sync (#191 had to use a `chore/*` branch). New test: `test_sync_branch_passes_naming`.
 - **Re-wrapped `pr-followup/SKILL.md:10`,** which the #190-era port had left as one over-long line (FinanceTracker #229). Synced from FinanceTracker.
 - **`/pr-followup`'s invocation note now says step 3 applies on the `app` lane** and is set off as its own paragraph, matching FinanceTracker. The 2026-11-12 pipeline-review report now notes that its 2.1.2 port item was only partly done (FinanceTracker #226 ported (a); #228 ported (b)-(d)).

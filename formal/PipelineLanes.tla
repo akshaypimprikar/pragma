@@ -40,7 +40,7 @@ ExclK == { "skill_guarded", "pipe_guarded" }
 
 (* Head/base branch combinations that lane_for() tells apart                *)
 (* (scripts/check_pr_lane.py:133-150, scripts/check_review_evidence.py:77-82). *)
-Branches == { "work",       \* feature/*, fix/*, chore/*, spec/*, hotfix/* ...
+Branches == { "work",       \* feature/*, fix/*, hotfix/*, spec/*, design/*, ci/*, chore/* ...
               "release",    \* head release/*, base main
               "backmerge",  \* head main, base develop
               "sync",       \* head sync/*, same repo

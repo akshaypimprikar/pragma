@@ -32,6 +32,7 @@ Map branch prefix → pipeline phase:
 | `hotfix/*` | `/bugfix` (hotfix) — fix off `main`, PRs to both `main` and `develop` |
 | `chore/*` | Maintenance (pipeline, docs, settings) |
 | `ci/*` | Pipeline/infrastructure work |
+| `sync/*` | `/sync-workflow` — workflow sync PR in progress |
 | `develop` or `main` | No active feature branch |
 
 ### 2. Commits on branch vs develop

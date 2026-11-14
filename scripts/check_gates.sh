@@ -48,9 +48,11 @@ RELEASE=0
 case "$BRANCH" in
     release/*)
         RELEASE=1
-        case "$BASE" in origin/*) BASE=origin/develop ;; *) BASE=develop ;; esac
-        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || BASE=origin/develop
-        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "check_gates.sh: release mode needs develop or origin/develop (git fetch first?)" >&2; exit 2; } ;;
+        # origin/develop first, as LANE_REF prefers origin/<base>: a stale local develop would make the
+        # release commit look like it carries develop's commits, and the lane read `app`.
+        BASE=origin/develop
+        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || BASE=develop
+        git rev-parse --verify -q "$BASE^{commit}" >/dev/null || { echo "check_gates.sh: release mode needs origin/develop or develop (git fetch first?)" >&2; exit 2; } ;;
 esac
 
 wants() {  # wants N: true when gate N is selected

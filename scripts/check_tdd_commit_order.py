@@ -161,7 +161,7 @@ for i, files in enumerate(added_per_commit):
         if test_path is None:
             checked += 1
             violations.append(
-                f"{f} — {len(candidates)} test files are named {test_basename} and none mirrors its folders "
+                f"{f} — {len(candidates)} test files named {test_basename} mirror its folders equally "
                 f"({', '.join(candidates)}) — move or rename one so the pairing is unambiguous"
             )
             continue

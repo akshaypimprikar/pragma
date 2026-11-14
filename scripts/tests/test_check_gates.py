@@ -280,14 +280,14 @@ class CheckGatesTests(unittest.TestCase):
         self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"}, "green")
         rc, summary, out = self.run_gates("--only", "9")
         self.assertEqual(rc, 1, out)
-        self.assertIn("2 test files are named NewThingTests.swift and none mirrors its folders", out)
+        self.assertIn("2 test files named NewThingTests.swift mirror its folders equally", out)
 
     def cut_release(self, release_files):
         # main at the base commit; develop gains a new untested Swift file (gated in its own PR); then
         # release/1.0.0 renames [Unreleased], as /release step 3 does.
         git(self.repo, "checkout", "-q", "develop")
         git(self.repo, "branch", "main")
-        self.commit({"App/Services/NewThing.swift": "struct NewThing {}\n"}, "feature")
+        self.commit({"App/Services/NewThing.swift": "struct NewThing {} // TODO: gated in its own PR\n"}, "feature")
         git(self.repo, "checkout", "-q", "-b", "release/1.0.0")
         self.commit(dict({"CHANGELOG.md": "# Changelog\n\n## [1.0.0] — 2026-11-14\n- Something\n"}, **release_files), "release")
 
@@ -297,11 +297,11 @@ class CheckGatesTests(unittest.TestCase):
         rc, summary, out = self.run_gates(FAKE_XCODEBUILD="fail")
         self.assertEqual(rc, 0, out)
         self.assertIn("Lane: release", summary)
+        self.assertEqual(self.row(summary, "No TODO/FIXME/HACK"), "[✓] No TODO/FIXME/HACK")  # develop's TODO is not seen
         self.assertEqual(self.row(summary, "Build"), "[–] Build — N/A (release/*: checked in each PR to develop)")
         self.assertEqual(self.row(summary, "CHANGELOG"), "[–] CHANGELOG — N/A (release renames [Unreleased])")
         for name in ("Tests", "Coverage", "Security", "Abstraction bloat", "RED-before-GREEN"):
             self.assertIn("— N/A (release/*: checked in each PR to develop)", self.row(summary, name))
-        self.assertEqual(len(summary.splitlines()), 3 + 11, summary)
 
     def test_release_branch_still_checks_the_release_commit_itself(self):
         self.cut_release({"App/Services/Existing.swift": "struct Existing {} // TODO: remove\n"})

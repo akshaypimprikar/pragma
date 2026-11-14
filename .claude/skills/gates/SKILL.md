@@ -22,7 +22,7 @@ Every deterministic check lives in one script, so no model transcribes a result:
 ```bash
 scripts/check_gates.sh            # --base main on release/* and hotfix/* (the default there); --branch <name> on a detached HEAD
 ```
-On `release/*` the script runs in release mode: the gates diff against `develop`, so they see only the release
+On `release/*` the script runs in release mode: the gates diff against `origin/develop` (local `develop` if there is no remote), so they see only the release
 commit (every other commit was gated in its own PR to `develop`), and Gates 1-2 and 5-9 print `[–] ... — N/A`.
 The `Lane:` line still uses the PR's base, `main`.
 It runs the pre-step and Gates 0–11 in order, prints each gate's details, and ends with the Gate summary block
@@ -118,7 +118,7 @@ Services; viper: Presenters, Interactors, Entities — set `project.architecture
 or list your own folders in `project.scoped_layer_dirs`) that has a matching test file, the test file must be
 added in a strictly earlier commit than the implementation. Why from git history: `reference.md` § Gate 9.
 When several test files share that name, the one whose folders mirror the source file's is used; a tie fails
-and names the files, so move or rename one.
+and names the files, so move or rename one (it fails even when both tests predate the branch).
 Fail: fix by re-doing the task as two commits (test-only, confirm it fails, then implementation). Exit 2
 (unconfigured — the layer names match nothing in this repo) is reported `[✗]`, never a pass. A branch that adds
 no `.swift` file has nothing to check, so the script skips the gate without running the TDD script; an

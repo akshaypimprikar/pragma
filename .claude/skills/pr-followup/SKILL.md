@@ -19,9 +19,10 @@ The plugin starts 10-20 subagents per run (Haiku triage, 5 Sonnet reviewers, a
 Haiku scorer per issue); from 2026-09-28, when it became the default here, it
 made each PR's review several times more expensive. `/review`'s isolated
 subagent already covers design and rule compliance.
+
 Note: `code-review` is a Claude Code skill and may not be invocable at all —
 either because it is unavailable in this session, or because this coding
-agent has no such skill mechanism. Either way, step 3
+agent has no such skill mechanism. Either way, on the `app` lane step 3
 below catches the invocation error and continues to reporting rather than
 halting the whole command; you'll still need to run an equivalent review
 yourself before merging.

@@ -338,3 +338,33 @@
 **Rule violated:** no formal rule, caught in review
 **File:** docs/pipeline-review/2026-11-12.md:44
 **Caught by:** this review
+
+## 2026-11-16 — PR#196 — git apply/patch option parser missed short-option clusters and abbreviations (repeats PR#147)
+**What was wrong:** `diff_write_targets` read `w[:2]` as the option name, so `git apply -vp0`, `git apply --direc=.claude`, `patch --dir=.claude -p0` and `patch -sd .claude -p0` applied a diff to protected paths with exit 0 (verified against real git and Apple patch). Same miss as the 2026-11-05 PR#147 rg short-option-cluster entry. Resolved by not parsing diffs at all: any write-capable run is blocked on feature/* (Akshay, 2026-11-16).
+**Rule violated:** repeats the 2026-11-05 PR#147 entry; no formal rule beyond that entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:583
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — Diff reader failed open on /dev/stdin, expanded heredocs, Index: headers, a non-ASCII -p digit and long headers
+**What was wrong:** `read_diff` read `/dev/stdin` as an empty diff; `<<< "$(cat x.diff)"` and unquoted heredocs were read literally; `Index:`/`*** name` headers were not parsed; `-p²` raised `ValueError` and `main()` allowed the whole command; `diff_paths` with no `-p` was quadratic, so a 30 KB heredoc timed the hook out. Each exits 0 with a diff touching CLAUDE.md. Resolved by the same block-on-feature decision.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:545
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — Self-test f-string is a SyntaxError on Python 3.9, so the hook failed open on load
+**What was wrong:** `f'cd "{repos['space']}" ...'` reuses the quote inside an f-string, valid only from Python 3.12. `/usr/bin/python3` on macOS is 3.9.6; the hook exited 1 on load, which Claude Code treats as non-blocking, so every tool call was allowed.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:1670
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — cd_dirs missed real directory changes (HOME/CDPATH, bash -c, eval, env -C, reassigned variables)
+**What was wrong:** `HOME=<repo>; cd ~`, `CDPATH=<dir> cd x`, `bash -c 'cd <repo> && ...'`, `eval 'cd ...'`, `env -C <repo>`, and a variable assigned twice or set by `for`/`read` all moved a shell-run patch into a feature repo with exit 0; `cd $d && git apply` used the old cd handling. Fixed: those cases, and any variable in a cd target, are unresolved and block.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:1181
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — CHANGELOG/docstring overclaimed diff reading and cd $VAR coverage (repeats PR#140 R6, PR#148 R1)
+**What was wrong:** the CHANGELOG said the hook reads every diff and blocks one it can't read, and that `cd $VAR` is expanded or blocked; the bypasses above made both false. `gates/reference.md` had the matching wording.
+**Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
+**File:** CHANGELOG.md:8
+**Caught by:** this review

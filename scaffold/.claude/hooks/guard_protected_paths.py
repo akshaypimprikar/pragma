@@ -1420,11 +1420,14 @@ MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 
 def diff_header_names(text):
     """File names in diff headers (`diff --git`, `---`/`+++`, context-diff `***`, `Index:`, rename/copy), with the
-    tab-separated timestamp cut and a git-quoted name ("a/\\056\\056/x") decoded."""
+    tab-separated timestamp cut and a git-quoted name ("a/\\056\\056/x") decoded in every header kind."""
     names = []
     for m in DIFF_HEADER.finditer(text):
         value = m.group(1).split("\t")[0].strip()
-        for part in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', value) if m.group(0).startswith("diff --git") else [value]:
+        quoted = re.match(r'"(?:[^"\\]|\\.)*"', value)
+        parts = (re.findall(r'"(?:[^"\\]|\\.)*"|\S+', value) if m.group(0).startswith("diff --git")
+                 else [quoted.group(0)] if quoted else [value])
+        for part in parts:
             if part.startswith('"') and part.endswith('"') and len(part) > 1:
                 try:
                     part = codecs.escape_decode(part[1:-1].encode("utf-8"))[0].decode("utf-8", "replace")
@@ -1435,22 +1438,28 @@ def diff_header_names(text):
 
 
 def diff_header_dirs(command, bases):
-    """Folders a diff may write outside the checked directories (#196 N5): every absolute or `..` name in a diff
+    """(dirs, unread): folders a diff may write outside the checked directories (#196 N5): every absolute or `..` name in a diff
     header, read from the command text (a heredoc or here-string) and from each existing file the command names
     (the first MAX_DIFF_BYTES of up to MAX_DIFF_FILES). Apple `patch -p0` writes both kinds of name, and git apply
     does with --unsafe-paths. Each `-pN` strip of a `..` name is tried. A diff the hook can't see (`curl ... | patch`)
-    is not read."""
+    is not read. `unread` is True when a file was cut at MAX_DIFF_BYTES or files past MAX_DIFF_FILES were skipped:
+    the caller blocks then, as for MAX_CHECKED_DIRS, since a header past the cap could name a feature repo."""
     texts = [command, command.replace("\\n", "\n")]
-    seen = set()
+    seen, unread = set(), False
     for w in dict.fromkeys(PATH_WORD.findall(command)):
         for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
             p = os.path.expanduser(w) if base is None else resolve(w, base)
-            if p in seen or len(seen) >= MAX_DIFF_FILES or not os.path.isfile(p):
+            if p in seen or not os.path.isfile(p):
+                continue
+            if len(seen) >= MAX_DIFF_FILES:
+                unread = True
                 continue
             seen.add(p)
             try:
                 with open(p, "rb") as f:
-                    texts.append(f.read(MAX_DIFF_BYTES).decode("utf-8", "replace"))
+                    data = f.read(MAX_DIFF_BYTES + 1)
+                unread = unread or len(data) > MAX_DIFF_BYTES
+                texts.append(data[:MAX_DIFF_BYTES].decode("utf-8", "replace"))
             except OSError:
                 pass
     out = []
@@ -1468,7 +1477,7 @@ def diff_header_dirs(command, bases):
                 found = p if os.path.isdir(p) else nearest_existing_dir(p)
                 if found:
                     out.append(found)
-    return list(dict.fromkeys(out))
+    return list(dict.fromkeys(out)), unread
 
 
 def repo_root(d):
@@ -1520,7 +1529,14 @@ def evaluate(payload):
                     f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
                 )
             dirs = dirs + [resolve(x, d) for x in diff_dirs for d in dirs] + named_dirs(command, dirs)
-            dirs += diff_header_dirs(command, list(dict.fromkeys(dirs)))
+            header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)))
+            dirs += header_dirs
+            if unread:
+                return (
+                    f"BLOCKED: this command runs, or may run, {tool_name} and names more than {MAX_DIFF_FILES} files or "
+                    f"one over {MAX_DIFF_BYTES >> 20} MB, so the guard could not read every diff header for paths "
+                    "outside the checked directories. Split it, or apply a smaller diff."
+                )
             remedy = ("use the apply_patch tool directly (its file list is checked)" if tool_name.startswith("apply_patch")
                       else "make the change with Write/Edit, or apply the diff on a chore/* or fix/* branch")
             if unresolved:
@@ -1672,6 +1688,10 @@ def self_test():
                 f.write("--- " + name + "\t2026-01-01\n+++ " + name + "\n" + hunk)
         with open(os.path.join(chore, "quoted.diff"), "w") as f:
             f.write('diff --git "a/\\056\\056/feat/CLAUDE.md" "b/\\056\\056/feat/CLAUDE.md"\n')
+        with open(os.path.join(chore, "quoted0.diff"), "w") as f:
+            f.write('--- "\\056\\056/feat/CLAUDE.md" 2026-01-01\n+++ "\\056\\056/feat/CLAUDE.md" x\n' + hunk)
+        with open(os.path.join(chore, "big.diff"), "w") as f:
+            f.write("--- App/A.swift\n+++ App/A.swift\n" + hunk + "#" * MAX_DIFF_BYTES)
         cases = [
             # (label, payload, expect_block)
             ("feature: Write gates SKILL.md", write("Write", "feat", ".claude/skills/gates/SKILL.md"), True),
@@ -2009,6 +2029,8 @@ def self_test():
             ("chore cwd: Bash N5 cat a ../ diff into patch", bash("chore", "cat cross.diff | patch -p0"), True),
             ("chore cwd: Bash N5 heredoc diff naming a feature repo",
              bash("chore", "patch -p0 <<'EOF'\n--- ../feat/CLAUDE.md\n+++ ../feat/CLAUDE.md\n@@ -0,0 +1 @@\n+x\nEOF"), True),
+            ("chore cwd: Bash N5 quoted ../ name in a --- header", bash("chore", "patch -p0 < quoted0.diff"), True),
+            ("chore cwd: Bash N5 diff over the read cap fails closed", bash("chore", "patch -p0 < big.diff"), True),
             ("chore cwd: Bash N5 diff of an ordinary chore file allowed", bash("chore", "patch -p0 < ok.diff"), False),
             ("feature: Bash S3 xargs sh -c", bash("feat", "ls *.diff | xargs sh -c 'git apply $0'"), True),
             ("feature: Bash S3 fish -c", bash("feat", "fish -c 'git apply x.diff'"), True),

@@ -1445,7 +1445,12 @@ def has_unquoted_glob(command):
     """True if a shell word (heredoc bodies excluded) has a glob character, brace expansion or zsh `<n-m>` outside
     quotes; `[`/`[[` (test) aside. A `<n-m>` range is looked for in the unquoted text, since the tokenizer reads its
     `<`/`>` as redirections."""
-    if re.search(r"<\d*-\d*>", split_quoted(command)[0]):
+    plain = split_quoted(command)[0]
+    if re.search(r"<\d*-\d*>", plain):
+        return True
+    # zsh `cr(o|x)ss.diff` (no option needed) and bash extglob `@(...)`/`+(...)`/`!(...)`: a `(` glued to a word
+    # character before it, or a `)` glued to one after it; `$(`, `<(` and `>(` are substitutions, not globs
+    if re.search(r"[^\s;&|<>()$]\(|\)[^\s;&|<>()]", plain):
         return True
     for t in tokenize(command) or []:
         bare = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"|\\.", "", t)
@@ -2090,6 +2095,9 @@ def self_test():
             ("chore cwd: Bash scan zsh-style glob diff name", bash("chore", "patch -p0 < cr[^x]ss.diff"), True),
             ("chore cwd: Bash scan brace-expanded diff name", bash("chore", "patch -p0 -i cr{o,}ss.diff"), True),
             ("chore cwd: Bash scan zsh numeric range diff name", bash("chore", "patch -p0 < cross<1-9>.diff"), True),
+            ("chore cwd: Bash scan zsh alternation diff name", bash("chore", "patch -p0 < cr(o|x)ss.diff"), True),
+            ("chore cwd: Bash scan bash extglob diff name", bash("chore", "patch -p0 -i @(cross).diff"), True),
+            ("chore cwd: Bash scan subshell beside git apply allowed", bash("chore", "git apply x.diff && (cd App && ls)"), False),
             ("chore cwd: Bash scan HEAD~1 diff piped to git apply allowed", bash("chore", "git diff HEAD~1 | git apply -R"), False),
             ("chore cwd: Bash scan test [ before git apply allowed", bash("chore", "[ -f x.diff ] && git apply x.diff"), False),
             ("chore cwd: Bash scan quoted glob in a patch command allowed", bash("chore", "git apply x.diff && ls '*.orig'"), False),

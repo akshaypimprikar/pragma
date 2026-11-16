@@ -37,14 +37,15 @@ Limits (deliberate):
     when a directory it may run in is on feature/*, unless every command in it
     is read-only (runs_diff_tool()). Those directories are the session's, each
     `cd` target, `git -C`/`--git-dir`/`--work-tree`, `patch -d`, and any path
-    named in the text, quoted strings included (named_dirs()). A `cd` the hook
-    can't work out blocks such a command on every branch (cd_dirs()).
+    named in the text, quoted strings included (named_dirs()), plus the folder
+    of each absolute or `..` name in a diff header, read from the command and
+    from files it names (diff_header_dirs()). A `cd` the hook can't work out
+    blocks such a command on every branch (cd_dirs()).
     Not detected: `python -c`, interpreter heredocs, variable/glob expansion
     (including `cd $VAR` before a write), a patch tool run under a name built
     at run time or from a script file, a git alias set outside the command,
     a directory that reaches a patch tool only through a pipe, file or
-    variable, the paths inside a diff (`patch -p0` of a diff naming
-    `../feat/CLAUDE.md`, run from another repo), `find -exec/-delete`,
+    variable, a diff the hook can't read (`curl ... | patch`), `find -exec/-delete`,
     `xargs rm` fed from stdin,
     git plumbing (`git checkout <ref> -- file`, `git restore`), removing a
     whole directory that merely contains a nested project (`rm -rf ios`), and
@@ -1413,6 +1414,63 @@ def named_dirs(command, bases):
     return list(dict.fromkeys(out))
 
 
+DIFF_HEADER = re.compile(r"^(?:diff --git |--- |\+\+\+ |\*\*\* |Index: |(?:rename|copy) (?:from|to) )(.+)$", re.MULTILINE)
+MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
+
+
+def diff_header_names(text):
+    """File names in diff headers (`diff --git`, `---`/`+++`, context-diff `***`, `Index:`, rename/copy), with the
+    tab-separated timestamp cut and a git-quoted name ("a/\\056\\056/x") decoded."""
+    names = []
+    for m in DIFF_HEADER.finditer(text):
+        value = m.group(1).split("\t")[0].strip()
+        for part in re.findall(r'"(?:[^"\\]|\\.)*"|\S+', value) if m.group(0).startswith("diff --git") else [value]:
+            if part.startswith('"') and part.endswith('"') and len(part) > 1:
+                try:
+                    part = codecs.escape_decode(part[1:-1].encode("utf-8"))[0].decode("utf-8", "replace")
+                except ValueError:
+                    pass
+            names.append(part)
+    return names
+
+
+def diff_header_dirs(command, bases):
+    """Folders a diff may write outside the checked directories (#196 N5): every absolute or `..` name in a diff
+    header, read from the command text (a heredoc or here-string) and from each existing file the command names
+    (the first MAX_DIFF_BYTES of up to MAX_DIFF_FILES). Apple `patch -p0` writes both kinds of name, and git apply
+    does with --unsafe-paths. Each `-pN` strip of a `..` name is tried. A diff the hook can't see (`curl ... | patch`)
+    is not read."""
+    texts = [command, command.replace("\\n", "\n")]
+    seen = set()
+    for w in dict.fromkeys(PATH_WORD.findall(command)):
+        for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
+            p = os.path.expanduser(w) if base is None else resolve(w, base)
+            if p in seen or len(seen) >= MAX_DIFF_FILES or not os.path.isfile(p):
+                continue
+            seen.add(p)
+            try:
+                with open(p, "rb") as f:
+                    texts.append(f.read(MAX_DIFF_BYTES).decode("utf-8", "replace"))
+            except OSError:
+                pass
+    out = []
+    for name in dict.fromkeys(n for t in texts for n in diff_header_names(t)):
+        parts = name.split("/")
+        if name.startswith("/"):
+            candidates = [name]
+        elif ".." in parts:
+            candidates = ["/".join(parts[k:]) for k in range(parts.index("..") + 1)]
+        else:
+            continue
+        for c in candidates:
+            for base in [None] if c.startswith("/") else bases:
+                p = os.path.normpath(c) if base is None else resolve(c, base)
+                found = p if os.path.isdir(p) else nearest_existing_dir(p)
+                if found:
+                    out.append(found)
+    return list(dict.fromkeys(out))
+
+
 def repo_root(d):
     """The nearest folder at or above `d` (symlinks resolved, as git does) holding a `.git` entry; None outside a
     repo, where `git branch` finds no branch either."""
@@ -1462,6 +1520,7 @@ def evaluate(payload):
                     f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
                 )
             dirs = dirs + [resolve(x, d) for x in diff_dirs for d in dirs] + named_dirs(command, dirs)
+            dirs += diff_header_dirs(command, list(dict.fromkeys(dirs)))
             remedy = ("use the apply_patch tool directly (its file list is checked)" if tool_name.startswith("apply_patch")
                       else "make the change with Write/Edit, or apply the diff on a chore/* or fix/* branch")
             if unresolved:
@@ -1605,6 +1664,14 @@ def self_test():
         # plain names, not repos['x'] inside f'...': reusing a quote in an f-string is a SyntaxError before
         # Python 3.12, and /usr/bin/python3 on macOS is 3.9, where the hook would fail open on load (#196 M5)
         feat, chore, space = repos["feat"], repos["chore"], repos["space"]
+        # #196 N5: diffs in the chore repo that name a file in the feature repo (Apple patch -p0 writes them)
+        hunk = "@@ -0,0 +1 @@\n+x\n"
+        for fname, name in (("cross.diff", "../feat/CLAUDE.md"), ("abs.diff", feat + "/CLAUDE.md"),
+                            ("p1.diff", "a/../../feat/CLAUDE.md"), ("ok.diff", "App/A.swift")):
+            with open(os.path.join(chore, fname), "w") as f:
+                f.write("--- " + name + "\t2026-01-01\n+++ " + name + "\n" + hunk)
+        with open(os.path.join(chore, "quoted.diff"), "w") as f:
+            f.write('diff --git "a/\\056\\056/feat/CLAUDE.md" "b/\\056\\056/feat/CLAUDE.md"\n')
         cases = [
             # (label, payload, expect_block)
             ("feature: Write gates SKILL.md", write("Write", "feat", ".claude/skills/gates/SKILL.md"), True),
@@ -1935,6 +2002,14 @@ def self_test():
             ("chore cwd: Bash S1 patch -o into a feature repo", bash("chore", f"patch -o{feat}/CLAUDE.md -p1 < x.diff"), True),
             ("chore cwd: Bash S1 git apply --directory into a feature repo",
              bash("chore", f"git apply --unsafe-paths --directory={feat} x.diff"), True),
+            ("chore cwd: Bash N5 patch -p0 of a ../ diff into a feature repo", bash("chore", "patch -p0 < cross.diff"), True),
+            ("chore cwd: Bash N5 patch -p0 of an absolute diff into a feature repo", bash("chore", "patch -p0 -i abs.diff"), True),
+            ("chore cwd: Bash N5 patch -p1 of a/../../ diff", bash("chore", "patch -p1 < p1.diff"), True),
+            ("chore cwd: Bash N5 git apply --unsafe-paths of a quoted ../ name", bash("chore", "git apply --unsafe-paths quoted.diff"), True),
+            ("chore cwd: Bash N5 cat a ../ diff into patch", bash("chore", "cat cross.diff | patch -p0"), True),
+            ("chore cwd: Bash N5 heredoc diff naming a feature repo",
+             bash("chore", "patch -p0 <<'EOF'\n--- ../feat/CLAUDE.md\n+++ ../feat/CLAUDE.md\n@@ -0,0 +1 @@\n+x\nEOF"), True),
+            ("chore cwd: Bash N5 diff of an ordinary chore file allowed", bash("chore", "patch -p0 < ok.diff"), False),
             ("feature: Bash S3 xargs sh -c", bash("feat", "ls *.diff | xargs sh -c 'git apply $0'"), True),
             ("feature: Bash S3 fish -c", bash("feat", "fish -c 'git apply x.diff'"), True),
             ("feature: Bash S5 eval", bash("feat", 'eval "git apply x.diff"'), True),

@@ -61,7 +61,6 @@ Usage: guard_protected_paths.py            (reads hook JSON on stdin)
 """
 import codecs
 import fnmatch
-import glob as globmod
 import json
 import os
 import re
@@ -1402,8 +1401,9 @@ def command_words(command):
     PATH_WORD), each shell word with its quotes removed (`"space dir.diff"`, `"cross".diff`), and the value of an
     attached short option (`-icross.diff`, `-o/x`) (#196 confirm F1, F2)."""
     words = PATH_WORD.findall(command) + [unquote(t) for t in tokenize(command) or [] if t not in REDIRECT_OPS]
-    # every suffix of a short-option cluster (`-sicross.diff` is -s -i cross.diff); words over 256 characters skipped
-    words += [w[k:] for w in words if re.match(r"-\w.", w) and len(w) <= 256 for k in range(2, len(w))]
+    # the attached value (`-o/x`), and for words up to 32 characters every suffix of a short-option cluster
+    # (`-sicross.diff` is -s -i cross.diff), so the suffixes stay bounded (MAX_WORD_WORK caps the rest)
+    words += [w[k:] for w in words if re.match(r"-\w.", w) for k in range(2, len(w) if len(w) <= 32 else 3)]
     return list(dict.fromkeys(w for w in words if w))
 
 
@@ -1435,6 +1435,17 @@ DIFF_HEADER = re.compile(r"^(?:diff --git |--- |\+\+\+ |\*\*\* |Index: |(?:renam
 MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 MAX_DIFF_NAMES = 512  # distinct absolute or `..` header names; each is resolved against every checked directory
 MAX_HEADER_WORK = 20000  # header names x their -pN strips x checked directories, and the longest name, both capped
+MAX_WORD_WORK = 100000  # command words x checked directories that named_dirs()/diff_header_dirs() may resolve
+UNQUOTED_GLOB = re.compile(r"[*?\[]")
+
+
+def has_unquoted_glob(command):
+    """True if a shell word (heredoc bodies excluded) has a glob character outside quotes; `[`/`[[` (test) aside."""
+    for t in tokenize(command) or []:
+        bare = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"|\\.", "", t)
+        if t not in ("[", "[[") and UNQUOTED_GLOB.search(bare):
+            return True
+    return False
 
 
 def diff_header_names(text):
@@ -1464,7 +1475,7 @@ def diff_header_dirs(command, bases, cache):
     is not read. `unread` is True when a file was cut at MAX_DIFF_BYTES, files past MAX_DIFF_FILES were skipped, or
     the diffs hold more than MAX_DIFF_NAMES absolute or `..` names: the caller blocks then, as for MAX_CHECKED_DIRS,
     since a header past the cap could name a feature repo, and checking them all could time the hook out."""
-    if len(bases) > MAX_CHECKED_DIRS or any(re.search(r"[$`]", t) and not re.fullmatch(r"'[^']*'", t)
+    if len(bases) > MAX_CHECKED_DIRS or has_unquoted_glob(command) or any(re.search(r"[$`]", t) and not re.fullmatch(r"'[^']*'", t)
                                             for t in tokenize(command) or []):
         return [], True  # a file named through a variable, `$( )` or `$'...'` can't be opened (#196 scan)
     texts = [command, command.replace("\\n", "\n")]
@@ -1472,8 +1483,7 @@ def diff_header_dirs(command, bases, cache):
     for w in command_words(command):
         for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
             p = os.path.expanduser(w) if base is None else resolve(w, base)
-            files = sorted(globmod.glob(p))[: MAX_DIFF_FILES + 1] if re.search(r"[*?\[]", w) and re.search(r"[A-Za-z0-9]", w) else [p]  # `cr*.diff`, not `***`
-            for p in files:
+            for p in [p]:
                 if p in seen or not os.path.isfile(p):
                     continue
                 if len(seen) >= MAX_DIFF_FILES:
@@ -1552,6 +1562,11 @@ def evaluate(payload):
                     f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
                 )
             cache = {}
+            if len(command_words(command)) * len(dirs) > MAX_WORD_WORK:
+                return (
+                    f"BLOCKED: this command runs, or may run, {tool_name} and has too many words to check against "
+                    f"{len(dirs)} directories within the guard's time budget (a hook that times out fails open). Split it."
+                )
             dirs = dirs + [resolve(x, d) for x in diff_dirs for d in dirs] + named_dirs(command, dirs, cache)
             header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache)
             dirs += header_dirs
@@ -1559,7 +1574,7 @@ def evaluate(payload):
                 return (
                     f"BLOCKED: this command runs, or may run, {tool_name} and names more than {MAX_DIFF_FILES} files, "
                     f"one over {MAX_DIFF_BYTES >> 20} MB, diffs with over {MAX_DIFF_NAMES} absolute or `..` file "
-                    "names (or too much header work), or a file named through a variable or `$( )`, so the guard "
+                    "names (or too much header work), a file named through a variable, `$( )` or an unquoted glob, so the guard "
                     "could not check every diff header for paths outside the checked directories (this applies on "
                     "every branch). Split it, name the diff file literally, or apply a smaller diff."
                 )
@@ -2066,6 +2081,9 @@ def self_test():
             ("chore cwd: Bash confirm F2 diff file name with a space", bash("chore", 'patch -p0 < "space dir.diff"'), True),
             ("chore cwd: Bash scan short-option cluster -si", bash("chore", "patch -p0 -sicross.diff"), True),
             ("chore cwd: Bash scan glob diff file name", bash("chore", "patch -p0 < cr*.diff"), True),
+            ("chore cwd: Bash scan zsh-style glob diff name", bash("chore", "patch -p0 < cr[^x]ss.diff"), True),
+            ("chore cwd: Bash scan test [ before git apply allowed", bash("chore", "[ -f x.diff ] && git apply x.diff"), False),
+            ("chore cwd: Bash scan quoted glob in a patch command allowed", bash("chore", "git apply x.diff && ls '*.orig'"), False),
             ("chore cwd: Bash scan diff file named by a variable", bash("chore", "f=cross.diff; patch -p0 < $f"), True),
             ("chore cwd: Bash scan $'...' diff file name", bash("chore", "patch -p0 < $'cross.diff'"), True),
             ("chore cwd: Bash scan deep ../ header names over the work budget", bash("chore", "patch -p0 < deep.diff"), True),

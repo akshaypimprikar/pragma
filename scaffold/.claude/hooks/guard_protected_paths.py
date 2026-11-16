@@ -61,6 +61,7 @@ Usage: guard_protected_paths.py            (reads hook JSON on stdin)
 """
 import codecs
 import fnmatch
+import glob as globmod
 import json
 import os
 import re
@@ -1401,7 +1402,8 @@ def command_words(command):
     PATH_WORD), each shell word with its quotes removed (`"space dir.diff"`, `"cross".diff`), and the value of an
     attached short option (`-icross.diff`, `-o/x`) (#196 confirm F1, F2)."""
     words = PATH_WORD.findall(command) + [unquote(t) for t in tokenize(command) or [] if t not in REDIRECT_OPS]
-    words += [w[2:] for w in words if re.match(r"-\w.", w)]
+    # every suffix of a short-option cluster (`-sicross.diff` is -s -i cross.diff); words over 256 characters skipped
+    words += [w[k:] for w in words if re.match(r"-\w.", w) and len(w) <= 256 for k in range(2, len(w))]
     return list(dict.fromkeys(w for w in words if w))
 
 
@@ -1432,6 +1434,7 @@ def named_dirs(command, bases, cache):
 DIFF_HEADER = re.compile(r"^(?:diff --git |--- |\+\+\+ |\*\*\* |Index: |(?:rename|copy) (?:from|to) )(.+)$", re.MULTILINE)
 MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 MAX_DIFF_NAMES = 512  # distinct absolute or `..` header names; each is resolved against every checked directory
+MAX_HEADER_WORK = 20000  # header names x their -pN strips x checked directories, and the longest name, both capped
 
 
 def diff_header_names(text):
@@ -1461,28 +1464,35 @@ def diff_header_dirs(command, bases, cache):
     is not read. `unread` is True when a file was cut at MAX_DIFF_BYTES, files past MAX_DIFF_FILES were skipped, or
     the diffs hold more than MAX_DIFF_NAMES absolute or `..` names: the caller blocks then, as for MAX_CHECKED_DIRS,
     since a header past the cap could name a feature repo, and checking them all could time the hook out."""
+    if len(bases) > MAX_CHECKED_DIRS or any(re.search(r"[$`]", t) and not re.fullmatch(r"'[^']*'", t)
+                                            for t in tokenize(command) or []):
+        return [], True  # a file named through a variable, `$( )` or `$'...'` can't be opened (#196 scan)
     texts = [command, command.replace("\\n", "\n")]
     seen, unread = set(), False
     for w in command_words(command):
         for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
             p = os.path.expanduser(w) if base is None else resolve(w, base)
-            if p in seen or not os.path.isfile(p):
-                continue
-            if len(seen) >= MAX_DIFF_FILES:
-                unread = True
-                continue
-            seen.add(p)
-            try:
-                with open(p, "rb") as f:
-                    data = f.read(MAX_DIFF_BYTES + 1)
-                unread = unread or len(data) > MAX_DIFF_BYTES
-                texts.append(data[:MAX_DIFF_BYTES].decode("utf-8", "replace"))
-            except OSError:
-                pass
+            files = sorted(globmod.glob(p))[: MAX_DIFF_FILES + 1] if re.search(r"[*?\[]", w) and re.search(r"[A-Za-z0-9]", w) else [p]  # `cr*.diff`, not `***`
+            for p in files:
+                if p in seen or not os.path.isfile(p):
+                    continue
+                if len(seen) >= MAX_DIFF_FILES:
+                    unread = True
+                    continue
+                seen.add(p)
+                try:
+                    with open(p, "rb") as f:
+                        data = f.read(MAX_DIFF_BYTES + 1)
+                    unread = unread or len(data) > MAX_DIFF_BYTES
+                    texts.append(data[:MAX_DIFF_BYTES].decode("utf-8", "replace"))
+                except OSError:
+                    pass
     names = [n for n in dict.fromkeys(n for t in texts for n in diff_header_names(t))
              if n.startswith("/") or ".." in n.split("/")]
-    if len(names) > MAX_DIFF_NAMES:
-        return [], True
+    if len(names) > MAX_DIFF_NAMES or any(len(n) > 4096 for n in names) or sum(
+            (n.split("/").index("..") + 1 if not n.startswith("/") else 1) * (1 if n.startswith("/") else len(bases))
+            for n in names) > MAX_HEADER_WORK:
+        return [], True  # a budget on the total work, not only the name count (#196 scan: `../a/../b/...` names)
     paths = {}
     for name in names:
         parts = name.split("/")
@@ -1548,9 +1558,10 @@ def evaluate(payload):
             if unread:
                 return (
                     f"BLOCKED: this command runs, or may run, {tool_name} and names more than {MAX_DIFF_FILES} files, "
-                    f"one over {MAX_DIFF_BYTES >> 20} MB, or diffs with over {MAX_DIFF_NAMES} absolute or `..` file "
-                    "names, so the guard could not check every diff header for paths outside the checked directories "
-                    "(this applies on every branch). Split it, or apply a smaller diff."
+                    f"one over {MAX_DIFF_BYTES >> 20} MB, diffs with over {MAX_DIFF_NAMES} absolute or `..` file "
+                    "names (or too much header work), or a file named through a variable or `$( )`, so the guard "
+                    "could not check every diff header for paths outside the checked directories (this applies on "
+                    "every branch). Split it, name the diff file literally, or apply a smaller diff."
                 )
             remedy = ("use the apply_patch tool directly (its file list is checked)" if tool_name.startswith("apply_patch")
                       else "make the change with Write/Edit, or apply the diff on a chore/* or fix/* branch")
@@ -1706,6 +1717,8 @@ def self_test():
             f.write('diff --git "a/\\056\\056/feat/CLAUDE.md" "b/\\056\\056/feat/CLAUDE.md"\n')
         with open(os.path.join(chore, "quoted0.diff"), "w") as f:
             f.write('--- "\\056\\056/feat/CLAUDE.md" 2026-01-01\n+++ "\\056\\056/feat/CLAUDE.md" x\n' + hunk)
+        with open(os.path.join(chore, "deep.diff"), "w") as f:  # 100 names x ~250 -pN strips: over MAX_HEADER_WORK
+            f.write("".join("--- " + "a/" * 250 + "../n" + str(k) + "\n" for k in range(100)))
         with open(os.path.join(chore, "big.diff"), "w") as f:
             f.write("--- App/A.swift\n+++ App/A.swift\n" + hunk + "#" * MAX_DIFF_BYTES)
         cases = [
@@ -2051,6 +2064,11 @@ def self_test():
             ("chore cwd: Bash confirm F1 attached -i ./ value", bash("chore", "patch -p0 -i./cross.diff"), True),
             ("chore cwd: Bash confirm F1 quote-split file name", bash("chore", 'patch -p0 -i "cross".diff'), True),
             ("chore cwd: Bash confirm F2 diff file name with a space", bash("chore", 'patch -p0 < "space dir.diff"'), True),
+            ("chore cwd: Bash scan short-option cluster -si", bash("chore", "patch -p0 -sicross.diff"), True),
+            ("chore cwd: Bash scan glob diff file name", bash("chore", "patch -p0 < cr*.diff"), True),
+            ("chore cwd: Bash scan diff file named by a variable", bash("chore", "f=cross.diff; patch -p0 < $f"), True),
+            ("chore cwd: Bash scan $'...' diff file name", bash("chore", "patch -p0 < $'cross.diff'"), True),
+            ("chore cwd: Bash scan deep ../ header names over the work budget", bash("chore", "patch -p0 < deep.diff"), True),
             ("chore cwd: Bash N5 diff of an ordinary chore file allowed", bash("chore", "patch -p0 < ok.diff"), False),
             ("feature: Bash S3 xargs sh -c", bash("feat", "ls *.diff | xargs sh -c 'git apply $0'"), True),
             ("feature: Bash S3 fish -c", bash("feat", "fish -c 'git apply x.diff'"), True),

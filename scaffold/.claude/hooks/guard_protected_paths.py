@@ -1436,11 +1436,17 @@ MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 MAX_DIFF_NAMES = 512  # distinct absolute or `..` header names; each is resolved against every checked directory
 MAX_HEADER_WORK = 20000  # header names x their -pN strips x checked directories, and the longest name, both capped
 MAX_WORD_WORK = 100000  # command words x checked directories that named_dirs()/diff_header_dirs() may resolve
-UNQUOTED_GLOB = re.compile(r"[*?\[]")
+# glob characters, a brace expansion (`cr{o,}ss.diff`, `{a..b}`) and a zsh numeric range (`<1-9>`); zsh's `^ ~ #`
+# act only with EXTENDED_GLOB (off by default) and stay text, so `git diff HEAD~1 | git apply` is not blocked
+UNQUOTED_GLOB = re.compile(r"[*?\[]|\{[^{}]*(?:,|\.\.)[^{}]*\}|<\d*-\d*>")
 
 
 def has_unquoted_glob(command):
-    """True if a shell word (heredoc bodies excluded) has a glob character outside quotes; `[`/`[[` (test) aside."""
+    """True if a shell word (heredoc bodies excluded) has a glob character, brace expansion or zsh `<n-m>` outside
+    quotes; `[`/`[[` (test) aside. A `<n-m>` range is looked for in the unquoted text, since the tokenizer reads its
+    `<`/`>` as redirections."""
+    if re.search(r"<\d*-\d*>", split_quoted(command)[0]):
+        return True
     for t in tokenize(command) or []:
         bare = re.sub(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"|\\.", "", t)
         if t not in ("[", "[[") and UNQUOTED_GLOB.search(bare):
@@ -2082,6 +2088,9 @@ def self_test():
             ("chore cwd: Bash scan short-option cluster -si", bash("chore", "patch -p0 -sicross.diff"), True),
             ("chore cwd: Bash scan glob diff file name", bash("chore", "patch -p0 < cr*.diff"), True),
             ("chore cwd: Bash scan zsh-style glob diff name", bash("chore", "patch -p0 < cr[^x]ss.diff"), True),
+            ("chore cwd: Bash scan brace-expanded diff name", bash("chore", "patch -p0 -i cr{o,}ss.diff"), True),
+            ("chore cwd: Bash scan zsh numeric range diff name", bash("chore", "patch -p0 < cross<1-9>.diff"), True),
+            ("chore cwd: Bash scan HEAD~1 diff piped to git apply allowed", bash("chore", "git diff HEAD~1 | git apply -R"), False),
             ("chore cwd: Bash scan test [ before git apply allowed", bash("chore", "[ -f x.diff ] && git apply x.diff"), False),
             ("chore cwd: Bash scan quoted glob in a patch command allowed", bash("chore", "git apply x.diff && ls '*.orig'"), False),
             ("chore cwd: Bash scan diff file named by a variable", bash("chore", "f=cross.diff; patch -p0 < $f"), True),

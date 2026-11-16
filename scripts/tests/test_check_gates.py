@@ -317,6 +317,7 @@ class CheckGatesTests(unittest.TestCase):
         # FinanceTracker #233 review: a release/* commit adding untested code got N/A rows and exit 0.
         self.cut_release({"App/Services/Big.swift": "struct Big {}\n"})
         rc, summary, out = self.run_gates()
+        self.assertNotEqual(rc, 0, out)
         self.assertNotIn("Lane: release", summary)
         self.assertEqual(self.row(summary, "Build"), "[✓] Build")
         self.assertEqual(self.row(summary, "CHANGELOG"), "[–] CHANGELOG — N/A (release renames [Unreleased])")

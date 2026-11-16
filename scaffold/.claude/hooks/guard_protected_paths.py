@@ -32,15 +32,20 @@ Limits (deliberate):
     `cd dir && ...` (scoped to its subshell; `cd -`, bare `cd`, `pushd` and `popd` work).
     Protected files are matched at the repo root and under any subdirectory
     (`ios/CLAUDE.md`), and a protected name that is a symlink is caught.
-    `git apply`, `git am` and `patch` (#200) are not parsed for targets: any
-    run that can write is blocked when a directory it may run in is on
-    feature/* (diff_apply_runs(); read-only forms pass), and so is a shell-run
-    apply_patch (#140). Before either, a `cd` the hook can't work out blocks
-    (cd_dirs()).
+    `git apply`, `git am` and `patch` (#200) are not parsed for targets. Like a
+    shell-run apply_patch (#140), a command whose text names one is blocked
+    when a directory it may run in is on feature/*, unless every command in it
+    is read-only (runs_diff_tool()). Those directories are the session's, each
+    `cd` target, `git -C`/`--git-dir`/`--work-tree`, `patch -d`, and any path
+    named in the text, quoted strings included (named_dirs()). A `cd` the hook
+    can't work out blocks such a command on every branch (cd_dirs()).
     Not detected: `python -c`, interpreter heredocs, variable/glob expansion
-    (including `cd $VAR` before a write), a patch tool run under a variable or
-    glob name or from a script file, a git alias set outside the command,
-    `find -exec/-delete`, `xargs rm` fed from stdin,
+    (including `cd $VAR` before a write), a patch tool run under a name built
+    at run time or from a script file, a git alias set outside the command,
+    a directory that reaches a patch tool only through a pipe, file or
+    variable, the paths inside a diff (`patch -p0` of a diff naming
+    `../feat/CLAUDE.md`, run from another repo), `find -exec/-delete`,
+    `xargs rm` fed from stdin,
     git plumbing (`git checkout <ref> -- file`, `git restore`), removing a
     whole directory that merely contains a nested project (`rm -rf ios`), and
     state that spans commands (`ln -s CLAUDE.md n && echo x > n`; a link that
@@ -87,7 +92,8 @@ PATCH_TARGET = re.compile(r"^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Mov
 # Codex runs a shell-invoked patch as apply_patch or applypatch; a patch body also gives one away.
 SHELL_PATCH = re.compile(r"apply_?patch|\*\*\*\s*Begin Patch")
 WRAPPER_WORDS = ("sudo", "env", "command", "time", "nohup", "exec", "xargs", "nice", "ionice", "timeout", "stdbuf", "setsid",
-                 "builtin", "busybox", "flock", "chroot", "arch", "caffeinate", "doas", "xcrun", "strace", "runuser")
+                 "builtin", "busybox", "flock", "chroot", "arch", "caffeinate", "doas", "xcrun", "strace", "runuser",
+                 "noglob", "nocorrect")
 # Shell keywords that precede a command in the same segment (`then rm x`,
 # `do sed -i ...`, `! rm x`, `{ rm x; }`), so the command word is the next token.
 SHELL_KEYWORDS = ("if", "then", "elif", "else", "while", "until", "do", "!", "{")
@@ -511,15 +517,26 @@ def command_substitutions(word):
 
 # What a candidate path is subject to (the second element of a target tuple).
 WRITE, MOVE_OR_REMOVE_DEST, REMOVE = 0, 1, 2  # REMOVE: rm / git rm / the source of a mv
-# `git apply`, `git am` and `patch` (#200): any run that can write is blocked on a feature/* branch, the same way
-# a shell-run apply_patch is (#140). The hook does not read the diff. These forms write nothing and pass:
-GIT_APPLY_READ_ONLY = ("--check", "--stat", "--numstat", "--summary")  # unless an `--ap...` (--apply) or `--no-...` is given
-GIT_AM_READ_ONLY = ("--abort", "--quit", "--show-current-patch")  # `--continue`/`--skip` apply the next patches
+# `git apply`, `git am` and `patch` (#200) follow pragma #140's model for a shell-run apply_patch: on feature/*, a
+# command whose text names one (names_diff_tool()) is blocked unless every command in it is read-only
+# (read_only_segment()). The hook does not read the diff. The read-only forms, with nothing else on the command:
+GIT_APPLY_READ_ONLY = ("--check", "--stat", "--numstat", "--summary")  # at least one of these: nothing is applied
+GIT_APPLY_SAFE_ARGS = GIT_APPLY_READ_ONLY + ("-v", "--verbose", "-R", "--reverse", "-z")  # also `-pN` and file names
+GIT_AM_READ_ONLY = ("--abort", "--quit", "--show-current-patch", "--show-current-patch=diff", "--show-current-patch=raw")
 HELP_ONLY = (["-h"], ["--help"])
 PATCH_SHORT_ARG = "BDdFioprVYz"  # `patch` short options that take a value (GNU and BSD): `-sd DIR` sets -d
-SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
-# A tool name anywhere in raw text: used where the hook can't parse the commands (a shell reading stdin, `eval`).
-DIFF_APPLY_WORD = re.compile(r"(?i)(?<![\w.-])(?:g?patch|git(?=[\s'\"])[^;&|\n]*?(?<![\w.-])(?:apply|am))(?![\w.-])")
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "mksh", "yash", "ash", "fish", "csh", "tcsh")
+# The tool names, in any case (macOS paths are case-insensitive): `patch`, `gpatch`, `git-apply`, `git-am`, or a `git`
+# followed later in the same command by an `apply` or `am` word (which also catches an alias defined on the way).
+DIFF_TOOL_NAME = re.compile(r"(?i)(?<![\w.-])(?:g?patch|git-(?:apply|am))(?![\w.-])"
+                            r"|(?<![\w.-])git(?=\s)[^;&|\n]*?(?<![\w.-])(?:apply|am)(?![\w.-])")
+STASH_APPLY = re.compile(r"(?i)(?<![\w.-])stash\s+apply(?![\w.-])")  # `git stash apply` restores a stash, not a diff
+# Global git options that cannot run an alias or another program. Any other one before the subcommand
+# (`--config-env`, `--exec-path=`, `--attr-source`) counts as a possible run.
+KNOWN_GIT_GLOBALS = ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--bare", "--no-pager", "-p", "--paginate",
+                     "-P", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+                     "--icase-pathspecs", "--no-optional-locks", "--no-advice", "--no-lazy-fetch")
+GIT_CONFIG_ENV = re.compile(r"GIT_CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS)")  # config, so aliases, from the environment
 
 
 def patch_dirs(operands):
@@ -551,21 +568,26 @@ def patch_dirs(operands):
     return dirs
 
 
-def diff_apply_dirs(words):
-    """None unless this one command is a `git apply`, `git am` or `patch` that can write (see GIT_APPLY_READ_ONLY,
-    GIT_AM_READ_ONLY, HELP_ONLY); otherwise the directories it names, as written: `git -C`, `--git-dir`,
-    `--work-tree` (each -C relative to the one before), or `patch -d`/`--directory`. A `git -c alias.*` counts as a
-    run, since the alias can run either tool."""
+def diff_apply_dirs(words, config_env=False):
+    """None unless this one command is a `git apply`, `git am`, `git-apply`, `git-am` or `patch`, or a git command
+    the hook can't follow: a `-c alias.*`, a global option not in KNOWN_GIT_GLOBALS, a subcommand built from a
+    variable, glob or brace, or a GIT_CONFIG_* setting (`config_env`, or a prefix on this command), since an alias can
+    run either tool. Otherwise the directories it names, as written: `git -C`, `--git-dir`, `--work-tree` (each -C
+    relative to the one before), `git apply --directory`, or `patch -d`/`--directory`. Read-only forms are told apart
+    later, by read_only_segment()."""
     idx = real_command_index(words)
     if idx is None:
         return None
     cmd = os.path.basename(unquote(words[idx])).lower()  # macOS paths are case-insensitive: `PATCH` runs patch
     operands = command_operands(words[idx + 1 :])
     if cmd in ("patch", "gpatch"):
-        return None if operands in HELP_ONLY + (["--version"],) else patch_dirs(operands)
+        return patch_dirs(operands)
+    if cmd in ("git-apply", "git-am"):
+        return []
     if cmd != "git":
         return None
-    dirs, base, alias, i = [], "", False, 0
+    config_env = config_env or any(GIT_CONFIG_ENV.match(w) for w in words[:idx])
+    dirs, base, unknown, i = [], "", config_env, 0
     while i < len(operands) and operands[i].startswith("-"):
         name, eq, val = operands[i].partition("=")
         if name in GIT_ARG_FLAGS and not eq:
@@ -577,15 +599,15 @@ def diff_apply_dirs(words):
         elif name in ("--git-dir", "--work-tree"):
             dirs.append(os.path.join(base, val))
         elif name == "-c" and val.lower().startswith("alias."):
-            alias = True
+            unknown = True
+        elif name not in KNOWN_GIT_GLOBALS:
+            unknown = True  # `--config-env alias.x=VAR`, `--exec-path=DIR`: it may consume the next word too
         i += 1
-    sub, rest = (operands[i].lower(), operands[i + 1 :]) if i < len(operands) else (None, [])
-    if sub == "apply" and (rest in HELP_ONLY or (any(w in GIT_APPLY_READ_ONLY for w in rest)
-                                                 and not any(w.startswith(("--ap", "--no-")) for w in rest))):
-        return None
-    if sub == "am" and (rest in HELP_ONLY or any(w.partition("=")[0] in GIT_AM_READ_ONLY for w in rest)):
-        return None
-    return dirs if sub in ("apply", "am") or alias else None
+    sub = operands[i].lower() if i < len(operands) else ""
+    if sub == "apply":
+        dirs += [w.partition("=")[2] for w in operands[i + 1 :] if w.startswith("--directory=")]
+    unknown = unknown or bool(re.search(r"[$`*?\[{}]", sub))
+    return dirs if sub in ("apply", "am") or unknown else None
 
 
 def reads_stdin_script(cmd, operands):
@@ -594,13 +616,13 @@ def reads_stdin_script(cmd, operands):
 
 
 def diff_apply_runs(command, _depth=0):
-    """(runs, dirs): whether the command runs a `git apply`, `git am` or `patch` that can write (#200), and the
-    directories those commands name (diff_apply_dirs()). Looks inside `$( )`, backticks, `bash -c` and `eval`. A
-    shell reading stdin, an `eval`, or text the tokenizer can't parse counts as a run when its text names a tool."""
+    """(runs, dirs): whether a command parses as a `git apply`, `git am` or `patch` run, or a git command the hook
+    can't follow (diff_apply_dirs()), and the directories those commands name. Looks inside `$( )`, backticks and
+    `bash -c`. This adds to names_diff_tool(), which reads the text; neither decides read-only on its own."""
     tokens = tokenize(command)
     if tokens is None or _depth > 3:
-        return bool(DIFF_APPLY_WORD.search(command)), []
-    runs, dirs = False, []
+        return False, []
+    runs, dirs, config_env = False, [], bool(GIT_CONFIG_ENV.search(command))
 
     def visit(text):
         nonlocal runs
@@ -617,7 +639,7 @@ def diff_apply_runs(command, _depth=0):
         for w in words:
             for body in command_substitutions(w):
                 visit(body)
-        found = diff_apply_dirs(words)
+        found = diff_apply_dirs(words, config_env)
         if found is not None:
             runs = True
             dirs += found
@@ -632,8 +654,6 @@ def diff_apply_runs(command, _depth=0):
                     if j + 1 < len(operands):
                         visit(operands[j + 1])
                     break
-        if cmd == "eval" or reads_stdin_script(cmd, operands):
-            runs = runs or bool(DIFF_APPLY_WORD.search(command))
     return runs, dirs
 
 
@@ -777,23 +797,104 @@ SHELL_WORDS = ("if", "then", "elif", "else", "fi", "while", "until", "do", "done
                "select", "in", "time")
 
 
+def patch_text_match(forms):
+    """names_patch()'s test on the [flat, expanded, defaulted, dropped] forms of a command."""
+    if any(PATCH_NAME.search(s) for s in forms):
+        return True
+    if has_brace_group(forms[0]) and any(spells_through_braces(t) for t in forms):
+        return True  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`, `apply_{'{',pa}tch`
+    if re.search(r"\$\(|`", forms[0]) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in forms[:3]):
+        return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
+    return False
+
+
+BRACE_RANGE = re.compile(r"(-?\d+)\.\.(-?\d+)(?:\.\.-?\d+)?|([A-Za-z])\.\.([A-Za-z])(?:\.\.-?\d+)?")
+BRACE_LIMIT = 256  # words one brace expansion may produce before it counts as naming the tool
+
+
+def brace_expand(word):
+    """The words bash brace expansion makes of one word (quotes already removed, so a quoted brace counts as a real
+    one, an over-approximation): `pa{t,}ch` -> [patch, pach], `{a..c}` ranges too. None past BRACE_LIMIT words."""
+    match, commas, stack = {}, {}, []
+    for k, c in enumerate(word):  # one pass: each `{` with its `}` and its own top-level commas
+        if c == "{":
+            stack.append(k)
+            commas[k] = []
+        elif c == "}" and stack:
+            match[stack.pop()] = k
+        elif c == "," and stack:
+            commas[stack[-1]].append(k)
+    for start in sorted(match):
+        end, cuts = match[start], commas[start]
+        if cuts:
+            bounds = [start] + cuts + [end]
+            alts = [word[a + 1 : b] for a, b in zip(bounds, bounds[1:])]
+        else:
+            m = BRACE_RANGE.fullmatch(word[start + 1 : end])
+            if not m:
+                continue  # `{}`, `{x}`, `${name}`: not an expansion
+            lo, hi = (int(m.group(1)), int(m.group(2))) if m.group(1) is not None else (ord(m.group(3)), ord(m.group(4)))
+            if abs(hi - lo) >= BRACE_LIMIT:
+                return None
+            step = 1 if lo <= hi else -1
+            alts = [str(x) if m.group(1) is not None else chr(x) for x in range(lo, hi + step, step)]
+        out = []
+        for alt in alts:
+            sub = brace_expand(word[:start] + alt + word[end + 1 :])
+            if sub is None or len(out) + len(sub) > BRACE_LIMIT:
+                return None
+            out += sub
+        return out
+    return [word]
+
+
+def diff_text_match(forms):
+    """names_diff_tool()'s test on the [flat, expanded, defaulted, dropped] forms of a command: DIFF_TOOL_NAME, also
+    after brace expansion (`pa{t,}ch`, `git ap{p,}ly`); `git stash apply` is not a match."""
+    for text in forms:
+        if DIFF_TOOL_NAME.search(STASH_APPLY.sub("stash", text)):
+            return True
+        if "{" in text:
+            words = [(w, brace_expand(w) if "{" in w else [w]) for w in text.split()]
+            git_named = re.search(r"(?i)(?<![\w.-])git(?![\w.-])", text)
+            for w, expanded in words:
+                # past BRACE_LIMIT, fall back to spells_through_braces(): could the word spell a name at all
+                if expanded is None and (any(spells_through_braces(w, name=n) for n in ("patch", "gitapply", "gitam"))
+                                         or git_named and any(spells_through_braces(w, name=n) for n in ("apply", "am"))):
+                    return True
+            if DIFF_TOOL_NAME.search(STASH_APPLY.sub("stash", " ".join(x for w, e in words for x in (e or [w])))):
+                return True
+    return False
+
+
 def names_patch(command):
-    """True if apply_patch/applypatch is named anywhere in the command: after removing quotes and backslashes
-    (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or with
-    unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`, backticks,
-    `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`), or as a glob
-    word (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is not seen; one assembled
-    with `printf -v` or `read` and then run as `$a` is caught by builds_command_name()."""
+    """True if apply_patch/applypatch is named anywhere in the command (names_tool())."""
+    return names_tool(command, ("apply_patch", "applypatch"), patch_text_match)
+
+
+def names_diff_tool(command):
+    """True if `patch`, `gpatch`, `git-apply`, `git-am`, or `git` ... `apply`/`am` is named anywhere in the command
+    (names_tool(), diff_text_match())."""
+    return names_tool(command, ("patch", "gpatch", "git-apply", "git-am"), diff_text_match)
+
+
+def names_tool(command, names, text_match):
+    """True if a tool is named anywhere in the command: `text_match` on the command after removing quotes and
+    backslashes (`ap''ply_patch`), after expanding variables the command assigns itself (`a=apply_; ${a}patch`), or
+    with unset ones dropped (`apply${x}_patch`), with `$'\\x61'`/`$"..."` quoting decoded and with `$( )`,
+    backticks, `$[ ]` and special parameters (`$@`) dropped, as they can expand to nothing (`apply_p$(:)atch`); or a
+    glob word that matches one of `names` (`apply_pat?h`). A name printed at run time (`base64 -d`, `$(echo pa)`) is
+    not seen; one assembled with `printf -v` or `read` and then run as `$a` is caught by builds_command_name()."""
     if "\\\n" in command:  # `apply\<NL>patch`: a line continuation joins the word; check both forms
         joined = re.sub(r"(?<!\\)((?:\\\\)*)\\\n", r"\1", command)
-        if joined != command and names_patch(joined):
+        if joined != command and names_tool(joined, names, text_match):
             return True
     if "$'" in command or '$"' in command:
         bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
         if any(ansi_c_decode(b) is None for b in bodies):
             return True  # an escape bash reads differently (`\\u61`, `\\x6`): fail closed
         decoded = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: "'" + ansi_c_decode(m.group(1)).replace("'", "'\\''") + "'", command).replace('$"', '"')
-        if decoded != command and names_patch(decoded):
+        if decoded != command and names_tool(decoded, names, text_match):
             return True
     flat = re.sub(r"[\\'\"]", "", command)
     values = {name: unquote(value) for name, value in ASSIGNMENT.findall(command)}
@@ -824,16 +925,12 @@ def names_patch(command):
     globs += q_globs(q_words) + q_globs(q_commands, command=True)
     commands.update(q_globs(q_commands, command=True))
     commands |= {posix_glob(c) for c in commands}  # compare a command glob in the same form as `globs` (`./a[p]*h`)
-    globs = [w for w in globs if glob_min_length(w) <= len("apply_patch")]  # fnmatch is slow on long bracket words
+    globs = [w for w in globs if glob_min_length(w) <= max(map(len, names))]  # fnmatch is slow on long bracket words
     if any((w in commands or len(re.findall(r"[a-z]", re.sub(r"\[[^\]]*\]", "", w))) >= GLOB_MIN_LETTERS)
-           and fnmatch.fnmatchcase(n, w) for w in globs for n in ("apply_patch", "applypatch")):
+           and fnmatch.fnmatchcase(n, w) for w in globs for n in names):
         return True  # `apply_pat?h`, `a*` as a command: the glob runs the tool when it matches a file of that name
-    if any(PATCH_NAME.search(s) for s in [flat, expanded, defaulted, dropped]):
+    if text_match([flat, expanded, defaulted, dropped]):
         return True
-    if has_brace_group(flat) and any(spells_through_braces(t) for t in [flat, expanded, defaulted, dropped]):
-        return True  # `apply_{{p,q}a,x}tch`, `apply_pa{s..t}ch`, `apply_{'{',pa}tch`
-    if re.search(r"\$\(|`", flat) and any(spells_through_braces(t, SUBSTITUTION_SEPARATORS) for t in [flat, expanded, defaulted]):
-        return True  # `apply_p$(: ")")atch`: a `$( )` or backtick span may print nothing, wherever its quotes end
     return builds_command_name(command)
 
 
@@ -1109,6 +1206,8 @@ def read_only_segment(words):
     if assigned:
         return False  # `GIT_PAGER=... git log`, `GREP_OPTIONS=...`: an environment prefix can make a tool run commands
     cmd, args = unquote(words[i]), command_operands(words[i + 1 :])
+    if cmd in ("patch", "gpatch"):
+        return args in HELP_ONLY + (["--version"],)
     if cmd not in READ_ONLY_TOOLS:
         return False
     if cmd in FLAG_SENSITIVE and any(re.search(r"[$`{}]", w) or (not re.search(r"['\"]", w) and re.search(r"[*?\[]", w))
@@ -1122,6 +1221,14 @@ def read_only_segment(words):
             and bool(scripts) and SED_PRINT.fullmatch(scripts[0]) is not None
     if cmd == "find":
         return not any(FIND_ACTIONS.fullmatch(a) for a in args)
+    if cmd == "git" and args[:1] == ["apply"]:
+        # every word must be on the list, so a `--check` in a comment (`x.diff # --check`), after `--`, or as the
+        # value of another option (`--exclude --check`) does not count (#196 N1)
+        rest = args[1:]
+        return rest in HELP_ONLY or (any(a in GIT_APPLY_READ_ONLY for a in rest) and all(
+            a in GIT_APPLY_SAFE_ARGS or re.fullmatch(r"-p\d+", a) or not a.startswith(("-", "#")) for a in rest))
+    if cmd == "git" and args[:1] == ["am"]:
+        return args[1:] in HELP_ONLY or (len(args) == 2 and args[1] in GIT_AM_READ_ONLY)
     if cmd == "git":
         return bool(args) and args[0] in ("commit", "log") and not any(
             a.startswith(("--output", "--ext-diff", "--textconv", "--template")) for a in args)
@@ -1140,45 +1247,59 @@ def runs_shell_patch(command):
     (read_only_segment()). Anything else, from `apply_patch < f` to `bash`, `xargs`, `sudo` or an unknown command,
     counts as a possible run, so it is blocked on a feature branch. A command that does not name the tool (a name
     decoded at run time, a script file) is not seen."""
-    if not names_patch(command):
+    return names_patch(command) and not_read_only(command, PATCH_NAME)
+
+
+def runs_diff_tool(command, parsed_run):
+    """True if a Bash command may run `git apply`, `git am` or `patch` (#200): its text names one (names_diff_tool())
+    or a command parses as one (`parsed_run`, diff_apply_runs()), and it does anything other than read
+    (not_read_only()). The same model as runs_shell_patch() (pragma #140)."""
+    return (parsed_run or names_diff_tool(command)) and not_read_only(command, DIFF_TOOL_NAME)
+
+
+def all_read_only(text, depth=0):
+    """True if every command in `text`, including inside `$( )` and backticks, is read-only (read_only_segment())."""
+    tokens = tokenize(text)
+    if tokens is None or depth > 3:
         return False
+    for item in split_segments(tokens):
+        if item[0] != "cmd":
+            continue
+        if not read_only_segment(item[1]):
+            return False
+        if any(not all_read_only(b, depth + 1) for w in item[1] for b in command_substitutions(w)):
+            return False
+    return True
+
+
+def not_read_only(command, name_re):
+    """True unless every command in it is read-only (all_read_only()) and it has none of the forms the parser can't
+    follow: an unquoted heredoc that expands `$( )`, nested backticks, arithmetic, a stored `$( )`, an unquoted
+    brace group, or an assignment whose value matches `name_re`."""
     if any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
         return True  # an unquoted heredoc body expands `$( )` and backticks, and the parser drops heredoc bodies
     if "\\`" in command:
         return True  # nested, escaped backticks are not parsed
-    if EVAL_EXPANSION.search(command) or any(PATCH_NAME.search(v) for _, v in ASSIGNMENT.findall(command)):
+    if EVAL_EXPANSION.search(command) or any(name_re.search(v) for _, v in ASSIGNMENT.findall(command)):
         return True  # arithmetic, subscripts and @P evaluate text as code; an assigned name may be run later
     plain, quoted = split_quoted(command)
     if any(re.search(r"\$\(|`", v) for v in quoted + [v for _, v in ASSIGNMENT.findall(command)]):
         return True  # a stored `$( )` or backtick can be run later (eval, @P, an indirect expansion)
     if has_brace_group(plain):
         return True  # an unquoted `{x,y}` or `{a..b}` can add words, flags or scripts the parser never sees
-
-    def all_read_only(text, depth=0):
-        tokens = tokenize(text)
-        if tokens is None or depth > 3:
-            return False
-        for item in split_segments(tokens):
-            if item[0] != "cmd":
-                continue
-            if not read_only_segment(item[1]):
-                return False
-            if any(not all_read_only(b, depth + 1) for w in item[1] for b in command_substitutions(w)):
-                return False
-        return True
-
     return not all_read_only(command)
 
 
 def cd_dirs(command, cwd, _depth=0):
-    """(dirs, unresolved): cwd plus every directory a `cd`, `pushd` or `popd` in the command moves to, in order,
-    and whether one of them could not be worked out. Read with the hook's tokenizer, so a quoted directory with
-    spaces stays one word (pragma #139). `cd -` and `popd` go back, and a bare `cd` and `~` go home. Looks inside
-    `$( )`, `bash -c` and `eval` (whose `cd` carries on to later commands). Unresolved: a target holding a
-    variable, `$( )`, a backtick or a glob; `~` or a bare `cd` when the command assigns HOME; a relative target
-    when CDPATH is set or assigned; `pushd` with no directory or with `+N`/`-N`; a `popd` past the command's own
-    pushes; a `cd -` with no earlier `cd`; `env -C`/`--chdir`, `sudo -D`/`--chdir` and `make -C`/`--directory`;
-    and a shell reading commands from stdin whose text has a `cd`, `pushd` or `popd`. A patch path is checked
+    """(dirs, unresolved): cwd plus every directory a `cd` (or zsh `chdir`), `pushd` or `popd` in the command moves
+    to, in order, and whether one of them could not be worked out. Read with the hook's tokenizer, so a quoted
+    directory with spaces stays one word (pragma #139). `cd -` and `popd` go back, and a bare `cd` and `~` go home.
+    Looks inside `$( )`, `bash -c` and `eval` (whose `cd` carries on to later commands). Unresolved: a target
+    holding a variable, `$( )`, a backtick or a glob; zsh's two-word `cd old new`; `~` or a bare `cd` when the
+    command assigns HOME; a relative target when CDPATH is set or assigned; `pushd` with no directory or with
+    `+N`/`-N`; a `popd` past the command's own pushes; a `cd -` with no earlier `cd`; `env -C`/`--chdir`,
+    `sudo -D`/`--chdir` and `make -C`/`--directory`; and a shell reading commands from stdin whose text has a
+    `cd`, `chdir`, `pushd` or `popd`. A patch path is checked
     against every directory (an over-approximation), so a `cd` before a shell-run patch can't move it off the
     guard."""
     tokens = tokenize(command)
@@ -1231,23 +1352,26 @@ def cd_dirs(command, cwd, _depth=0):
                     if j + 1 < len(operands):
                         visit(operands[j + 1], False)
                     break
-            if reads_stdin_script(cmd, operands) and re.search(r"(?<![\w.-])(?:cd|pushd|popd)(?![\w.-])", command):
+            if reads_stdin_script(cmd, operands) and re.search(r"(?<![\w.-])(?:cd|chdir|pushd|popd)(?![\w.-])", command):
                 unresolved = True
         if cmd == "eval":
             visit(" ".join(operands), True)
             continue
-        if cmd not in ("cd", "pushd", "popd"):
+        if cmd not in ("cd", "chdir", "pushd", "popd"):
             continue
         if any("$" in w or "`" in w for w in rest):
             unresolved = True
             continue
         args = [w for w in operands if w == "-" or not w.startswith("-") or re.fullmatch(r"[+-]\d+", w)]
         target = None
+        if cmd in ("cd", "chdir") and len(args) > 1:
+            unresolved = True  # zsh `cd old new` swaps text in $PWD
+            continue
         if cmd == "popd":
             target = dirstack.pop() if dirstack else None
-        elif cmd == "cd" and (not args or args[0] == "~"):
+        elif cmd in ("cd", "chdir") and (not args or args[0] == "~"):
             target = home
-        elif cmd == "cd" and args[0] == "-":
+        elif cmd in ("cd", "chdir") and args[0] == "-":
             target = prev
         elif args and not re.fullmatch(r"[+-]\d+", args[0]) and not re.search(r"[*?\[]", args[0]):
             word = args[0]
@@ -1265,6 +1389,39 @@ def cd_dirs(command, cwd, _depth=0):
         prev, cur = cur, target
         dirs.append(cur)
     return dirs, unresolved
+
+
+MAX_CHECKED_DIRS = 64  # distinct directories (then repos) a patch-tool command may name before it is blocked unchecked
+PATH_WORD = re.compile(r"[^\s'\"`=;&|()<>$]+")
+
+
+def named_dirs(command, bases):
+    """The nearest existing folder of every word in the raw command text, quoted strings included, read as a path
+    from each of `bases` (an absolute one once; `-o/x` also as `/x`). This finds a directory that reaches a patch
+    tool through a string or option the parser does not follow: `ssh h 'cd D && ...'`, `su -c`, `env -S`, `script`,
+    `xargs -I{} git -C {}` fed `echo D`, a `patch` ORIGFILE or `-o`/`-r` value, `git apply --directory=D`,
+    `find D -execdir` (#196 N4, N6, S1, S7). An over-approximation: a word that only looks like a path is checked too."""
+    out = []
+    for w in dict.fromkeys(PATH_WORD.findall(command)):
+        for word in [w] + ([w[2:]] if re.match(r"-\w./", w) or re.match(r"-\w/", w) else []):
+            word = os.path.expanduser(word)
+            for base in [None] if os.path.isabs(word) else bases:
+                p = word if base is None else resolve(word, base)
+                found = p if os.path.isdir(p) else nearest_existing_dir(p)
+                if found:
+                    out.append(found)
+    return list(dict.fromkeys(out))
+
+
+def repo_root(d):
+    """The nearest folder at or above `d` (symlinks resolved, as git does) holding a `.git` entry; None outside a
+    repo, where `git branch` finds no branch either."""
+    d = os.path.realpath(d)
+    while not os.path.exists(os.path.join(d, ".git")):
+        if os.path.dirname(d) == d:
+            return None
+        d = os.path.dirname(d)
+    return d
 
 
 def evaluate(payload):
@@ -1291,14 +1448,20 @@ def evaluate(payload):
             # headers joined by a literal \n (`printf '...\n*** Update File: X'`) are read too; this still
             # catches an absolute path into another repo that is on a feature branch
             candidates += patch_targets(command.replace("\\n", "\n"), cwd, dirs)
-        diff_runs, diff_dirs = diff_apply_runs(command)
-        if diff_runs:
+        parsed_run, diff_dirs = diff_apply_runs(command)
+        diff_runs = runs_diff_tool(command, parsed_run)
+        tool_name = "apply_patch through the shell" if runs_shell_patch(command) else "`git apply`, `git am` or `patch`" if diff_runs else None
+        if tool_name:
             diff_dirs += [os.environ[v] for v in ("GIT_DIR", "GIT_WORK_TREE") if os.environ.get(v)]
             if re.search(r"(?<![\w$])GIT_(?:DIR|WORK_TREE)\b", command) or any(re.search(r"[$`*?\[]", d) for d in diff_dirs):
                 unresolved = True
-            dirs = dirs + [resolve(x, d) for x in diff_dirs for d in dirs]
-        tool_name = "apply_patch through the shell" if runs_shell_patch(command) else "`git apply`, `git am` or `patch`" if diff_runs else None
-        if tool_name:
+            dirs = list(dict.fromkeys(dirs))  # #196 N7: a long chain of `cd`s repeats directories
+            if len(dirs) > MAX_CHECKED_DIRS:
+                return (
+                    f"BLOCKED: this command runs, or may run, {tool_name} and moves through {len(dirs)} directories, "
+                    f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
+                )
+            dirs = dirs + [resolve(x, d) for x in diff_dirs for d in dirs] + named_dirs(command, dirs)
             remedy = ("use the apply_patch tool directly (its file list is checked)" if tool_name.startswith("apply_patch")
                       else "make the change with Write/Edit, or apply the diff on a chore/* or fix/* branch")
             if unresolved:
@@ -1307,9 +1470,21 @@ def evaluate(payload):
                     "(a variable, `$( )`, a glob, a stack move, HOME/CDPATH/GIT_DIR, or a chdir option), so it "
                     f"can't tell whether that directory is on a feature/* branch. Remedy: {remedy}, or cd to a literal path."
                 )
-            # fail closed if the session or any directory the command cds into or names is on a feature branch
+            # fail closed if the session or any directory the command cds into or names is on a feature branch;
+            # one `git branch` per repo (#196 N7: one per directory let a long command time out, and a hook that
+            # times out fails open)
+            repos = {}
             for d in dirs:
-                branch = git(d if os.path.isdir(d) else (nearest_existing_dir(d) or d), "branch", "--show-current")
+                d = d if os.path.isdir(d) else (nearest_existing_dir(d) or d)
+                root = repo_root(d)
+                if root:
+                    repos.setdefault(root, d)
+            if len(repos) > MAX_CHECKED_DIRS:
+                return (
+                    f"BLOCKED: this command runs, or may run, {tool_name} and names {len(repos)} repositories, over the guard's {MAX_CHECKED_DIRS} limit, so it was not checked. Split it."
+                )
+            for d in repos.values():
+                branch = git(d, "branch", "--show-current")
                 if branch and GUARDED_BRANCH.match(branch):
                     return (
                         f"BLOCKED: this command runs, or may run, {tool_name} and `{d}` is on `{branch}` (feature/*). "
@@ -1736,6 +1911,45 @@ def self_test():
             ("chore: Bash git apply allowed", bash("chore", "git apply x.diff"), False),
             ("chore: Bash patch -p1 allowed", bash("chore", "patch -p1 < x.diff"), False),
             ("chore: Bash piped diff into git apply allowed", bash("chore", "cat x.diff | git apply"), False),
+            # #196 round 2: pragma #140's model (text names a tool -> blocked on feature/* unless all read-only)
+            ("feature: Bash N1 --check in a comment is not read-only", bash("feat", "git apply x.diff # --check"), True),
+            ("feature: Bash N1 --check as an option value is not read-only", bash("feat", "git apply --exclude --check x.diff"), True),
+            ("feature: Bash N1 --check after -- is not read-only", bash("feat", "git apply x.diff -- --check"), True),
+            ("feature: Bash N2 alias set in the same command", bash("feat", "git config alias.p apply; git p x.diff"), True),
+            ("chore cwd: Bash N2 alias set in a feature repo", bash("chore", f"git -C {feat} config alias.p apply; git -C {feat} p x.diff"), True),
+            ("feature: Bash N4 noglob wrapper", bash("feat", "noglob git apply x.diff"), True),
+            ("chore cwd: Bash N4 noglob git -C a feature repo", bash("chore", f"noglob git -C {feat} apply x.diff"), True),
+            ("chore cwd: Bash N4 ssh string cds into a feature repo", bash("chore", f"ssh localhost 'cd {feat} && git apply x.diff'"), True),
+            ("chore cwd: Bash N4 su -c into a feature repo", bash("chore", f"su -c 'git -C {feat} apply x.diff'"), True),
+            ("chore cwd: Bash N4 env -S into a feature repo", bash("chore", f"env -S 'git -C {feat} apply x.diff'"), True),
+            ("chore cwd: Bash N4 script runs patch -d a feature repo", bash("chore", f"script -q /dev/null patch -d {feat} -p1 < x.diff"), True),
+            ("feature: Bash N4 git-apply by path", bash("feat", "/usr/libexec/git-core/git-apply x.diff"), True),
+            ("feature: Bash N4 git-am", bash("feat", "git-am < m.mbox"), True),
+            ("chore cwd: Bash N6 zsh chdir into a feature repo", bash("chore", f"chdir {feat} && git apply x.diff"), True),
+            ("chore cwd: Bash N6 zsh two-word cd is unresolved", bash("chore", "cd chore feat && git apply x.diff"), True),
+            ("chore cwd: Bash N6 xargs -I{} git -C {}", bash("chore", f"echo {feat} | xargs -I{{}} git -C {{}} apply x.diff"), True),
+            ("feature: Bash N6 --config-env alias", bash("feat", "git --config-env alias.p=P p x.diff"), True),
+            ("feature: Bash N6 --attr-source before the subcommand", bash("feat", "git --attr-source HEAD p x.diff"), True),
+            ("chore: Bash N8 stderr to a file named --check allowed", bash("chore", "git apply x.diff 2>--check"), False),
+            ("chore cwd: Bash S1 patch ORIGFILE in a feature repo", bash("chore", f"patch {feat}/CLAUDE.md x.diff"), True),
+            ("chore cwd: Bash S1 patch -o into a feature repo", bash("chore", f"patch -o{feat}/CLAUDE.md -p1 < x.diff"), True),
+            ("chore cwd: Bash S1 git apply --directory into a feature repo",
+             bash("chore", f"git apply --unsafe-paths --directory={feat} x.diff"), True),
+            ("feature: Bash S3 xargs sh -c", bash("feat", "ls *.diff | xargs sh -c 'git apply $0'"), True),
+            ("feature: Bash S3 fish -c", bash("feat", "fish -c 'git apply x.diff'"), True),
+            ("feature: Bash S5 eval", bash("feat", 'eval "git apply x.diff"'), True),
+            ("chore cwd: Bash S7 find -execdir in a feature repo", bash("chore", f"find {feat} -name x.diff -execdir git apply {{}} \\;"), True),
+            ("feature: Bash S8 GIT_CONFIG_* alias", bash("feat", "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=apply git p x.diff"), True),
+            ("feature: Bash brace-built patch name", bash("feat", "pa{t,}ch -p1 < x.diff"), True),
+            ("feature: Bash brace-built git subcommand", bash("feat", "git ap{p,}ly x.diff"), True),
+            ("feature: Bash glob git subcommand", bash("feat", "git ap?ly x.diff"), True),
+            ("feature: Bash git apply --check -p1 is read-only", bash("feat", "git apply --check -p1 x.diff"), False),
+            ("feature: Bash git am --show-current-patch=diff is read-only", bash("feat", "git am --show-current-patch=diff"), False),
+            ("feature: Bash git commit message naming patch is read-only", bash("feat", "git commit -m 'fix the am patch'"), False),
+            ("feature: Bash dispatch is not patch", bash("feat", "swift test --filter DispatchTests"), False),
+            ("chore cwd: Bash git apply naming only chore paths allowed", bash("chore", f"git apply {chore}/x.diff"), False),
+            ("chore cwd: Bash 300 cds then git apply stays fast and allowed",
+             bash("chore", " && ".join(["cd App", "cd .."] * 150) + " && git apply x.diff"), False),
             ("feature: Bash $var command word with apply_patch fails closed", bash("feat", "p=apply_patch; $p < f"), True),
             ("feature: Bash alias to apply_patch fails closed", bash("feat", "alias ap=apply_patch; ap < f"), True),
             ("feature: Bash find -exec apply_patch fails closed", bash("feat", r"find . -name '*.patch' -exec apply_patch {} \;"), True),

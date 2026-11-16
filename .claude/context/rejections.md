@@ -368,3 +368,21 @@
 **Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
 **File:** CHANGELOG.md:8
 **Caught by:** this review
+
+## 2026-11-16 — PR#196 — git apply read-only check matched --check in a comment, after --, or as an option value
+**What was wrong:** `git apply x.diff # --check`, `git apply --exclude --check x.diff` and `git apply x.diff -- --check` counted as read-only because any `--check`/`--stat` word did, so each wrote CLAUDE.md on feature/* with exit 0. Fixed: #140's model; `git apply` is read-only only when every word is on a short allowlist (no `#`, `--`, or other option).
+**Rule violated:** no formal rule, caught in review (a "this flag makes it safe" check must also prove nothing else on the line undoes it)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (read_only_segment)
+**Caught by:** this review (Round 2, N1)
+
+## 2026-11-16 — PR#196 — git alias set in the same command ran git apply unseen
+**What was wrong:** `git config alias.p apply; git p x.diff` applied a diff on feature/* with exit 0, while the CHANGELOG listed only an alias set outside the command as unseen. Fixed: a command whose text has `git` then `apply`/`am` is a possible run, as are `--config-env`, unknown global options and `GIT_CONFIG_*`.
+**Rule violated:** repeats the PR#140 lesson: a denylist of ways to run a tool keeps leaking; name-in-text plus a read-only allowlist does not
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (DIFF_TOOL_NAME, diff_apply_dirs)
+**Caught by:** this review (Round 2, N2)
+
+## 2026-11-16 — PR#196 — reference.md said the hook allows every edit off feature/*, and the Not seen lists were incomplete (repeats PR#140 R6, PR#148 R1)
+**What was wrong:** an unresolved `cd` before a patch tool blocks on every branch, and wrappers, zsh `chdir`, `xargs -I`, `--config-env` and cross-repo diff paths were missing from the "Not seen" lists in the CHANGELOG and `gates/reference.md`.
+**Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
+**File:** .claude/skills/gates/reference.md:65
+**Caught by:** this review (Round 2, N3)

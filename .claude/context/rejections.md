@@ -386,3 +386,15 @@
 **Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
 **File:** .claude/skills/gates/reference.md:65
 **Caught by:** this review (Round 2, N3)
+
+## 2026-11-16 — PR#196 — Diff-header read skipped attached and quoted file names (confirm F1, F2)
+**What was wrong:** `diff_header_dirs` opened only whitespace-split words, so `patch -p0 -icross.diff`, `-i "cross".diff` and `patch -p0 < "space dir.diff"` applied a diff naming `../feat/CLAUDE.md` from a chore cwd with exit 0. Fixed in bdf79f1 (`command_words()`).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs)
+**Caught by:** this review (Round confirm)
+
+## 2026-11-16 — PR#196 — Unbounded diff-header work let the hook time out and fail open (confirm F3)
+**What was wrong:** each absolute or `..` header name was resolved against every checked directory with an uncached parent walk; two sub-1 MB diffs with ~140k names ran 69 s. Fixed in bdf79f1 (512-name cap, cached `existing_dir()`).
+**Rule violated:** repeats this PR's N7 (one subprocess/walk per directory, no bound): every new loop over command input needs a work budget
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs)
+**Caught by:** this review (Round confirm)

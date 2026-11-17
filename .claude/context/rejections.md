@@ -440,3 +440,9 @@
 **Rule violated:** no formal rule, caught in review (guard bypass)
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
 **Caught by:** financetracker-ios#234 round 2 review of the same hook
+
+## 2026-11-17 — PR#196 — Repo walk after the 20 s deadline still let the hook run past its timeout (repeats PR#140)
+**What was wrong:** 8f9a901's deadline guarded only `resolve_both`/`existing_dir`; the later `for d in dirs` loop ran an uncached `repo_root` per (duplicated) directory, so `patch` + `-da ` x 8000 from a 430-deep cwd ran over 70 s and fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate repo walk)
+**Caught by:** this review (Round confirm on 2d71985)

@@ -1393,6 +1393,7 @@ def cd_dirs(command, cwd, _depth=0):
 
 
 MAX_CHECKED_DIRS = 64  # distinct directories (then repos) a patch-tool command may name before it is blocked unchecked
+MAX_CLUSTER_WORD = 32  # characters; an option word up to this long contributes every cluster suffix, a longer one only w[2:]
 PATH_WORD = re.compile(r"[^\s'\"`=;&|()<>$]+")
 
 
@@ -1401,9 +1402,10 @@ def command_words(command):
     PATH_WORD), each shell word with its quotes removed (`"space dir.diff"`, `"cross".diff`), and the value of an
     attached short option (`-icross.diff`, `-o/x`) (#196 confirm F1, F2)."""
     words = PATH_WORD.findall(command) + [unquote(t) for t in tokenize(command) or [] if t not in REDIRECT_OPS]
-    # the attached value (`-o/x`), and for words up to 32 characters every suffix of a short-option cluster
-    # (`-sicross.diff` is -s -i cross.diff), so the suffixes stay bounded (MAX_WORD_WORK caps the rest)
-    words += [w[k:] for w in words if re.match(r"-\w.", w) for k in range(2, len(w) if len(w) <= 32 else 3)]
+    # the attached value (`-o/x`), and for words up to MAX_CLUSTER_WORD characters every suffix of a short-option
+    # cluster (`-sicross.diff` is -s -i cross.diff), so the suffixes stay bounded (MAX_WORD_WORK caps the rest)
+    words += [w[k:] for w in words if re.match(r"-\w.", w)
+              for k in range(2, len(w) if len(w) <= MAX_CLUSTER_WORD else 3)]
     return list(dict.fromkeys(w for w in words if w))
 
 
@@ -1434,7 +1436,8 @@ def named_dirs(command, bases, cache):
 DIFF_HEADER = re.compile(r"^(?:diff --git |--- |\+\+\+ |\*\*\* |Index: |(?:rename|copy) (?:from|to) )(.+)$", re.MULTILINE)
 MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 MAX_DIFF_NAMES = 512  # distinct absolute or `..` header names; each is resolved against every checked directory
-MAX_HEADER_WORK = 20000  # header names x their -pN strips x checked directories, and the longest name, both capped
+MAX_HEADER_WORK = 20000  # header names x their -pN strips x checked directories
+MAX_DIFF_NAME_LEN = 4096  # characters in one absolute or `..` header name (PATH_MAX on Linux; macOS is 1024)
 MAX_WORD_WORK = 100000  # command words x checked directories that named_dirs()/diff_header_dirs() may resolve
 # glob characters, a brace expansion (`cr{o,}ss.diff`, `{a..b}`) and a zsh numeric range (`<1-9>`); zsh's `^ ~ #`
 # act only with EXTENDED_GLOB (off by default) and stay text, so `git diff HEAD~1 | git apply` is not blocked
@@ -1494,23 +1497,22 @@ def diff_header_dirs(command, bases, cache):
     for w in command_words(command):
         for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
             p = os.path.expanduser(w) if base is None else resolve(w, base)
-            for p in [p]:
-                if p in seen or not os.path.isfile(p):
-                    continue
-                if len(seen) >= MAX_DIFF_FILES:
-                    unread = True
-                    continue
-                seen.add(p)
-                try:
-                    with open(p, "rb") as f:
-                        data = f.read(MAX_DIFF_BYTES + 1)
-                    unread = unread or len(data) > MAX_DIFF_BYTES
-                    texts.append(data[:MAX_DIFF_BYTES].decode("utf-8", "replace"))
-                except OSError:
-                    pass
+            if p in seen or not os.path.isfile(p):
+                continue
+            if len(seen) >= MAX_DIFF_FILES:
+                unread = True
+                continue
+            seen.add(p)
+            try:
+                with open(p, "rb") as f:
+                    data = f.read(MAX_DIFF_BYTES + 1)
+                unread = unread or len(data) > MAX_DIFF_BYTES
+                texts.append(data[:MAX_DIFF_BYTES].decode("utf-8", "replace"))
+            except OSError:
+                pass
     names = [n for n in dict.fromkeys(n for t in texts for n in diff_header_names(t))
              if n.startswith("/") or ".." in n.split("/")]
-    if len(names) > MAX_DIFF_NAMES or any(len(n) > 4096 for n in names) or sum(
+    if len(names) > MAX_DIFF_NAMES or any(len(n) > MAX_DIFF_NAME_LEN for n in names) or sum(
             (n.split("/").index("..") + 1 if not n.startswith("/") else 1) * (1 if n.startswith("/") else len(bases))
             for n in names) > MAX_HEADER_WORK:
         return [], True  # a budget on the total work, not only the name count (#196 scan: `../a/../b/...` names)
@@ -1583,11 +1585,11 @@ def evaluate(payload):
             dirs += header_dirs
             if unread:
                 return (
-                    f"BLOCKED: this command runs, or may run, {tool_name} and names more than {MAX_DIFF_FILES} files, "
-                    f"one over {MAX_DIFF_BYTES >> 20} MB, diffs with over {MAX_DIFF_NAMES} absolute or `..` file "
-                    "names (or too much header work), a file named through a variable, `$( )` or an unquoted glob, so the guard "
-                    "could not check every diff header for paths outside the checked directories (this applies on "
-                    "every branch). Split it, name the diff file literally, or apply a smaller diff."
+                    f"BLOCKED: this command runs, or may run, {tool_name}, and the guard could not read every diff "
+                    "header it may apply (this applies on every branch). Causes: a variable, `$( )` or unquoted glob "
+                    f"anywhere in the command (even in a word unrelated to the diff); more than {MAX_DIFF_FILES} named "
+                    f"files; a file over {MAX_DIFF_BYTES >> 20} MB; or too many absolute or `..` header names. "
+                    "Split the command, name the diff file literally, or apply a smaller diff."
                 )
             remedy = ("use the apply_patch tool directly (its file list is checked)" if tool_name.startswith("apply_patch")
                       else "make the change with Write/Edit, or apply the diff on a chore/* or fix/* branch")

@@ -69,6 +69,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 
 # Repo-relative globs. fnmatch's `*` also crosses `/`, so nested paths match.
 PROTECTED_GLOBS = (
@@ -262,10 +263,30 @@ def resolve(path, cwd):
     return os.path.normpath(os.path.join(cwd, os.path.expanduser(path)))
 
 
+MAX_CHECK_SECONDS = 20  # a patch-tool directory check past this blocks; the hook timeout is 60 s and a timeout fails open
+CHECK_DEADLINE = [None]  # time.monotonic() deadline, set by evaluate() before the patch-tool directory checks
+REALPATHS = {}
+
+
+class CheckTimeout(Exception):
+    pass
+
+
+def check_deadline():
+    """Raise CheckTimeout past CHECK_DEADLINE: the item caps don't weigh path depth, and a deep tree made the checks
+    run past the hook timeout, which fails open (#196 confirm on acdbbd8)."""
+    if CHECK_DEADLINE[0] is not None and time.monotonic() > CHECK_DEADLINE[0]:
+        raise CheckTimeout
+
+
 def resolve_both(path, cwd):
     """resolve() and the path the kernel reaches with symlinks followed: `lnk/..` is the link target's parent, not
     `cwd` (FT#234 review). A patch tool's directories are checked both ways."""
-    return [resolve(path, cwd), os.path.realpath(os.path.join(cwd, os.path.expanduser(path)))]
+    check_deadline()
+    joined = os.path.join(cwd, os.path.expanduser(path))
+    if joined not in REALPATHS:
+        REALPATHS[joined] = os.path.realpath(joined)
+    return [resolve(path, cwd), REALPATHS[joined]]
 
 
 def unquote(word):
@@ -532,7 +553,7 @@ WRITE, MOVE_OR_REMOVE_DEST, REMOVE = 0, 1, 2  # REMOVE: rm / git rm / the source
 GIT_APPLY_READ_ONLY = ("--check", "--stat", "--numstat", "--summary")  # at least one of these: nothing is applied
 GIT_APPLY_SAFE_ARGS = GIT_APPLY_READ_ONLY + ("-v", "--verbose", "-R", "--reverse", "-z")  # also `-pN` and file names
 # allowed, though not read-only: `--abort` resets HEAD and `--quit` drops .git/rebase-apply; neither applies a diff
-GIT_AM_READ_ONLY = ("--abort", "--quit", "--show-current-patch", "--show-current-patch=diff", "--show-current-patch=raw")
+GIT_AM_ALLOWED = ("--abort", "--quit", "--show-current-patch", "--show-current-patch=diff", "--show-current-patch=raw")
 HELP_ONLY = (["-h"], ["--help"])
 PATCH_SHORT_ARG = "BDdFioprVYz"  # `patch` short options that take a value (GNU and BSD): `-sd DIR` sets -d
 SHELLS = ("bash", "sh", "zsh", "dash", "ksh", "mksh", "yash", "ash", "fish", "csh", "tcsh")
@@ -586,9 +607,9 @@ def diff_apply_dirs(words, config_env=False):
     relative to the one before), `git apply --directory`, or `patch -d`/`--directory`. Read-only forms are told apart
     later, by read_only_segment()."""
     idx = real_command_index(words)
-    # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment, so it can sit before
-    # `idx`): the shell splits the word into `git apply` (FT#234 review)
-    if any(re.match(r"git[$`]", os.path.basename(unquote(w)).lower()) for w in words[: len(words) if idx is None else idx + 1]):
+    # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment): the shell splits the word
+    # into `git apply`. Any word of the command counts, so `find -exec`, `watch` and `parallel` are covered (FT#234)
+    if any(re.match(r"git[$`]", os.path.basename(unquote(w)).lower()) for w in words):
         return []
     if idx is None:
         return None
@@ -1242,7 +1263,7 @@ def read_only_segment(words):
         return rest in HELP_ONLY or (any(a in GIT_APPLY_READ_ONLY for a in rest) and all(
             a in GIT_APPLY_SAFE_ARGS or re.fullmatch(r"-p\d+", a) or not a.startswith(("-", "#")) for a in rest))
     if cmd == "git" and args[:1] == ["am"]:
-        return args[1:] in HELP_ONLY or (len(args) == 2 and args[1] in GIT_AM_READ_ONLY)
+        return args[1:] in HELP_ONLY or (len(args) == 2 and args[1] in GIT_AM_ALLOWED)
     if cmd == "git":
         return bool(args) and args[0] in ("commit", "log") and not any(
             a.startswith(("--output", "--ext-diff", "--textconv", "--template")) for a in args)
@@ -1426,6 +1447,7 @@ def existing_dir(p, cache):
     """`p` if it is a directory, else its nearest existing parent; cached by parent, so many words in one folder
     cost one walk (#196 confirm F3, F4: the uncached walk per word and base took over 30 s, and a hook that times out
     fails open)."""
+    check_deadline()
     if os.path.isdir(p):
         return p
     parent = os.path.dirname(p)
@@ -1450,7 +1472,8 @@ DIFF_HEADER = re.compile(r"^(?:diff --git |--- |\+\+\+ |\*\*\* |Index: |(?:renam
 MAX_DIFF_FILES, MAX_DIFF_BYTES = 32, 1 << 20
 MAX_DIFF_NAMES = 8192  # distinct diff header names (a 4,000-file diff has ~8,000); each is resolved against every
 # checked directory
-MAX_HEADER_WORK = 100000  # header names x their -pN strips x checked directories (~3 s at the cap, 2026-11-17)
+MAX_HEADER_WORK = 100000  # header names x their -pN strips x checked directories (~3 s at the cap in a shallow tree;
+# MAX_CHECK_SECONDS bounds a deep one)
 MAX_DIFF_NAME_LEN = 4096  # characters in one diff header name (PATH_MAX on Linux; macOS is 1024)
 MAX_WORD_WORK = 100000  # command words x checked directories that named_dirs()/diff_header_dirs() may resolve
 # glob characters, a brace expansion (`cr{o,}ss.diff`, `{a..b}`) and a zsh numeric range (`<1-9>`); zsh's `^ ~ #`
@@ -1597,13 +1620,21 @@ def evaluate(payload):
                     f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
                 )
             cache = {}
+            CHECK_DEADLINE[0] = time.monotonic() + MAX_CHECK_SECONDS
             if len(command_words(command)) * len(dirs) > MAX_WORD_WORK:
                 return (
                     f"BLOCKED: this command runs, or may run, {tool_name} and has too many words to check against "
                     f"{len(dirs)} directories within the guard's time budget (a hook that times out fails open). Split it."
                 )
-            dirs = dirs + [p for x in diff_dirs for d in dirs for p in resolve_both(x, d)] + named_dirs(command, dirs, cache)
-            header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache)
+            try:
+                dirs = dirs + [p for x in diff_dirs for d in dirs for p in resolve_both(x, d)] + named_dirs(command, dirs, cache)
+                header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache)
+            except CheckTimeout:
+                return (
+                    f"BLOCKED: this command runs, or may run, {tool_name}, and checking the directories it names took "
+                    f"over {MAX_CHECK_SECONDS} s (deep folders, many words or diff names), so it was not checked (a hook "
+                    "that times out fails open; this applies on every branch). Split it, or run it from a shallower folder."
+                )
             dirs += header_dirs
             if unread:
                 return (
@@ -2148,6 +2179,9 @@ def self_test():
             ("feature: Bash FT#234 zsh git${=IFS}apply", bash("feat", "git${=IFS}apply x.diff"), True),
             ("feature: Bash FT#234 git$IFS$9am", bash("feat", "git$IFS$9am x.mbox"), True),
             ("feature: Bash FT#234 bash -c git${IFS}apply", bash("feat", "bash -c 'git${IFS}apply x.diff'"), True),
+            ("feature: Bash FT#234 r2 find -exec git${IFS}apply", bash("feat", "find . -exec git${IFS}apply x.diff ';'"), True),
+            ("feature: Bash FT#234 r2 watch git${IFS}apply", bash("feat", "watch -n1 git${IFS}apply x.diff"), True),
+            ("feature: Bash FT#234 r2 parallel git${IFS}apply", bash("feat", "parallel git${IFS}apply ::: x.diff"), True),
             ("parent cwd: Bash FT#234 patch -p0 of a relative name into a child feature repo", bash_at(top, "patch -p0 < child.diff"), True),
             ("parent cwd: Bash FT#234 git apply of a relative name into a child feature repo", bash_at(top, "git apply child_git.diff"), True),
             ("chore cwd: Bash FT#234 diff name through a symlink to a feature repo", bash("chore", "patch -p0 < sym.diff"), True),
@@ -2393,6 +2427,16 @@ def self_test():
             ok = blocked == expect_block and (not blocked or "BLOCKED" in proc.stderr)
             failures += 0 if ok else 1
             print(f"{'PASS' if ok else 'FAIL'}  exit={proc.returncode}  {label}")
+        # #196 confirm on acdbbd8: a check past MAX_CHECK_SECONDS blocks instead of running into the hook timeout
+        saved = MAX_CHECK_SECONDS
+        globals()["MAX_CHECK_SECONDS"] = -1
+        try:
+            message = evaluate(bash("chore", "patch -p0 < ok.diff")) or ""
+        finally:
+            globals()["MAX_CHECK_SECONDS"] = saved
+        ok = "took over" in message
+        failures += 0 if ok else 1
+        print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash patch-tool check past MAX_CHECK_SECONDS blocks")
 
         for label, stdin in (("malformed JSON fails open", "not json"), ("empty stdin fails open", "")):
             proc = subprocess.run(

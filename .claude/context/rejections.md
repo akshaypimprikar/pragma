@@ -339,6 +339,18 @@
 **File:** docs/pipeline-review/2026-11-12.md:44
 **Caught by:** this review
 
+## 2026-11-14 — PR#195 — Release-mode tests could not fail on the base switch
+**What was wrong:** `test_release_branch_checks_only_the_release_commit` and `..._still_checks_the_release_commit_itself` passed with release mode keeping `BASE=main` for every gate: the develop commit tripped no gate, and the N/A rows come from `RELEASE=1`, not the base switch.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/tests/test_check_gates.py:302
+**Caught by:** this review
+
+## 2026-11-14 — PR#195 — Release mode preferred a stale local develop
+**What was wrong:** release mode set the gates' base and the lane's `--develop-ref` to local `develop` whenever it existed; when it lags `origin/develop`, the lane reads `app` instead of `release` and Gate 3 flags develop commits already gated.
+**Rule violated:** no formal rule, caught in review
+**File:** scripts/check_gates.sh:48
+**Caught by:** this review
+
 ## 2026-11-16 — PR#196 — git apply/patch option parser missed short-option clusters and abbreviations (repeats PR#147)
 **What was wrong:** `diff_write_targets` read `w[:2]` as the option name, so `git apply -vp0`, `git apply --direc=.claude`, `patch --dir=.claude -p0` and `patch -sd .claude -p0` applied a diff to protected paths with exit 0 (verified against real git and Apple patch). Same miss as the 2026-11-05 PR#147 rg short-option-cluster entry. Resolved by not parsing diffs at all: any write-capable run is blocked on feature/* (Akshay, 2026-11-16).
 **Rule violated:** repeats the 2026-11-05 PR#147 entry; no formal rule beyond that entry

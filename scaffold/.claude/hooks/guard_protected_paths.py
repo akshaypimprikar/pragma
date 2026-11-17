@@ -279,6 +279,14 @@ def check_deadline():
         raise CheckTimeout
 
 
+def timeout_message(tool_name):
+    return (
+        f"BLOCKED: this command runs, or may run, {tool_name}, and checking the directories it names took "
+        f"over {MAX_CHECK_SECONDS} s (deep folders, many words or diff names), so it was not checked (a hook "
+        "that times out fails open; this applies on every branch). Split it, or run it from a shallower folder."
+    )
+
+
 def resolve_both(path, cwd):
     """resolve() and the path the kernel reaches with symlinks followed: `lnk/..` is the link target's parent, not
     `cwd` (FT#234 review). A patch tool's directories are checked both ways."""
@@ -609,7 +617,8 @@ def diff_apply_dirs(words, config_env=False):
     idx = real_command_index(words)
     # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment): the shell splits the word
     # into `git apply`. Any word of the command counts, so `find -exec`, `watch` and `parallel` are covered (FT#234)
-    if any(re.match(r"git[$`]", os.path.basename(unquote(w)).lower()) for w in words):
+    # the word itself, or an absolute path to it: `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
+    if any(re.match(r"(?:/[^$`]*/)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
         return []
     if idx is None:
         return None
@@ -1630,11 +1639,7 @@ def evaluate(payload):
                 dirs = dirs + [p for x in diff_dirs for d in dirs for p in resolve_both(x, d)] + named_dirs(command, dirs, cache)
                 header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache)
             except CheckTimeout:
-                return (
-                    f"BLOCKED: this command runs, or may run, {tool_name}, and checking the directories it names took "
-                    f"over {MAX_CHECK_SECONDS} s (deep folders, many words or diff names), so it was not checked (a hook "
-                    "that times out fails open; this applies on every branch). Split it, or run it from a shallower folder."
-                )
+                return timeout_message(tool_name)
             dirs += header_dirs
             if unread:
                 return (
@@ -1656,11 +1661,15 @@ def evaluate(payload):
             # one `git branch` per repo (#196 N7: one per directory let a long command time out, and a hook that
             # times out fails open)
             repos = {}
-            for d in dirs:
-                d = d if os.path.isdir(d) else (nearest_existing_dir(d) or d)
-                root = repo_root(d)
-                if root:
-                    repos.setdefault(root, d)
+            try:
+                for d in dict.fromkeys(dirs):  # the deadline covers this walk too (#196 confirm on 2d71985)
+                    check_deadline()
+                    d = d if os.path.isdir(d) else (nearest_existing_dir(d) or d)
+                    root = repo_root(d)
+                    if root:
+                        repos.setdefault(root, d)
+            except CheckTimeout:
+                return timeout_message(tool_name)
             if len(repos) > MAX_CHECKED_DIRS:
                 return (
                     f"BLOCKED: this command runs, or may run, {tool_name} and names {len(repos)} repositories, over the guard's {MAX_CHECKED_DIRS} limit, so it was not checked. Split it."
@@ -2182,6 +2191,8 @@ def self_test():
             ("feature: Bash FT#234 r2 find -exec git${IFS}apply", bash("feat", "find . -exec git${IFS}apply x.diff ';'"), True),
             ("feature: Bash FT#234 r2 watch git${IFS}apply", bash("feat", "watch -n1 git${IFS}apply x.diff"), True),
             ("feature: Bash FT#234 r2 parallel git${IFS}apply", bash("feat", "parallel git${IFS}apply ::: x.diff"), True),
+            ("feature: Bash r3 absolute-path git${IFS}apply", bash("feat", "/usr/bin/git${IFS}apply x.diff"), True),
+            ("feature: Bash r3 git$ inside a ref argument is not a git run", bash("feat", "git push origin feature/git$BRANCH"), False),
             ("parent cwd: Bash FT#234 patch -p0 of a relative name into a child feature repo", bash_at(top, "patch -p0 < child.diff"), True),
             ("parent cwd: Bash FT#234 git apply of a relative name into a child feature repo", bash_at(top, "git apply child_git.diff"), True),
             ("chore cwd: Bash FT#234 diff name through a symlink to a feature repo", bash("chore", "patch -p0 < sym.diff"), True),

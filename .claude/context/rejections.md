@@ -410,3 +410,21 @@
 **Rule violated:** repeats this PR's N7 (one subprocess/walk per directory, no bound): every new loop over command input needs a work budget
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs)
 **Caught by:** this review (Round confirm)
+
+## 2026-11-17 — PR#196 — `git${IFS}apply` ran git apply on feature/* unseen
+**What was wrong:** `DIFF_TOOL_NAME` needed whitespace after `git`, and the tokenizer reads `git${IFS}apply` as one word (zsh `git${=IFS}apply` even as an assignment), so neither the text match nor `diff_apply_dirs` saw a run; the zsh form overwrote a feature repo's `CLAUDE.md` with exit 0.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Relative and symlinked diff-header names reached a feature repo
+**What was wrong:** `diff_header_dirs` read only absolute or `..` header names and `resolve()` is lexical, so `patch -p0`/`git apply` of a diff naming `feat/CLAUDE.md` from a non-repo parent folder, a diff naming `lnk2/CLAUDE.md` through a symlink in a chore repo, and `git -C lnk/.. apply` all wrote into a `feature/*` repo with exit 0.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs, named_dirs)
+**Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Docs said only a variable-named diff file blocks on every branch (repeats PR#163, PR#214)
+**What was wrong:** CHANGELOG and `gates/reference.md` said "a file named through a variable or `$( )`" is blocked unread on every branch, but any `$` or backtick outside single quotes in a command naming a patch tool blocks there (`npm version patch -m "v$V"`); `reference.md` also said "one exception" and then listed several.
+**Rule violated:** repeats the 2026-10-07 PR#163 and 2026-11-11 PR#214 entries (CHANGELOG states a blocking rule without its exceptions)
+**File:** CHANGELOG.md:10, .claude/skills/gates/reference.md:65
+**Caught by:** financetracker-ios#234 round-1 review of the same hook

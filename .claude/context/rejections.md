@@ -428,3 +428,15 @@
 **Rule violated:** repeats the 2026-10-07 PR#163 and 2026-11-11 PR#214 entries (CHANGELOG states a blocking rule without its exceptions)
 **File:** CHANGELOG.md:10, .claude/skills/gates/reference.md:65
 **Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Uncached realpath let a deep-tree patch-tool check outrun the hook timeout (repeats PR#140)
+**What was wrong:** bd0e046's `resolve_both()` called `os.path.realpath` per path inside loops capped only by item count (MAX_WORD_WORK, MAX_HEADER_WORK), not path depth; a ~290-deep cwd with 1,000 words ran 112 s and deep `a/a/.../../n` header names over 82 s, past the 60 s hook timeout, which fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (resolve_both, named_dirs, diff_header_dirs)
+**Caught by:** this review (Round confirm on acdbbd8) and financetracker-ios#234 round 2
+
+## 2026-11-17 — PR#196 — `git${IFS}apply` behind find -exec, watch or parallel still ran unseen
+**What was wrong:** bd0e046 checked for a `$`-built `git` word only up to the parsed command word, so `find . -exec git${IFS}apply x.diff ';'`, `watch`, `parallel` and `chronic` forms exited 0 on feature/* and wrote `CLAUDE.md`.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** financetracker-ios#234 round 2 review of the same hook

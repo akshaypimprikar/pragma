@@ -458,3 +458,15 @@
 **Rule violated:** a false-block fix must not reopen a bypass the previous form closed
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
 **Caught by:** this review (Round confirm on b337612)
+
+## 2026-11-18 — PR#196 — Shell apply_patch names x directories built before any deadline (repeats PR#140)
+**What was wrong:** `patch_targets` built every (name, directory) pair before `dirs` was deduped or any deadline applied; 3,000 `cd .;` plus an 800-name `apply_patch` heredoc from a 430-deep cwd took 99 s on `/usr/bin/python3`, so the hook timed out and failed open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries and the 2026-11-17/18 timeout entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate, patch_targets)
+**Caught by:** this review (Round confirm on c7c66c0)
+
+## 2026-11-18 — PR#196 — Documented a reopened bypass instead of closing it
+**What was wrong:** c7c66c0 listed `find . -exec bin/git${IFS}apply` as "not seen"; `eval`, `find -exec`, `watch` and `parallel` with a bare relative path to a `$`-built git ran unseen on feature/* and changed CLAUDE.md, though the hook before ace1300 blocked them.
+**Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel" entry and the 2026-11-18 "a false-block fix must not reopen a bypass the previous form closed" rule
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** this review (Round confirm on c7c66c0)

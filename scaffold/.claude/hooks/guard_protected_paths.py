@@ -621,6 +621,10 @@ def diff_apply_dirs(words, config_env=False):
     # on b337612): `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
     if any(re.match(r"(?:(?:/|\.\.?/|~[^/$`]*/)(?:[^$`]*/)?)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
         return []
+    if idx is not None:  # as the command itself, any path to it counts: `cd /usr && bin/git${IFS}apply` (#196 scan)
+        head = unquote(words[idx])
+        if re.match(r"git[$`]", os.path.basename(head), re.I) or (head[:1] in "$`" and re.match(r"git", os.path.basename(head), re.I)):
+            return []
     if idx is None:
         return None
     cmd = os.path.basename(unquote(words[idx])).lower()  # macOS paths are case-insensitive: `PATCH` runs patch
@@ -2209,6 +2213,9 @@ def self_test():
             ("feature: Bash b337612 relative-path ./git${IFS}apply", bash("feat", "cd /usr/bin && ./git${IFS}apply x.diff"), True),
             ("feature: Bash b337612 home-path ~/git${IFS}apply through xargs", bash("feat", "xargs ~/git${IFS}apply x"), True),
             ("feature: Bash b337612 parent-path ../bin/git${IFS}am", bash("feat", "../bin/git${IFS}am x.mbox"), True),
+            ("feature: Bash b337612 scan: relative command bin/git${IFS}apply", bash("feat", "cd /usr && bin/git${IFS}apply x.diff"), True),
+            ("feature: Bash b337612 scan: sudo usr/bin/git${IFS}am", bash("feat", "sudo usr/bin/git${IFS}am x.mbox"), True),
+            ("feature: Bash b337612 scan: $D/git${IFS}apply as the command", bash("feat", "$D/git${IFS}apply x.diff"), True),
             ("parent cwd: Bash FT#234 patch -p0 of a relative name into a child feature repo", bash_at(top, "patch -p0 < child.diff"), True),
             ("parent cwd: Bash FT#234 git apply of a relative name into a child feature repo", bash_at(top, "git apply child_git.diff"), True),
             ("chore cwd: Bash FT#234 diff name through a symlink to a feature repo", bash("chore", "patch -p0 < sym.diff"), True),

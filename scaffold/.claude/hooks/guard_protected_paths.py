@@ -611,7 +611,7 @@ def patch_dirs(operands):
     return dirs
 
 
-LAUNCHERS = ("eval", "watch", "parallel", "-exec", "-execdir", "-ok", "-okdir")  # their later words can be a command
+GIT_WORD_QUOTES = re.compile(r"[\\'\"]")  # removed before the `git$` word check: `bin/g''it${IFS}apply` is `bin/git${IFS}apply`
 
 
 def diff_apply_dirs(words, config_env=False):
@@ -623,19 +623,11 @@ def diff_apply_dirs(words, config_env=False):
     later, by read_only_segment()."""
     idx = real_command_index(words)
     # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment): the shell splits the word
-    # into `git apply`. Any word of the command counts, so `find -exec`, `watch` and `parallel` are covered (FT#234)
-    # the word itself, or a path to it from `/`, `./`, `../` or `~` (`./git${IFS}apply`, `~/git${IFS}apply`: #196 confirm
-    # on b337612): `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
-    if any(re.match(r"(?:(?:/|\.\.?/|~[^/$`]*/)(?:[^$`]*/)?)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
-        return []
-    # as the command itself, any path to it counts: `cd /usr && bin/git${IFS}apply` (#196 scan); so does every word
-    # after a launcher, split on shell separators: `eval 'bin/git${IFS}apply x'`, `find . -exec bin/git${IFS}apply`,
-    # `watch`, `parallel` (#196 confirm on c7c66c0)
-    heads = [words[idx]] if idx is not None else []
-    launcher = next((i for i, w in enumerate(words) if os.path.basename(unquote(w)).lower() in LAUNCHERS), None)
-    if launcher is not None:
-        heads += [t for w in words[launcher + 1 :] for t in re.split(r"[\s;&|()]+", unquote(w))]
-    if any(re.match(r"git[$`]", os.path.basename(h), re.I) for h in heads):
+    # into `git apply`. Any word anywhere counts, with quotes and backslashes removed and split on shell separators,
+    # through any path: a closed list of launchers (`eval`, `find -exec`, `watch`, `parallel`) kept missing some (`trap`,
+    # `fd -x`, `entr`, `source`) and quotes inside an eval string hid the word (#196 scans on f4791d5). Tradeoff: on
+    # `git push origin feature/git$BRANCH` is blocked too, on every branch (its `$` makes the diff unreadable) unless read-only
+    if any(re.match(r"git[$`]", os.path.basename(t), re.I) for w in words for t in re.split(r"[\s;&|()]+", GIT_WORD_QUOTES.sub("", w))):
         return []
     if idx is None:
         return None
@@ -2231,7 +2223,12 @@ def self_test():
             ("feature: Bash FT#234 r2 watch git${IFS}apply", bash("feat", "watch -n1 git${IFS}apply x.diff"), True),
             ("feature: Bash FT#234 r2 parallel git${IFS}apply", bash("feat", "parallel git${IFS}apply ::: x.diff"), True),
             ("feature: Bash r3 absolute-path git${IFS}apply", bash("feat", "/usr/bin/git${IFS}apply x.diff"), True),
-            ("feature: Bash r3 git$ inside a ref argument is not a git run", bash("feat", "git push origin feature/git$BRANCH"), False),
+            ("feature: Bash f4791d5 git$ inside a ref argument now counts (fail closed)", bash("feat", "git push origin feature/git$BRANCH"), True),
+            ("chore cwd: Bash f4791d5 git$ inside a ref argument blocks on every branch (its `$`)", bash("chore", "git push origin feature/git$BRANCH"), True),
+            ("feature: Bash f4791d5 scan: quotes inside eval hide nothing", bash("feat", "eval \"bin/g''it\\${IFS}apply x.diff\""), True),
+            ("feature: Bash f4791d5 scan: trap launcher", bash("feat", "trap 'bin/git${IFS}apply x.diff' EXIT"), True),
+            ("feature: Bash f4791d5 scan: fd -x launcher", bash("feat", "fd -e diff -x bin/git${IFS}apply"), True),
+            ("feature: Bash f4791d5 scan: entr launcher", bash("feat", "entr bin/git${IFS}apply x.diff"), True),
             ("feature: Bash b337612 relative-path ./git${IFS}apply", bash("feat", "cd /usr/bin && ./git${IFS}apply x.diff"), True),
             ("feature: Bash b337612 home-path ~/git${IFS}apply through xargs", bash("feat", "xargs ~/git${IFS}apply x"), True),
             ("feature: Bash b337612 parent-path ../bin/git${IFS}am", bash("feat", "../bin/git${IFS}am x.mbox"), True),

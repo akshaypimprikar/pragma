@@ -651,6 +651,33 @@ def shell_variants(command):
     return variants
 
 
+ALIAS_TOOL = re.compile(r"\balias\b[^\n;&|]*=\s*['\"]?[^'\"\s=]*(?:git|patch)", re.IGNORECASE)
+SUBSTITUTION = re.compile(r"\$\([^()]*\)|`[^`]*`")
+
+
+def may_name_git(word):
+    """True if a command word built with an expansion may run git: its letters, default and alternate text included
+    and `$( )` bodies left out (they are parsed as commands of their own), hold g, i, t in order. Shapes one parse
+    can't follow all reduce to this: `${A:-gi}${B:+x}t`, `${1:-git}`, `${A[0]:-git}`, `g${A//\\}/}it`,
+    `${E:-git} "$@"` (#196 confirm on e6aa65d); zsh `${(L)A:-GIT}` is split by the tokenizer, so diff_apply_runs()
+    counts any `${(` flag form. A literal last path part is the name as written, so
+    `$HOME/go/bin/gitleaks` is not git. Tradeoff: `${GIT_BIN:-git} status` counts (and blocks on every branch)."""
+    if re.search(r"\$\{|\$\(|`|\\", word):
+        part = word
+    elif "$" in word or "{" in word:
+        part = word.rsplit("/", 1)[-1]
+        if not re.search(r"[$`{]", part):
+            return False
+    else:
+        return False
+    for _ in range(MAX_EXPANSION_PASSES):
+        dropped = SUBSTITUTION.sub("", part)
+        if dropped == part:
+            break
+        part = dropped
+    return bool(re.search(r"g.*i.*t", re.sub(r"[^a-z]", "", part.lower())))
+
+
 def diff_apply_dirs(words, config_env=False):
     """None unless this one command is a `git apply`, `git am`, `git-apply`, `git-am` or `patch`, or a git command
     the hook can't follow: a `-c alias.*`, a global option not in KNOWN_GIT_GLOBALS, a subcommand built from a
@@ -667,6 +694,8 @@ def diff_apply_dirs(words, config_env=False):
     # Tradeoff: `git push origin feature/git$BRANCH` counts too, so it is blocked on every branch (its `$` makes the
     # diff unreadable) unless the command is read-only. Spellings built from expansions are caught by shell_variants()
     if any(re.match(r"(?:[^$`]*/)?git[$`]", t, re.I) for w in words for t in re.split(r"[\s;&|()]+", GIT_WORD_QUOTES.sub("", w))):
+        return []
+    if idx is not None and may_name_git(words[idx]):
         return []
     if idx is None:
         return None
@@ -716,7 +745,10 @@ def diff_apply_runs(command, _depth=0):
         return False, []
     # the tokenizer splits `g$(:)it${IFS}apply` at `$(`, so the whole text is checked too (#196 scan on ac8a069)
     variants = shell_variants(command)
-    runs = variants is None or any(diff_apply_runs(v, _depth + 1)[0] for v in variants)
+    # past the nesting budget a `$`-built text is not reparsed, so it counts as a run (#196 scan on 7bf3e12: three
+    # `bash -c` levels hid `g${E}it${IFS}apply`, and the depth cap failed open)
+    # an alias for git or patch defined anywhere in the command, on its own line too (#196 confirm F8 on e6aa65d)
+    runs = bool(ALIAS_TOOL.search(command)) or "${(" in command or variants is None or bool(variants and _depth >= 3) or any(diff_apply_runs(v, _depth + 1)[0] for v in variants)
     dirs, config_env = [], bool(GIT_CONFIG_ENV.search(command))
 
     def visit(text):
@@ -2277,6 +2309,22 @@ def self_test():
             ("feature: Bash ac8a069 scan: brace expansion inside git", bash("feat", "gi{t,}${IFS}apply x.diff"), True),
             ("feature: Bash ac8a069 scan: special parameter before git", bash("feat", "$@git${IFS}am x.mbox"), True),
             ("feature: Bash ac8a069 scan: command substitution inside git", bash("feat", "g$(:)it${IFS}apply x.diff"), True),
+            ("feature: Bash 7bf3e12 scan: $-built git apply under three bash -c levels", bash("feat", "bash -c \"bash -c 'bash -c g\\${E}it\\${IFS}apply\\ x.diff'\""), True),
+            ("feature: Bash e6aa65d F1 unquoted $( ) hides a spelled git", bash("feat", "echo $(g${E}it${IFS}apply x.diff)"), True),
+            ("feature: Bash e6aa65d F1 assignment from $( )", bash("feat", "x=$(${E:-git}${IFS}apply x.diff)"), True),
+            ("feature: Bash e6aa65d F2 mixed default and alternate", bash("feat", "${A:-gi}${B:+x}t apply x.diff"), True),
+            ("feature: Bash e6aa65d F2 mixed inside bash -c", bash("feat", "bash -c \"${A:-g}${B:+j}it apply x.diff\""), True),
+            ("feature: Bash e6aa65d F3 positional default", bash("feat", "${1:-git} apply x.diff"), True),
+            ("feature: Bash e6aa65d F3 array default", bash("feat", "${A[0]:-git} apply x.diff"), True),
+            ("feature: Bash e6aa65d F3 indirect default", bash("feat", "${!A:-git} apply x.diff"), True),
+            ("feature: Bash e6aa65d F3 zsh flag default", bash("feat", "${(L)A:-GIT} apply x.diff"), True),
+            ("feature: Bash e6aa65d F4 escaped brace in an expansion", bash("feat", "g${A//\\}/}it apply x.diff"), True),
+            ("feature: Bash e6aa65d F5 line continuation before an expansion", bash("feat", "g\\\n${E}it${IFS}apply x.diff"), True),
+            ("feature: Bash e6aa65d F7 spelled git with $@", bash("feat", "set -- apply x.diff; g${E}it \"$@\""), True),
+            ("feature: Bash e6aa65d F7 default git in a function", bash("feat", "f() { \"${A:-git}\" \"$@\"; }; f apply x.diff"), True),
+            ("feature: Bash e6aa65d F8 alias on its own line", bash("feat", "shopt -s expand_aliases\nalias a=git\na apply x.diff"), True),
+            ("chore cwd: Bash e6aa65d $(git rev-parse)/script is not a git run", bash("chore", "\"$(git rev-parse --show-toplevel)/scripts/x.sh\" --flag"), False),
+            ("chore cwd: Bash e6aa65d $PYTHON and \"$EDITOR\" are not git", bash("chore", "$PYTHON x.py; \"$EDITOR\" f"), False),
             ("feature: Bash 45e9a30 N1 default text supplies git", bash("feat", "${E:-git}${IFS}apply x.diff"), True),
             ("feature: Bash 45e9a30 N1 default text supplies a letter", bash("feat", "gi${E:-t}${IFS}apply x.diff"), True),
             ("feature: Bash 45e9a30 N1 default text supplies apply", bash("feat", "g${E}it${IFS}${X:-apply} x.diff"), True),

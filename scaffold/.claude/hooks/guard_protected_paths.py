@@ -272,6 +272,10 @@ class CheckTimeout(Exception):
     pass
 
 
+def start_deadline():
+    CHECK_DEADLINE[0] = time.monotonic() + MAX_CHECK_SECONDS
+
+
 def check_deadline():
     """Raise CheckTimeout past CHECK_DEADLINE: the item caps don't weigh path depth, and a deep tree made the checks
     run past the hook timeout, which fails open (#196 confirm on acdbbd8)."""
@@ -607,6 +611,9 @@ def patch_dirs(operands):
     return dirs
 
 
+LAUNCHERS = ("eval", "watch", "parallel", "-exec", "-execdir", "-ok", "-okdir")  # their later words can be a command
+
+
 def diff_apply_dirs(words, config_env=False):
     """None unless this one command is a `git apply`, `git am`, `git-apply`, `git-am` or `patch`, or a git command
     the hook can't follow: a `-c alias.*`, a global option not in KNOWN_GIT_GLOBALS, a subcommand built from a
@@ -621,10 +628,15 @@ def diff_apply_dirs(words, config_env=False):
     # on b337612): `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
     if any(re.match(r"(?:(?:/|\.\.?/|~[^/$`]*/)(?:[^$`]*/)?)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
         return []
-    if idx is not None:  # as the command itself, any path to it counts: `cd /usr && bin/git${IFS}apply` (#196 scan)
-        head = unquote(words[idx])
-        if re.match(r"git[$`]", os.path.basename(head), re.I) or (head[:1] in "$`" and re.match(r"git", os.path.basename(head), re.I)):
-            return []
+    # as the command itself, any path to it counts: `cd /usr && bin/git${IFS}apply` (#196 scan); so does every word
+    # after a launcher, split on shell separators: `eval 'bin/git${IFS}apply x'`, `find . -exec bin/git${IFS}apply`,
+    # `watch`, `parallel` (#196 confirm on c7c66c0)
+    heads = [words[idx]] if idx is not None else []
+    launcher = next((i for i, w in enumerate(words) if os.path.basename(unquote(w)).lower() in LAUNCHERS), None)
+    if launcher is not None:
+        heads += [t for w in words[launcher + 1 :] for t in re.split(r"[\s;&|()]+", unquote(w))]
+    if any(re.match(r"git[$`]", os.path.basename(h), re.I) for h in heads):
+        return []
     if idx is None:
         return None
     cmd = os.path.basename(unquote(words[idx])).lower()  # macOS paths are case-insensitive: `PATCH` runs patch
@@ -817,8 +829,8 @@ def bash_write_targets(command, cwd, _depth=0):
 
 def patch_targets(patch, cwd, dirs=None):
     """Every path a Codex apply_patch adds, updates, deletes or moves to; the source of a move is its Update File line.
-    Each path is resolved against every directory in `dirs` (default: cwd alone)."""
-    return [(resolve(p, d), WRITE) for p in PATCH_TARGET.findall(patch) for d in (dirs or [cwd])]
+    Each path is resolved against every directory in `dirs` (default: cwd alone), each pair once."""
+    return [(resolve(p, d), WRITE) for p in dict.fromkeys(PATCH_TARGET.findall(patch)) for d in dict.fromkeys(dirs or [cwd])]
 
 
 PATCH_NAME = re.compile(r"apply_?patch", re.IGNORECASE)  # macOS paths are case-insensitive
@@ -1601,7 +1613,7 @@ def evaluate(payload):
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
     cwd = payload.get("cwd") or os.getcwd()
-    CHECK_DEADLINE[0] = time.monotonic() + MAX_CHECK_SECONDS  # the write-target loop at the end runs under it too
+    start_deadline()  # the write-target loop at the end runs under it too
 
     if tool in FILE_TOOLS:
         candidates = [(resolve(tool_input["file_path"], cwd), WRITE)] if tool_input.get("file_path") else []
@@ -1620,7 +1632,17 @@ def evaluate(payload):
         if SHELL_PATCH.search(command):
             # headers joined by a literal \n (`printf '...\n*** Update File: X'`) are read too; this still
             # catches an absolute path into another repo that is on a feature branch
-            candidates += patch_targets(command.replace("\\n", "\n"), cwd, dirs)
+            patch_text = command.replace("\\n", "\n")
+            # names x directories is bounded before the list is built: 800 names after 3,000 `cd`s took 99 s, and a
+            # hook that times out fails open (#196 confirm on c7c66c0)
+            pairs = len(set(PATCH_TARGET.findall(patch_text))) * len(set(dirs or [cwd]))
+            if pairs > MAX_WORD_WORK:
+                return (
+                    f"BLOCKED: this command may run apply_patch through the shell and pairs {pairs} file names with "
+                    f"directories, over the guard's {MAX_WORD_WORK} limit, so it was not checked (a hook that times "
+                    "out fails open; this applies on every branch). Split it, or use the apply_patch tool directly."
+                )
+            candidates += patch_targets(patch_text, cwd, dirs)
         parsed_run, diff_dirs = diff_apply_runs(command)
         diff_runs = runs_diff_tool(command, parsed_run)
         tool_name = "apply_patch through the shell" if runs_shell_patch(command) else "`git apply`, `git am` or `patch`" if diff_runs else None
@@ -1635,7 +1657,7 @@ def evaluate(payload):
                     f"over the guard's {MAX_CHECKED_DIRS}-directory limit, so it was not checked. Split it."
                 )
             cache = {}
-            CHECK_DEADLINE[0] = time.monotonic() + MAX_CHECK_SECONDS
+            start_deadline()
             if len(command_words(command)) * len(dirs) > MAX_WORD_WORK:
                 return (
                     f"BLOCKED: this command runs, or may run, {tool_name} and has too many words to check against "
@@ -2216,6 +2238,13 @@ def self_test():
             ("feature: Bash b337612 scan: relative command bin/git${IFS}apply", bash("feat", "cd /usr && bin/git${IFS}apply x.diff"), True),
             ("feature: Bash b337612 scan: sudo usr/bin/git${IFS}am", bash("feat", "sudo usr/bin/git${IFS}am x.mbox"), True),
             ("feature: Bash b337612 scan: $D/git${IFS}apply as the command", bash("feat", "$D/git${IFS}apply x.diff"), True),
+            ("feature: Bash c7c66c0 F2 eval quoted bin/git${IFS}apply", bash("feat", "eval 'bin/git${IFS}apply /tmp/x.diff'"), True),
+            ("feature: Bash c7c66c0 F2 eval bare bin/git${IFS}apply", bash("feat", "eval bin/git${IFS}apply x.diff"), True),
+            ("feature: Bash c7c66c0 F2 find -exec bin/git${IFS}apply", bash("feat", "find . -maxdepth 0 -exec bin/git${IFS}apply x.diff \\;"), True),
+            ("feature: Bash c7c66c0 F2 watch bin/git${IFS}apply", bash("feat", "watch bin/git${IFS}apply x"), True),
+            ("feature: Bash c7c66c0 F2 parallel bin/git${IFS}apply", bash("feat", "parallel bin/git${IFS}apply ::: x"), True),
+            ("feature: Bash c7c66c0 F3 $HOME/go/bin/gitleaks is not git", bash("feat", "$HOME/go/bin/gitleaks detect"), False),
+            ("chore cwd: Bash c7c66c0 F3 $HOME/bin/git-lfs is not git", bash("chore", "$HOME/bin/git-lfs ls-files"), False),
             ("parent cwd: Bash FT#234 patch -p0 of a relative name into a child feature repo", bash_at(top, "patch -p0 < child.diff"), True),
             ("parent cwd: Bash FT#234 git apply of a relative name into a child feature repo", bash_at(top, "git apply child_git.diff"), True),
             ("chore cwd: Bash FT#234 diff name through a symlink to a feature repo", bash("chore", "patch -p0 < sym.diff"), True),
@@ -2480,6 +2509,12 @@ def self_test():
         ok = "files this command writes took over" in message
         failures += 0 if ok else 1
         print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash write-target check past MAX_CHECK_SECONDS blocks")
+        # #196 confirm on c7c66c0: a shell-run apply_patch's names x directories is capped before the list is built
+        message = evaluate(bash("chore", "".join(f"cd d{i}; " for i in range(400)) + "apply_patch <<'E'\n"
+                                + "".join(f"*** Update File: f{i}\n" for i in range(300)) + "E")) or ""
+        ok = "file names with directories" in message
+        failures += 0 if ok else 1
+        print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash shell apply_patch names x dirs over the cap blocks first")
         calls, real_git = [], globals()["git"]
         globals()["git"] = lambda *a: calls.append(a) or real_git(*a)
         try:

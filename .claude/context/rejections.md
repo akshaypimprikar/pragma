@@ -446,3 +446,15 @@
 **Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate repo walk)
 **Caught by:** this review (Round confirm on 2d71985)
+
+## 2026-11-18 — PR#196 — Write-target loop had no deadline, so the hook could still run past its timeout (repeats PR#140)
+**What was wrong:** the final `for abs_path, kind in candidates` loop ran a `git rev-parse` per write target with no dedupe and no deadline; `>CLAUDE.md;` x2800 plus a write to a feature repo's CLAUDE.md (30.9 KB) from a 430-deep chore cwd ran over 70 s, so the protected write fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate write-target loop)
+**Caught by:** this review (Round confirm on b337612)
+
+## 2026-11-18 — PR#196 — Narrowing the `git$` match to absolute paths let relative and `~` paths through
+**What was wrong:** ace1300's `(?:/[^$`]*/)?git[$`]` only matched a leading `/`, so `cd /usr/bin && ./git${IFS}apply x.diff` and `xargs ~/git${IFS}apply x` exited 0 on feature/*; the earlier basename check blocked them.
+**Rule violated:** a false-block fix must not reopen a bypass the previous form closed
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** this review (Round confirm on b337612)

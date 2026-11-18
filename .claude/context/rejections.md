@@ -482,3 +482,9 @@
 **Rule violated:** pragma #140's lesson (normalize the way the shell does, or fail closed; names_tool() already did for apply_patch)
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs, diff_apply_runs)
 **Caught by:** background security scans on ac8a069
+
+## 2026-11-18 — PR#196 — Letter matching for a spelled `git` missed default text and options
+**What was wrong:** the `gitapply`/`gitam` letter match dropped `${X:-text}` default text and needed `apply` right after `git`: `${E:-git}${IFS}apply`, `gi${E:-t}${IFS}apply` and `g${E}it${IFS}-C${IFS}<feature repo>${IFS}apply` ran unseen (cross-repo from a chore cwd too), and `$` words like `git-amend` false-blocked on every branch.
+**Rule violated:** repeats the 2026-11-18 "`git$` word check missed decoded, expanded and slash-split spellings" entry; normalize like the shell, then parse, instead of matching letters
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (shell_variants, diff_apply_runs)
+**Caught by:** this review (Round confirm on 45e9a30)

@@ -264,7 +264,7 @@ def resolve(path, cwd):
 
 
 MAX_CHECK_SECONDS = 20  # a patch-tool directory check past this blocks; the hook timeout is 60 s and a timeout fails open
-CHECK_DEADLINE = [None]  # time.monotonic() deadline, set by evaluate() before the patch-tool directory checks
+CHECK_DEADLINE = [None]  # time.monotonic() deadline, set by evaluate() on each call and again before the patch-tool directory checks
 REALPATHS = {}
 
 
@@ -617,8 +617,9 @@ def diff_apply_dirs(words, config_env=False):
     idx = real_command_index(words)
     # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment): the shell splits the word
     # into `git apply`. Any word of the command counts, so `find -exec`, `watch` and `parallel` are covered (FT#234)
-    # the word itself, or an absolute path to it: `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
-    if any(re.match(r"(?:/[^$`]*/)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
+    # the word itself, or a path to it from `/`, `./`, `../` or `~` (`./git${IFS}apply`, `~/git${IFS}apply`: #196 confirm
+    # on b337612): `feature/git$BRANCH` or `repos/o/git$REPO` is an argument, not a git
+    if any(re.match(r"(?:(?:/|\.\.?/|~[^/$`]*/)(?:[^$`]*/)?)?git[$`]", unquote(w), re.IGNORECASE) for w in words):
         return []
     if idx is None:
         return None
@@ -1596,6 +1597,7 @@ def evaluate(payload):
     tool = payload.get("tool_name", "")
     tool_input = payload.get("tool_input") or {}
     cwd = payload.get("cwd") or os.getcwd()
+    CHECK_DEADLINE[0] = time.monotonic() + MAX_CHECK_SECONDS  # the write-target loop at the end runs under it too
 
     if tool in FILE_TOOLS:
         candidates = [(resolve(tool_input["file_path"], cwd), WRITE)] if tool_input.get("file_path") else []
@@ -1685,22 +1687,33 @@ def evaluate(payload):
     else:
         return None
 
-    for abs_path, kind in candidates:
-        hit = protected_relpath(abs_path, kind != WRITE)
-        if not hit and kind == REMOVE:
-            hit = covers_repo_root(abs_path, cwd)
-        if not hit:
-            continue
-        root, rel = hit
-        branch = git(root, "branch", "--show-current")
-        if not branch or not GUARDED_BRANCH.match(branch):
-            continue  # detached HEAD or a non-feature branch: allow
+    # one check per target, under the deadline: `>CLAUDE.md;` x2800 from a 430-deep cwd ran one `git rev-parse` each
+    # past the hook timeout, which fails open (#196 confirm on b337612)
+    targets = list(dict.fromkeys(candidates))
+    try:
+        for abs_path, kind in targets:
+            check_deadline()
+            hit = protected_relpath(abs_path, kind != WRITE)
+            if not hit and kind == REMOVE:
+                hit = covers_repo_root(abs_path, cwd)
+            if not hit:
+                continue
+            root, rel = hit
+            branch = git(root, "branch", "--show-current")
+            if not branch or not GUARDED_BRANCH.match(branch):
+                continue  # detached HEAD or a non-feature branch: allow
+            return (
+                f"BLOCKED: `{rel}` is, or holds, a gate-definition/guardrail file and the current branch is "
+                f"`{branch}` (feature/*). A feature branch must not change what counts as passing. "
+                "Remedy: make this change on a chore/* or fix/* branch in its own PR, then rebase "
+                "this feature branch onto it. If the edit really belongs to this feature, stop and "
+                "ask the user instead of editing around the guard."
+            )
+    except CheckTimeout:
         return (
-            f"BLOCKED: `{rel}` is, or holds, a gate-definition/guardrail file and the current branch is "
-            f"`{branch}` (feature/*). A feature branch must not change what counts as passing. "
-            "Remedy: make this change on a chore/* or fix/* branch in its own PR, then rebase "
-            "this feature branch onto it. If the edit really belongs to this feature, stop and "
-            "ask the user instead of editing around the guard."
+            f"BLOCKED: checking the {len(targets)} files this command writes took over {MAX_CHECK_SECONDS} s (deep "
+            "folders or many targets), so they were not checked (a hook that times out fails open; this applies on "
+            "every branch). Split the command, or run it from a shallower folder."
         )
     return None
 
@@ -2193,6 +2206,9 @@ def self_test():
             ("feature: Bash FT#234 r2 parallel git${IFS}apply", bash("feat", "parallel git${IFS}apply ::: x.diff"), True),
             ("feature: Bash r3 absolute-path git${IFS}apply", bash("feat", "/usr/bin/git${IFS}apply x.diff"), True),
             ("feature: Bash r3 git$ inside a ref argument is not a git run", bash("feat", "git push origin feature/git$BRANCH"), False),
+            ("feature: Bash b337612 relative-path ./git${IFS}apply", bash("feat", "cd /usr/bin && ./git${IFS}apply x.diff"), True),
+            ("feature: Bash b337612 home-path ~/git${IFS}apply through xargs", bash("feat", "xargs ~/git${IFS}apply x"), True),
+            ("feature: Bash b337612 parent-path ../bin/git${IFS}am", bash("feat", "../bin/git${IFS}am x.mbox"), True),
             ("parent cwd: Bash FT#234 patch -p0 of a relative name into a child feature repo", bash_at(top, "patch -p0 < child.diff"), True),
             ("parent cwd: Bash FT#234 git apply of a relative name into a child feature repo", bash_at(top, "git apply child_git.diff"), True),
             ("chore cwd: Bash FT#234 diff name through a symlink to a feature repo", bash("chore", "patch -p0 < sym.diff"), True),
@@ -2448,6 +2464,24 @@ def self_test():
         ok = "took over" in message
         failures += 0 if ok else 1
         print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash patch-tool check past MAX_CHECK_SECONDS blocks")
+        # #196 confirm on b337612: the write-target loop runs under the deadline too, and checks each target once
+        globals()["MAX_CHECK_SECONDS"] = -1
+        try:
+            message = evaluate(bash("chore", "echo x > ../feat/CLAUDE.md")) or ""
+        finally:
+            globals()["MAX_CHECK_SECONDS"] = saved
+        ok = "files this command writes took over" in message
+        failures += 0 if ok else 1
+        print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash write-target check past MAX_CHECK_SECONDS blocks")
+        calls, real_git = [], globals()["git"]
+        globals()["git"] = lambda *a: calls.append(a) or real_git(*a)
+        try:
+            message = evaluate(bash("chore", ">CLAUDE.md; " * 50))
+        finally:
+            globals()["git"] = real_git
+        ok = message is None and len(calls) <= 2
+        failures += 0 if ok else 1
+        print(f"{'PASS' if ok else 'FAIL'}  in-process  chore cwd: Bash a repeated write target is checked once ({len(calls)} git calls)")
 
         for label, stdin in (("malformed JSON fails open", "not json"), ("empty stdin fails open", "")):
             proc = subprocess.run(

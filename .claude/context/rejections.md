@@ -470,3 +470,9 @@
 **Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel" entry and the 2026-11-18 "a false-block fix must not reopen a bypass the previous form closed" rule
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
 **Caught by:** this review (Round confirm on c7c66c0)
+
+## 2026-11-18 — PR#196 — A closed launcher list for the `git$` word check kept leaking
+**What was wrong:** f4791d5 checked `git$` words only after `eval`/`watch`/`parallel`/`find -exec`; `trap`, `fd -x`, `entr` and quotes inside an eval string (`bin/g''it\${IFS}apply`) still ran unseen on feature/*.
+**Rule violated:** pragma #140's lesson (a denylist of ways to run a tool keeps leaking; fail closed instead)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** background security scan on f4791d5

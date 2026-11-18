@@ -476,3 +476,9 @@
 **Rule violated:** pragma #140's lesson (a denylist of ways to run a tool keeps leaking; fail closed instead)
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
 **Caught by:** background security scan on f4791d5
+
+## 2026-11-18 — PR#196 — `git$` word check missed decoded, expanded and slash-split spellings
+**What was wrong:** the `git$` word check matched the raw basename only, so `$'git'${IFS}apply`, `$"git"${IFS}apply`, `g${EMPTY}it${IFS}apply`, `gi{t,}${IFS}apply`, `g$(:)it${IFS}apply` and `git${IFS//x/}apply` (basename `}apply`) ran unseen on feature/*.
+**Rule violated:** pragma #140's lesson (normalize the way the shell does, or fail closed; names_tool() already did for apply_patch)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs, diff_apply_runs)
+**Caught by:** background security scans on ac8a069

@@ -614,28 +614,41 @@ def patch_dirs(operands):
 GIT_WORD_QUOTES = re.compile(r"[\\'\"]")  # removed before the `git$` word check: `bin/g''it${IFS}apply` is `bin/git${IFS}apply`
 
 
-EXPANSION = re.compile(r"\$\([^()]*\)|`[^`]*`|\$\{[^{}]*\}|\$\[[^\[\]]*\]|\$(?:[A-Za-z_]\w*|.)")
+# one innermost expansion each; `$` before `{`, `(` or `[` waits until what is inside is gone
+EXPANSION = re.compile(r"\$\([^()]*\)|`[^`]*`|\$\{[^{}]*\}|\$\[[^\[\]]*\]|\$(?:[A-Za-z_]\w*|[^{(\[])")
+IFS_EXPANSION = re.compile(r"\$\{[=~^#!]*IFS(?!\w)[^{}]*\}|\$IFS(?!\w)")  # `${IFS}`, `${=IFS}`, `${IFS//x/}`, `$IFS`
+DEFAULT_EXPANSION = re.compile(r"\$\{[A-Za-z_]\w*:?[-=+?]([^{}]*)\}")  # `${X:-text}`, `${X=text}`, `${X:+text}`
+MAX_EXPANSION_PASSES = 64  # nesting levels shell_variants() unwraps before it fails closed (each pass reads the text)
 
 
-def spells_git_run(word):
-    """True if a word built with `$`, a backtick or `{` can spell `git apply`/`git am` once the shell expands it:
-    `$'g\\x69t'${IFS}apply`, `$"git"${IFS}apply`, `g${EMPTY}it${IFS}apply`, `gi{t,}${IFS}apply` (#196 scan on ac8a069).
-    `$'...'` is decoded (an escape bash reads differently fails closed), quotes and expansions are dropped, and the
-    letters left in each token are matched. Tradeoff: a `$` word like `$HOME/gitamp` counts too."""
-    if not re.search(r"[$`{]", word):
-        return False
-    bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", word)
+def shell_variants(command):
+    """The texts a command may read as once the shell expands it, or None to fail closed; [] when it has no `$`,
+    backtick or `{`. `$'...'` is decoded (an escape bash reads differently fails closed) and `$"` read as `"`,
+    `${IFS}` forms read as a space, then either every other expansion is dropped or a `${X:-text}`-style one is read
+    as its text, and quotes and braces are removed. diff_apply_runs() parses each with the real git option handling,
+    so `${E:-git}${IFS}apply`, `g${E}it${IFS}-C${IFS}dir${IFS}apply` and `gi{t,}${IFS}apply` are runs (#196 confirm
+    on 45e9a30: matching the letters `gitapply` missed default text and options, and false-blocked `git-amend`)."""
+    if not re.search(r"[$`{]", command):
+        return []
+    bodies = re.findall(r"\$'((?:[^'\\]|\\.)*)'", command)
     if any(ansi_c_decode(b) is None for b in bodies):
-        return True
-    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: ansi_c_decode(m.group(1)), word).replace('$"', '"')
-    text = GIT_WORD_QUOTES.sub("", text)
-    while True:  # ends within two passes: the `\$.` branch drops every `$` the others don't, and backticks pair up
-        dropped = EXPANSION.sub("", text)
-        if dropped == text:
-            break
-        text = dropped
-    tokens = re.split(r"[\s;&|()]+", re.sub(r"[{},]", "", text))
-    return any(re.match(r"git(?:apply|am)", re.sub(r"[^a-z]", "", t.lower().rsplit("/", 1)[-1])) for t in tokens)
+        return None
+    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", lambda m: "'" + ansi_c_decode(m.group(1)) + "'", command).replace('$"', '"')
+    text = IFS_EXPANSION.sub(" ", text)
+    variants = []
+    for keep_defaults in (False, True):
+        t = text
+        for _ in range(MAX_EXPANSION_PASSES):
+            d = DEFAULT_EXPANSION.sub(r"\1", t) if keep_defaults else t
+            if d == t:
+                d = EXPANSION.sub("", t)
+            if d == t:
+                break
+            t = d
+        else:
+            return None
+        variants.append(re.sub(r"[{},\\'\"]", "", t))
+    return variants
 
 
 def diff_apply_dirs(words, config_env=False):
@@ -649,12 +662,11 @@ def diff_apply_dirs(words, config_env=False):
     # `git${IFS}apply`, `git$IFS$9am`, zsh `git${=IFS}apply` (which reads as an assignment): the shell splits the word
     # into `git apply`. Any word anywhere counts, with quotes and backslashes removed and split on shell separators,
     # through any path: a closed list of launchers (`eval`, `find -exec`, `watch`, `parallel`) kept missing some (`trap`,
-    # `fd -x`, `entr`, `source`) and quotes inside an eval string hid the word (#196 scans on f4791d5). Tradeoff: on
-    # `git push origin feature/git$BRANCH` is blocked too, on every branch (its `$` makes the diff unreadable) unless read-only
-    # the path part ends at the first `$`/backtick: basename() of `git${IFS//x/}apply` is `}apply` (#196 scan on ac8a069)
+    # `fd -x`, `entr`, `source`) and quotes inside an eval string hid the word (#196 scans on f4791d5). The path part
+    # ends at the first `$`/backtick: basename() of `git${IFS//x/}apply` is `}apply` (#196 scan on ac8a069).
+    # Tradeoff: `git push origin feature/git$BRANCH` counts too, so it is blocked on every branch (its `$` makes the
+    # diff unreadable) unless the command is read-only. Spellings built from expansions are caught by shell_variants()
     if any(re.match(r"(?:[^$`]*/)?git[$`]", t, re.I) for w in words for t in re.split(r"[\s;&|()]+", GIT_WORD_QUOTES.sub("", w))):
-        return []
-    if any(spells_git_run(w) for w in words):
         return []
     if idx is None:
         return None
@@ -703,7 +715,9 @@ def diff_apply_runs(command, _depth=0):
     if tokens is None or _depth > 3:
         return False, []
     # the tokenizer splits `g$(:)it${IFS}apply` at `$(`, so the whole text is checked too (#196 scan on ac8a069)
-    runs, dirs, config_env = spells_git_run(command), [], bool(GIT_CONFIG_ENV.search(command))
+    variants = shell_variants(command)
+    runs = variants is None or any(diff_apply_runs(v, _depth + 1)[0] for v in variants)
+    dirs, config_env = [], bool(GIT_CONFIG_ENV.search(command))
 
     def visit(text):
         nonlocal runs
@@ -2263,6 +2277,15 @@ def self_test():
             ("feature: Bash ac8a069 scan: brace expansion inside git", bash("feat", "gi{t,}${IFS}apply x.diff"), True),
             ("feature: Bash ac8a069 scan: special parameter before git", bash("feat", "$@git${IFS}am x.mbox"), True),
             ("feature: Bash ac8a069 scan: command substitution inside git", bash("feat", "g$(:)it${IFS}apply x.diff"), True),
+            ("feature: Bash 45e9a30 N1 default text supplies git", bash("feat", "${E:-git}${IFS}apply x.diff"), True),
+            ("feature: Bash 45e9a30 N1 default text supplies a letter", bash("feat", "gi${E:-t}${IFS}apply x.diff"), True),
+            ("feature: Bash 45e9a30 N1 default text supplies apply", bash("feat", "g${E}it${IFS}${X:-apply} x.diff"), True),
+            ("feature: Bash 45e9a30 N2 option between spelled git and apply", bash("feat", "g${E}it${IFS}--no-pager${IFS}apply x.diff"), True),
+            ("feature: Bash 45e9a30 N2 -C between spelled git and apply", bash("feat", "g${E}it${IFS}-C${IFS}.${IFS}apply x.diff"), True),
+            ("chore cwd: Bash 45e9a30 N2 -C into a feature repo", bash("chore", "g${E}it${IFS}-C${IFS}" + feat + "${IFS}apply x.diff"), True),
+            ("chore cwd: Bash 45e9a30 N3 ${HOME}/git-amend is not git", bash("chore", "ls ${HOME}/git-amend"), False),
+            ("chore cwd: Bash 45e9a30 N3 $HOME/.gitam is not git", bash("chore", "ls $HOME/.gitam"), False),
+            ("chore cwd: Bash 45e9a30 N3 brace gitamend is not git", bash("chore", "mkdir -p {gitamend,x}"), False),
             ("feature: Bash ac8a069 scan: slash inside the IFS expansion", bash("feat", "git${IFS//x/}apply x.diff"), True),
             ("feature: Bash ac8a069 scan: path + slash inside the IFS expansion", bash("feat", "/usr/bin/git${IFS%/}am x.mbox"), True),
             ("feature: Bash b337612 relative-path ./git${IFS}apply", bash("feat", "cd /usr/bin && ./git${IFS}apply x.diff"), True),

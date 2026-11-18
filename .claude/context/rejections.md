@@ -488,3 +488,9 @@
 **Rule violated:** repeats the 2026-11-18 "`git$` word check missed decoded, expanded and slash-split spellings" entry; normalize like the shell, then parse, instead of matching letters
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (shell_variants, diff_apply_runs)
 **Caught by:** this review (Round confirm on 45e9a30)
+
+## 2026-11-18 — PR#196 — Two fixed readings of a `$`-built command missed run-time git names, and the depth cap failed open
+**What was wrong:** the reparse of two fixed variants missed a `git` name built from mixed `:-`/`:+` defaults, `${1:-git}`/`${A[0]:-git}`/`${!A:-git}`/zsh flags, an escaped `}`, a line continuation, `${E:-git} "$@"`, an unquoted `$( )` (regression), and three `bash -c` levels (depth cap failed open, regression); an alias on its own line was not seen either.
+**Rule violated:** repeats the 2026-11-18 "Letter matching for a spelled `git`" entry; a command name the hook cannot read must count as a run
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs)
+**Caught by:** this review (Round confirm on e6aa65d)

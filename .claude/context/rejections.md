@@ -506,3 +506,9 @@
 **Rule violated:** repeats the PR#140 timeout entries (keep every regex linear, one loop per character class) and the "closed alias list" half of the previous entry; a stricter parser rule needs a regression row for each shape it stops matching
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, DEFAULT_EXPANSION, ALIAS_DEFINITION, diff_apply_runs)
 **Caught by:** this review (Round confirm on d5e89cd)
+
+## 2026-11-19 — PR#196 — Subscript tail after `${...}` hid the command, and the glob scan was quadratic
+**What was wrong:** the restored assignment skip did not skip `${x}]=1` (the tail of `a[$(echo 1)${x}]=1` after the tokenizer split at `(`), so `a[$(echo 1)${x}]=1 rm CLAUDE.md` ran unseen; `glob_names_tool()`'s fnmatch was quadratic on `[a` runs, so 3 `bash -c` levels of 32 KB took 59 s on Python 3.9 (the hook fails open at 60 s); zsh `=rm`, `/bin/r[m=]`, command tables (`BASH_CMDS`, zsh `commands[`/`functions[`/`galiases[`), `hash name=value` and a quoted `eval` glob string also ran unseen
+**Rule violated:** repeats the 2026-11-18 "Stricter assignment regex" entry and the PR#140 timeout entries; after ~10 confirm rounds of letter matching, Akshay chose a fail-closed redesign (a command the hook can't read in full is a possible run) instead of another targeted round
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, glob_names_tool, ALIAS_DEFINITION, diff_apply_runs)
+**Caught by:** this review (Round confirm on c0fade2) and background security scans on acd9427/c0fade2

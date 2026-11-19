@@ -332,19 +332,47 @@ HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z_0-9]*)\1")
 CONTINUATION = re.compile(r"(?<!\\)(?:\\\\)*\\$")  # an odd number of trailing backslashes
 
 
+def cut_comment(line, quote):
+    """(text, quote, cut) for one line: `line` up to an unquoted `#` that starts a word (a shell comment), the quote
+    still open at its end (`'`, `"` or `$'`; carried to the next line), and whether a comment was cut. A comment's
+    apostrophe used to open a quote that paired with one in a later comment, hiding the commands between them, and a
+    `<<E` in a comment dropped the next lines as a heredoc body (#196, 2026-11-19)."""
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+        elif quote in ('"', "$'"):
+            if c == "\\":
+                i += 1
+            elif c == quote[-1]:
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif c == "$" and line[i + 1 : i + 2] == "'":
+            quote, i = "$'", i + 1
+        elif c in "'\"":
+            quote = c
+        elif c == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
+            return line[:i], None, True
+        i += 1
+    return line, quote, False
+
+
 def strip_heredocs_and_newlines(command):
-    """Drop heredoc bodies (data, not commands), join backslash-newline
-    continuations the way the shell does (`cp x \\\nCLAUDE.md` is one command),
-    and turn the remaining newlines into `;`."""
-    lines, out, i = command.split("\n"), [], 0
+    """Drop comments (cut_comment()) and heredoc bodies (data, not commands), join backslash-newline
+    continuations the way the shell does (`cp x \\\nCLAUDE.md` is one command; a comment's trailing
+    backslash continues nothing), and turn the remaining newlines into `;`."""
+    lines, out, i, quote = command.split("\n"), [], 0, None
     terminators = {}
     for n, line in enumerate(lines):
         terminators.setdefault(line.strip(), []).append(n)
     while i < len(lines):
-        line = lines[i]
+        line, quote, cut = cut_comment(lines[i], quote)
         i += 1
-        while CONTINUATION.search(line) and i < len(lines):
-            line = line[:-1] + lines[i]
+        while not cut and CONTINUATION.search(line) and i < len(lines):
+            more, quote, cut = cut_comment(lines[i], quote)
+            line = line[:-1] + more
             i += 1
         out.append(line)
         m = HEREDOC.search(line)
@@ -2995,6 +3023,11 @@ def self_test():
             ("feature: Bash allowed: apostrophes in two commit messages", bash("feat", "git commit -m \"it's done\"; echo \"don't\""), False),
             ("feature: Bash allowed: git ls-files with a quoted glob", bash("feat", "git ls-files '*.swift'"), False),
             ("feature: Bash allowed: bash -e runs a script", bash("feat", "bash -e scripts/x.sh"), False),
+            ("feature: Bash commands between two commented apostrophes", bash("feat", "true # it's\ng$(echo it) apply y.diff\ntrue # it's"), True),
+            ("feature: Bash heredoc marker inside a comment", bash("feat", "true # <<'E'\ng$(echo it) apply y.diff\nE"), True),
+            ("feature: Bash comment backslash continues nothing", bash("feat", "true # x \\\nrm CLAUDE.md"), True),
+            ("feature: Bash allowed: apostrophe in a comment", bash("feat", "echo hi # don't"), False),
+            ("feature: Bash allowed: # inside quotes and ${#x}", bash("feat", "echo \"a # it's\" ${#x} 'b #'"), False),
             ("feature: Bash allowed: PR body with alias prose", bash("feat", "gh pr create --body \"alias a=git\""), False),
             ("feature: Bash allowed: Swift heredoc body with let", bash("feat", "cat <<'EOF' > /dev/null\nlet x = [1]\nEOF"), False),
             ("feature: Bash allowed: bash running a script file", bash("feat", "bash scripts/x.sh"), False),

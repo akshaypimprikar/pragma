@@ -329,23 +329,45 @@ def unquote(word):
 
 # `<<WORD` / `<<-WORD` / `<<'WORD'`, but not the here-string `<<<`.
 HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z_0-9]*)\1")
-CONTINUATION = re.compile(r"(?<!\\)(?:\\\\)*\\$")  # an odd number of trailing backslashes
 
 
-def cut_comment(line, quote):
-    """(text, quote, cut) for one line: `line` up to an unquoted `#` that starts a word (a shell comment), the quote
-    still open at its end (`'`, `"` or `$'`; carried to the next line), and whether a comment was cut. A comment's
-    apostrophe used to open a quote that paired with one in a later comment, hiding the commands between them, and a
-    `<<E` in a comment dropped the next lines as a heredoc body (#196, 2026-11-19)."""
-    i, n = 0, len(line)
+def cut_comment(line, state, at_start=True):
+    """(text, state, cut, heredocs) for one line. `text` is `line` up to a `#` that surely starts a shell comment:
+    outside quotes, not escaped, at the line start (`at_start`: the previous line did not end in a continuation
+    backslash) or after unescaped whitespace, `;`, `&` or `|`, and before any `$(`, `${`, `<(`, `>(` or backtick on
+    the line (inside those the shell's word and quote rules nest, so nothing after one is cut; #196 confirm on a55f7ae:
+    `a\\ #x`, `$(echo a)#x`, a backtick body, `"${x:+"a #b"}"` were cut). `state` is (quote, depth): the quote open
+    at the end (`'`, `"`, `$'`) and the `$(` depth inside a double quote, carried to the next line. `heredocs` are the
+    offsets of each `<<` outside quotes and escapes, or inside a double-quoted `$( )` (`"$(cat <<'EOF'`), the only
+    places a heredoc starts (`echo '<<E'` and `echo \\<<E` start none). Not cutting is the safe side: a comment
+    read as code can only block."""
+    quote, depth = state
+    i, n, nested, heredocs = 0, len(line), False, []
+    prev_break = at_start  # the next character starts a word
     while i < n:
         c = line[i]
+        breaks = False
         if quote == "'":
             quote = None if c == "'" else quote
-        elif quote in ('"', "$'"):
+        elif quote == "$'":
             if c == "\\":
                 i += 1
-            elif c == quote[-1]:
+            elif c == "'":
+                quote = None
+        elif quote == '"':
+            if c == "\\":
+                i += 1
+            elif c == "$" and line[i + 1 : i + 2] in ("(", "{"):
+                nested = True
+                depth += line[i + 1] == "("
+                i += 1
+            elif c == "`":
+                nested = True
+            elif c == ")" and depth:
+                depth -= 1
+            elif c == "<" and depth and line[i + 1 : i + 2] == "<":
+                heredocs.append(i)
+            elif c == '"' and not depth:
                 quote = None
         elif c == "\\":
             i += 1
@@ -353,29 +375,44 @@ def cut_comment(line, quote):
             quote, i = "$'", i + 1
         elif c in "'\"":
             quote = c
-        elif c == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
-            return line[:i], None, True
+        elif c == "`" or (c in "$<>" and line[i + 1 : i + 2] in ("(", "{") and (c == "$" or line[i + 1] == "(")):
+            nested = True
+        elif c == "<" and line[i + 1 : i + 2] == "<":
+            heredocs.append(i)
+        elif c == "#" and prev_break and not nested:
+            return line[:i], (None, 0), True, heredocs
+        else:
+            breaks = c in " \t;&|"
+        prev_break = breaks
         i += 1
-    return line, quote, False
+    return line, (quote, depth), False, heredocs
+
+
+def continues(line):
+    """True if `line` ends in an odd number of backslashes (a continuation); linear, unlike a regex search on a line
+    that grows with each join (`a\\` x 10,900 took 10 s; #196 confirm on a55f7ae)."""
+    return (len(line) - len(line.rstrip("\\"))) % 2 == 1
 
 
 def strip_heredocs_and_newlines(command):
     """Drop comments (cut_comment()) and heredoc bodies (data, not commands), join backslash-newline
     continuations the way the shell does (`cp x \\\nCLAUDE.md` is one command; a comment's trailing
     backslash continues nothing), and turn the remaining newlines into `;`."""
-    lines, out, i, quote = command.split("\n"), [], 0, None
+    lines, out, i, state, at_start = command.split("\n"), [], 0, (None, 0), True
     terminators = {}
     for n, line in enumerate(lines):
         terminators.setdefault(line.strip(), []).append(n)
     while i < len(lines):
-        line, quote, cut = cut_comment(lines[i], quote)
+        line, state, cut, heredocs = cut_comment(lines[i], state, at_start)
         i += 1
-        while not cut and CONTINUATION.search(line) and i < len(lines):
-            more, quote, cut = cut_comment(lines[i], quote)
+        while not cut and continues(line) and i < len(lines):
+            more, state, cut, more_heredocs = cut_comment(lines[i], state, False)
+            heredocs += [len(line) - 1 + h for h in more_heredocs]
             line = line[:-1] + more
             i += 1
+        at_start = not continues(line)
         out.append(line)
-        m = HEREDOC.search(line)
+        m = next((m for m in (HEREDOC.match(line, h) for h in heredocs) if m), None)
         if not m:
             continue
         prefix = line[: m.start()]
@@ -694,6 +731,25 @@ RUNS_NAME = re.compile(r"(?:GIT_(?:EDITOR|SEQUENCE_EDITOR|PAGER|SSH_COMMAND|SSH|
 RUNS_VALUE = re.compile(RUNS_NAME.pattern + r"\+?=")
 # builtins that set a variable named by an operand at run time (`printf -v GIT_EDITOR ...`, `read PAGER`)
 SETS_NAMED_VARIABLE = ("printf", "read", "mapfile", "readarray")
+# `for GIT_EDITOR in ...`, `${GIT_EDITOR:=...}`: other ways to set one (#196 confirm on a55f7ae)
+RUNS_NAME_SET = re.compile(r"(?<![\w.-])for\s+" + RUNS_NAME.pattern + r"(?!\w)|\$\{" + RUNS_NAME.pattern + r":?[=?+-]")
+# xargs-style programs that are not wrappers: GNU parallel and its tools, Homebrew's GNU xargs
+ARGUMENT_FEEDERS = ("parallel", "sem", "env_parallel", "parset", "gxargs")
+
+
+def sets_runs_name(cmd, args):
+    """True if `printf -v NAME` (or `-vNAME`), or a `read`/`mapfile`/`readarray` NAME operand, is a RUNS_NAME or a word
+    built by the shell (`v=GIT_EDITOR; printf -v $v ...`). printf's other operands are data (`printf %s PAGER`)."""
+    names = []
+    for k, w in enumerate(args):
+        if cmd == "printf":
+            if w == "-v" and k + 1 < len(args):
+                names.append(args[k + 1])
+            elif w.startswith("-v") and len(w) > 2:
+                names.append(w[2:])
+        elif not w.startswith("-"):
+            names.append(w)
+    return any(not literal_word(w) or RUNS_NAME.fullmatch(unquote(w)) for w in names)
 
 
 def quote_parts(command):
@@ -725,7 +781,8 @@ def eval_form(command):
                 or STORED_SUBSCRIPT.search(command))
 # a command table entry anywhere, or an `alias`/`hash` definition (defines_alias()): each can make a plain word run
 # git or patch. `aliases+=(g git)` and `aliases=(...)` (zsh) set entries too
-COMMAND_TABLE = re.compile(r"aliases(?:\[|\+?=)|BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:commands|functions)(?:\[|\+?=)")
+COMMAND_TABLE = re.compile(r"BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:[gs]?aliases|commands|functions)\[")
+TABLE_ASSIGNMENT = re.compile(r"(?:[gs]?aliases|commands|functions)\+?=")  # only as an assignment word
 
 
 def defines_alias(tokens):
@@ -739,9 +796,12 @@ def defines_alias(tokens):
         if item[0] != "cmd":
             continue
         plain = [unquote(w) for w in item[1]]
-        for w, u in zip(item[1], plain):  # a quoted word is a value or prose: only its unquoted head can name a table
-            head = u if not re.search(r"\s", u) else re.split(r"['\"]", w, maxsplit=1)[0]
-            if COMMAND_TABLE.search(head):
+        idx = real_command_index(item[1])
+        declares = idx is not None and plain[idx] in ("declare", "typeset", "local", "export", "readonly")
+        for j, (w, u) in enumerate(zip(item[1], plain)):  # a quoted word is a value or prose: only its unquoted head
+            head = u if not re.search(r"\s", u) else re.split(r"['\"]", w, maxsplit=1)[0]  # can name a table
+            assigns = idx is None or j < idx or declares  # `aliases=(...)` sets the table; `echo functions=3` does not
+            if COMMAND_TABLE.search(head) or (assigns and TABLE_ASSIGNMENT.match(head) and is_assignment_word(w)):
                 return True
         # the last word holding `=` and the last `-...p` option, so each word is read once (`alias alias alias ...`)
         last_eq = max((i for i, u in enumerate(plain) if "=" in u), default=-1)
@@ -757,10 +817,16 @@ SHELL_TEXT = re.compile(r"[\s;&|<>()$`'\"\\]")  # a quoted or escaped argument h
 GLOB_TEXT = re.compile(r"[*?\[{]")
 
 
+# programs whose arguments are package, script or test names or find tests, never re-parsed by a shell: a quoted glob
+# given to one is data (`npm run 'test:*'`, `swift test --filter 'App/*'`, `find -name '*.orig' -exec rm`)
+GLOB_DATA_TOOLS = frozenset(("find", "npm", "pnpm", "yarn", "swift", "pytest", "jest", "vitest", "brew", "pip", "pip3", "pod",
+                             "fastlane", "bundle", "rake"))
+
+
 def code_text(text, first=False):
     """True if a quoted argument may be a command for a program that re-parses it: it holds SHELL_TEXT, or a glob
-    with a `/` (`ssh h '/usr/bin/gi?' apply x.diff`) or as the first operand that is not an option (`watch -n1 'gi?'
-    apply`). A glob word with no `/` later in the line is data (`npm run 'test:*'`; #196 confirm on c098069)."""
+    with a `/` or, when `first`, any glob (`ssh -p 22 h 'gi?' apply x.diff` once a `git` file exists; #196 confirm on
+    a55f7ae). diff_apply_runs() passes `first` for every program outside GLOB_DATA_TOOLS and reads no glob for those."""
     return bool(SHELL_TEXT.search(text) or (GLOB_TEXT.search(text) and ("/" in text or first)))
 
 
@@ -1005,6 +1071,8 @@ def diff_apply_runs(command, _depth=0):
     possible = None
     if defines_alias(tokens):
         possible = "it defines an alias, a hashed command or a command table entry"
+    elif RUNS_NAME_SET.search(joined):
+        possible = "a variable that runs its value (an editor, pager or ssh command) is set by `for` or `${NAME:=}`"
     elif eval_form(joined):
         possible = "it evaluates text as code at run time (arithmetic, an array subscript, `${!x}`, `@P`, `${(..)}`)"
     elif glued_paren(joined):
@@ -1061,10 +1129,10 @@ def diff_apply_runs(command, _depth=0):
         operands = command_operands(words[idx + 1 :])
         if reads_stdin_script(cmd, operands):
             possible = possible or "a shell reads commands from stdin"
-        if cmd in SETS_NAMED_VARIABLE and any(RUNS_NAME.fullmatch(o[2:] if o.startswith("-v") else o) for o in operands):
+        if cmd in SETS_NAMED_VARIABLE and sets_runs_name(cmd, raw_operands(words[idx + 1 :])):
             possible = possible or f"`{cmd}` sets a variable that runs its value (an editor, pager or ssh command)"
-        if cmd == "parallel":  # GNU parallel replaces `{}` and appends words read at run time, like xargs
-            possible = possible or "`parallel` adds words read at run time to its command"
+        if cmd in ARGUMENT_FEEDERS:  # they replace `{}` and append words read at run time, like xargs
+            possible = possible or f"`{cmd}` adds words read at run time to its command"
         if cmd == "eval":  # eval joins its words: `eval '/usr/bin/gi?' apply x`
             visit(" ".join(unquote(w) for w in raw_operands(words[idx + 1 :]) if literal_word(w)))
         # xargs appends words read at run time, and `{}` in an xargs or find -exec command is replaced by them
@@ -1081,11 +1149,10 @@ def diff_apply_runs(command, _depth=0):
         if not runs_arguments(cmd, operands):
             continue
         args = raw_operands(words[idx + 1 :])
-        first = next((i for i, w in enumerate(args) if not unquote(w).startswith("-")), None)
-        for i, w in enumerate(args):
+        for w in args:
             if not literal_word(w):
                 possible = possible or f"a word built by the shell is given to `{cmd}`, which may run it"
-            elif unquote(w) != w and code_text(unquote(w), i == first):
+            elif unquote(w) != w and (SHELL_TEXT.search(unquote(w)) if cmd in GLOB_DATA_TOOLS else code_text(unquote(w), True)):
                 visit(unquote(w))  # `bash -c '...'`, `eval '...'`, `trap '...' EXIT`: parsed as commands
     return runs, dirs, possible
 
@@ -3028,6 +3095,23 @@ def self_test():
             ("feature: Bash comment backslash continues nothing", bash("feat", "true # x \\\nrm CLAUDE.md"), True),
             ("feature: Bash allowed: apostrophe in a comment", bash("feat", "echo hi # don't"), False),
             ("feature: Bash allowed: # inside quotes and ${#x}", bash("feat", "echo \"a # it's\" ${#x} 'b #'"), False),
+            ("feature: Bash escaped space before # is no comment", bash("feat", "echo a\\ #x; echo y > CLAUDE.md"), True),
+            ("feature: Bash continuation then # is no comment", bash("feat", "echo a\\\n#x; echo y > CLAUDE.md"), True),
+            ("feature: Bash # after $( ) is no comment", bash("feat", "echo $(echo a)#x; echo y > CLAUDE.md"), True),
+            ("feature: Bash # inside backticks ends there", bash("feat", "echo `echo a #b`; echo y > CLAUDE.md"), True),
+            ("feature: Bash # in nested quotes of ${x:+}", bash("feat", "echo \"x\" \"${x:+\"a #b\"}\"; echo y > CLAUDE.md"), True),
+            ("feature: Bash single-quoted <<E starts no heredoc", bash("feat", "echo '<<E'\necho y > CLAUDE.md\nE"), True),
+            ("feature: Bash escaped <<E starts no heredoc", bash("feat", "echo \\<<E\necho y > CLAUDE.md\nE"), True),
+            ("feature: Bash ssh quoted glob without a slash", bash("feat", "touch git; ssh -p 22 localhost '[g]it' apply y.diff"), True),
+            ("feature: Bash gxargs placeholder", bash("feat", "echo apply | gxargs -I{} git {} y.diff"), True),
+            ("feature: Bash for sets GIT_EDITOR", bash("feat", "for GIT_EDITOR in '$(echo git) apply y.diff; :'; do export GIT_EDITOR; git commit --amend; done"), True),
+            ("feature: Bash printf -v with a built name", bash("feat", "v=GIT_EDITOR; printf -v $v '%s' '$(echo git) apply y.diff; :'; git commit --amend"), True),
+            ("feature: Bash ${GIT_EDITOR:=...}", bash("feat", ": ${GIT_EDITOR:='$(echo git) apply y.diff; :'}; git commit --amend"), True),
+            ("feature: Bash zsh aliases=() table", bash("feat", "aliases=(g git); g apply y.diff"), True),
+            ("feature: Bash allowed: heredoc in a quoted $( ) body", bash("feat", "gh pr create --title t --body \"$(cat <<'EOF'\nit's a fix # see\nEOF\n)\""), False),
+            ("feature: Bash allowed: functions=3 as data", bash("feat", "echo functions=3"), False),
+            ("feature: Bash allowed: printf names a pager as data", bash("feat", "printf '%s\\n' PAGER"), False),
+            ("feature: Bash allowed: swift test filter glob", bash("feat", "swift test --filter 'App/*'"), False),
             ("feature: Bash allowed: PR body with alias prose", bash("feat", "gh pr create --body \"alias a=git\""), False),
             ("feature: Bash allowed: Swift heredoc body with let", bash("feat", "cat <<'EOF' > /dev/null\nlet x = [1]\nEOF"), False),
             ("feature: Bash allowed: bash running a script file", bash("feat", "bash scripts/x.sh"), False),

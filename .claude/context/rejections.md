@@ -512,3 +512,9 @@
 **Rule violated:** repeats the 2026-11-18 "Stricter assignment regex" entry and the PR#140 timeout entries; after ~10 confirm rounds of letter matching, Akshay chose a fail-closed redesign (a command the hook can't read in full is a possible run) instead of another targeted round
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, glob_names_tool, ALIAS_DEFINITION, diff_apply_runs)
 **Caught by:** this review (Round confirm on c0fade2) and background security scans on acd9427/c0fade2
+
+## 2026-11-19 — PR#196 — The fail-closed redesign read one alias word and missed stdin shells with options
+**What was wrong:** `defines_alias()` read only the first `alias`/`hash` word in a command part, so `FOO=alias hash -p /usr/bin/git g; g apply x.diff` ran unseen (regression from c0fade2); the stdin-shell rule treated an option argument (`bash -o pipefail`, `-O extglob`, `--rcfile F`), `-s --` or `/dev/stdin` as a script, so a piped spelled `git apply` ran unseen; `echo apply | xargs -I{} git {} x.diff` passed (regression); `COMMAND_TABLE` was quadratic (19.6 s on 3.9); `find` was missing from the no-exec list and `let`/`hash`/subscript forms in quoted prose blocked on feature/*
+**Rule violated:** a fail-closed rule must fail closed on every shape it does not parse (an option it does not model counts as a script it cannot read); repeats the PR#140 timeout entries (no `\w*` prefix before a literal) and the 2026-11-18 "closed alias list" entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, COMMAND_TABLE, eval_form, diff_apply_runs)
+**Caught by:** this review (Round confirm on f69b07e)

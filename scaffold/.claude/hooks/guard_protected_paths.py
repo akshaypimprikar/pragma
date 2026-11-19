@@ -659,9 +659,13 @@ EVAL_EXPANSION_FORM = re.compile(r"\$\(\(|\$\[|\$\{[!(]|@P\}|\$\{\w+\[[^\[\]\n$`
 EVAL_WORD_FORM = re.compile(r"(?<![\w$])\(\(|(?<![\w.-])let\s|(?<![\w.-])(?:declare|typeset|local|export|readonly)\s+"
                             r"(?:-\w+\s+)*-\w*i|[\w}]\[[^\[\]\n$`]*[$`]")
 STORED_SUBSCRIPT = re.compile(r"\[[^\[\]\n]*(?:\$\(|`)")
-# a variable whose value git or the shell runs as a command (`GIT_EDITOR='...' git commit --amend`)
-RUNS_VALUE = re.compile(r"(?:GIT_(?:EDITOR|SEQUENCE_EDITOR|PAGER|SSH_COMMAND|SSH|EXTERNAL_DIFF|ASKPASS|PROXY_COMMAND)"
-                        r"|EDITOR|VISUAL|PAGER|MANPAGER|BASH_ENV|ENV|PROMPT_COMMAND|SHELLOPTS|BASHOPTS)\+?=")
+# a variable whose value git or the shell runs as a command (`GIT_EDITOR='...' git commit --amend`, `LESSOPEN='|...'`,
+# `PS4` under `bash -x`)
+RUNS_NAME = re.compile(r"(?:GIT_(?:EDITOR|SEQUENCE_EDITOR|PAGER|SSH_COMMAND|SSH|EXTERNAL_DIFF|ASKPASS|PROXY_COMMAND)"
+                       r"|EDITOR|VISUAL|PAGER|MANPAGER|BASH_ENV|ENV|PROMPT_COMMAND|SHELLOPTS|BASHOPTS|LESSOPEN|LESSCLOSE|PS4)")
+RUNS_VALUE = re.compile(RUNS_NAME.pattern + r"\+?=")
+# builtins that set a variable named by an operand at run time (`printf -v GIT_EDITOR ...`, `read PAGER`)
+SETS_NAMED_VARIABLE = ("printf", "read", "mapfile", "readarray")
 
 
 def quote_parts(command):
@@ -692,32 +696,44 @@ def eval_form(command):
     return bool(EVAL_WORD_FORM.search(plain) or EVAL_EXPANSION_FORM.search(plain + " " + double)
                 or STORED_SUBSCRIPT.search(command))
 # a command table entry anywhere, or an `alias`/`hash` definition (defines_alias()): each can make a plain word run
-# git or patch
-COMMAND_TABLE = re.compile(r"aliases\[|BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:commands|functions)\[")  # galiases[ too
-ALIAS_OR_HASH = re.compile(r"(?i)(?<![\w.-])(alias|hash)\s")
+# git or patch. `aliases+=(g git)` and `aliases=(...)` (zsh) set entries too
+COMMAND_TABLE = re.compile(r"aliases(?:\[|\+?=)|BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:commands|functions)(?:\[|\+?=)")
 
 
-def defines_alias(command):
-    """True if the command holds a command table entry, or an `alias` with `=` or a `hash` with `=` or `-p` after it
-    in the same `;`/`&`/`|`/newline-separated part. A quoted string holding whitespace is prose or a value and is
-    dropped (`--body "alias a=git"`); other quotes and backslashes are removed (`a"lias" a=git`). Every `alias` and
-    `hash` word counts (#196 confirm on f69b07e: only the first one was read, so `FOO=alias hash -p ...` passed), and
-    each part is scanned a fixed number of times."""
-    text = re.sub(r"[\\'\"]", "", re.sub(r"'[^']*\s[^']*'|\"(?:[^\"\\]|\\.)*\s(?:[^\"\\]|\\.)*\"", " =",
-                                         command.replace("\\\n", "")))
-    if COMMAND_TABLE.search(text):
-        return True
-    for part in re.split(r"[\n;&|]", text):
-        first = ALIAS_OR_HASH.search(part)
-        if not first:
+def defines_alias(tokens):
+    """True if the command's words hold a command table entry, or an `alias` word with a word holding `=` after it, or
+    a `hash` word with `=` or `-p` after it, in the same `;`/`&`/`|`/newline-separated segment. The words come from
+    tokenize(), so a quoted string is one word: prose holding `alias a=git` is not an `alias` word (`--body "alias
+    a=git"`), while `a"lias" a=git` is. Every `alias` and `hash` word counts (`FOO=alias hash -p ...`). The quotes are
+    paired by the tokenizer, not a regex (#196 confirm on c098069: `echo "it's"; hash -p /usr/bin/git g; echo "it's"`
+    paired the two apostrophes and dropped the definition between them)."""
+    for item in split_segments(tokens):
+        if item[0] != "cmd":
             continue
-        if part.rfind("=") > first.start():
-            return True
-        hash_word = re.search(r"(?i)(?<![\w.-])hash\s", part)
-        if hash_word and re.compile(r"(?<!\S)-\w*p").search(part, hash_word.end()):
-            return True
+        plain = [unquote(w) for w in item[1]]
+        for w, u in zip(item[1], plain):  # a quoted word is a value or prose: only its unquoted head can name a table
+            head = u if not re.search(r"\s", u) else re.split(r"['\"]", w, maxsplit=1)[0]
+            if COMMAND_TABLE.search(head):
+                return True
+        # the last word holding `=` and the last `-...p` option, so each word is read once (`alias alias alias ...`)
+        last_eq = max((i for i, u in enumerate(plain) if "=" in u), default=-1)
+        last_p = max((i for i, u in enumerate(plain) if re.match(r"-\w*p", u)), default=-1)
+        for i, u in enumerate(plain):
+            name = u.lower()
+            if (name == "alias" and last_eq > i) or (name == "hash" and max(last_eq, last_p) > i):
+                return True
     return False
+
+
 SHELL_TEXT = re.compile(r"[\s;&|<>()$`'\"\\]")  # a quoted or escaped argument holding one of these may be code
+GLOB_TEXT = re.compile(r"[*?\[{]")
+
+
+def code_text(text, first=False):
+    """True if a quoted argument may be a command for a program that re-parses it: it holds SHELL_TEXT, or a glob
+    with a `/` (`ssh h '/usr/bin/gi?' apply x.diff`) or as the first operand that is not an option (`watch -n1 'gi?'
+    apply`). A glob word with no `/` later in the line is data (`npm run 'test:*'`; #196 confirm on c098069)."""
+    return bool(SHELL_TEXT.search(text) or (GLOB_TEXT.search(text) and ("/" in text or first)))
 
 
 def literal_word(word):
@@ -907,22 +923,38 @@ def diff_apply_dirs(words, config_env=False):
     return dirs if sub in ("apply", "am") or unknown else None
 
 
-SHELL_OPTION_ARGS = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+SHELL_OPTION_ARGS = ("--rcfile", "--init-file")
+SHELL_OPTION_CLUSTER = re.compile(r"[-+][A-Za-z]*[oO][A-Za-z]*")  # `-o`, `-euo pipefail`, `-eO extglob`, `+o`
 STDIN_FILES = re.compile(r"-|/dev/(?:stdin|fd/\d+)|/proc/self/fd/\d+")
+
+
+def stdin_file(path):
+    """True if a script path may be the shell's stdin: `-`, or `/dev/stdin`, `/dev/fd/N` or `/proc/...` after
+    collapsing `//` and `/./` (`///dev/stdin`, `/dev/./stdin`), or any path ending in `stdin` or `fd/N`
+    (`../../dev/stdin`; #196 confirm on c098069)."""
+    if path == "-":
+        return True
+    norm = os.path.normpath(path)
+    if norm.startswith("/"):
+        norm = "/" + norm.lstrip("/")
+    return bool(STDIN_FILES.fullmatch(norm) or norm.startswith(("/dev/", "/proc/"))
+                or re.search(r"(?:^|/)(?:stdin|fd/\d+)$", norm))
 
 
 def reads_stdin_script(cmd, operands):
     """True for a shell that may run commands from a heredoc, here-string or pipe: no `-c` and no script operand,
     `-s`, a `/dev/stdin`-style or `-` script, or an option that takes an argument (`-o pipefail`, `-O extglob`,
-    `--rcfile F`), which the hook does not tell apart from a script (fails closed; #196 confirm on f69b07e). Also
-    `.`/`source` of a `/dev/stdin`-style file or of nothing (`. <(...)`)."""
+    `--rcfile F`, any option cluster holding `o`/`O` such as `-euo pipefail`), which the hook does not tell apart from a
+    script (fails closed; #196 confirm on f69b07e and c098069). Also `.`/`source` of a stdin_file() or of nothing:
+    `. <(...)` runs text built at run time, so `source <(cmd)` is a possible run too."""
     if cmd in (".", "source"):
-        return not operands or bool(STDIN_FILES.fullmatch(operands[0]))
+        files = operands[1:] if operands[:1] == ["--"] else operands
+        return not files or stdin_file(files[0])
     if cmd not in SHELLS or any(re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w) for w in operands):
         return False
     script = next((w for w in operands if not w.startswith(("-", "+"))), None)
-    return (script is None or bool(STDIN_FILES.fullmatch(script)) or any(w in SHELL_OPTION_ARGS or w.startswith("--rcfile=")
-            or re.fullmatch(r"-[A-Za-z]*s[A-Za-z]*", w) for w in operands))
+    return (script is None or stdin_file(script) or any(w in SHELL_OPTION_ARGS or w.startswith("--rcfile=")
+            or SHELL_OPTION_CLUSTER.fullmatch(w) or re.fullmatch(r"-[A-Za-z]*s[A-Za-z]*", w) for w in operands))
 
 
 def diff_apply_runs(command, _depth=0):
@@ -943,7 +975,7 @@ def diff_apply_runs(command, _depth=0):
     last_substitution = max(command.rfind("$("), command.rfind("`"), command.rfind("${!"), command.rfind("$(("))
     joined = command.replace("\\\n", "")
     possible = None
-    if defines_alias(command):
+    if defines_alias(tokens):
         possible = "it defines an alias, a hashed command or a command table entry"
     elif eval_form(joined):
         possible = "it evaluates text as code at run time (arithmetic, an array subscript, `${!x}`, `@P`, `${(..)}`)"
@@ -982,7 +1014,7 @@ def diff_apply_runs(command, _depth=0):
                 value = w.split("=", 1)[1]
                 if not literal_word(value):
                     possible = possible or "a variable that runs its value (an editor, pager or ssh command) is built by the shell"
-                elif SHELL_TEXT.search(unquote(value)):
+                elif code_text(unquote(value)):
                     visit(unquote(value))
         # wrapper options (`env -S 'g${E}it apply'`, `sudo -u "$U"`); assignments are data until something runs them
         for w in raw_operands(words if idx is None else words[:idx]):
@@ -990,7 +1022,7 @@ def diff_apply_runs(command, _depth=0):
                 continue
             if not literal_word(w):
                 possible = possible or "a wrapper option is built by the shell"
-            elif unquote(w) != w and SHELL_TEXT.search(unquote(w)):
+            elif unquote(w) != w and code_text(unquote(w)):
                 visit(unquote(w))
         if idx is None:
             continue
@@ -1001,6 +1033,10 @@ def diff_apply_runs(command, _depth=0):
         operands = command_operands(words[idx + 1 :])
         if reads_stdin_script(cmd, operands):
             possible = possible or "a shell reads commands from stdin"
+        if cmd in SETS_NAMED_VARIABLE and any(RUNS_NAME.fullmatch(o[2:] if o.startswith("-v") else o) for o in operands):
+            possible = possible or f"`{cmd}` sets a variable that runs its value (an editor, pager or ssh command)"
+        if cmd == "parallel":  # GNU parallel replaces `{}` and appends words read at run time, like xargs
+            possible = possible or "`parallel` adds words read at run time to its command"
         if cmd == "eval":  # eval joins its words: `eval '/usr/bin/gi?' apply x`
             visit(" ".join(unquote(w) for w in raw_operands(words[idx + 1 :]) if literal_word(w)))
         # xargs appends words read at run time, and `{}` in an xargs or find -exec command is replaced by them
@@ -1016,10 +1052,12 @@ def diff_apply_runs(command, _depth=0):
                 runs = True
         if not runs_arguments(cmd, operands):
             continue
-        for w in raw_operands(words[idx + 1 :]):
+        args = raw_operands(words[idx + 1 :])
+        first = next((i for i, w in enumerate(args) if not unquote(w).startswith("-")), None)
+        for i, w in enumerate(args):
             if not literal_word(w):
                 possible = possible or f"a word built by the shell is given to `{cmd}`, which may run it"
-            elif unquote(w) != w and SHELL_TEXT.search(unquote(w)):
+            elif unquote(w) != w and code_text(unquote(w), i == first):
                 visit(unquote(w))  # `bash -c '...'`, `eval '...'`, `trap '...' EXIT`: parsed as commands
     return runs, dirs, possible
 
@@ -2940,6 +2978,23 @@ def self_test():
             ("feature: Bash allowed: awk field subscript", bash("feat", "awk '{print a[$1]}' f"), False),
             ("feature: Bash allowed: jq variable subscript", bash("feat", "jq '.a[$i]' f"), False),
             ("feature: Bash allowed: commit message with hash x=1", bash("feat", "git commit -m \"hash x=1\""), False),
+            ("feature: Bash hash -p between apostrophes in double quotes", bash("feat", "echo \"it's\"; hash -p /usr/bin/git g; echo \"it's\"; g apply y.diff"), True),
+            ("feature: Bash hash -p between double quotes in single quotes", bash("feat", "echo 'a\"b'; hash -p /usr/bin/git g; echo 'c\"d'; g apply y.diff"), True),
+            ("feature: Bash zsh aliases+=() entry", bash("feat", "aliases+=(g git); g apply y.diff"), True),
+            ("feature: Bash stdin shell with -euo pipefail", bash("feat", "printf 'g\\151t apply y.diff\\n' | bash -euo pipefail"), True),
+            ("feature: Bash stdin shell with -eO extglob", bash("feat", "printf 'g\\151t apply y.diff\\n' | bash -eO extglob"), True),
+            ("feature: Bash stdin shell via /dev/./stdin", bash("feat", "printf 'g\\151t apply y.diff\\n' | bash /dev/./stdin"), True),
+            ("feature: Bash stdin shell via ///dev/stdin", bash("feat", "printf 'g\\151t apply y.diff\\n' | bash ///dev/stdin"), True),
+            ("feature: Bash source -- /dev/stdin", bash("feat", "printf 'g\\151t apply y.diff\\n' | . -- /dev/stdin"), True),
+            ("feature: Bash ssh with a quoted glob command path", bash("feat", "ssh localhost '/usr/bin/gi?' apply y.diff"), True),
+            ("feature: Bash watch with a quoted glob command", bash("feat", "watch -n1 'gi?' apply y.diff"), True),
+            ("feature: Bash printf -v sets GIT_EDITOR", bash("feat", "printf -v GIT_EDITOR '%s' '$(echo git) apply y.diff; :'; export GIT_EDITOR; git commit --amend"), True),
+            ("feature: Bash LESSOPEN runs a built command", bash("feat", "LESSOPEN='|$(echo git) apply y.diff; cat %s' less y.diff"), True),
+            ("feature: Bash parallel fed from stdin", bash("feat", "printf apply | parallel git {}"), True),
+            ("feature: Bash allowed: alias prose in a PR body", bash("feat", "gh pr create --title t --body \"alias a=git\""), False),
+            ("feature: Bash allowed: apostrophes in two commit messages", bash("feat", "git commit -m \"it's done\"; echo \"don't\""), False),
+            ("feature: Bash allowed: git ls-files with a quoted glob", bash("feat", "git ls-files '*.swift'"), False),
+            ("feature: Bash allowed: bash -e runs a script", bash("feat", "bash -e scripts/x.sh"), False),
             ("feature: Bash allowed: PR body with alias prose", bash("feat", "gh pr create --body \"alias a=git\""), False),
             ("feature: Bash allowed: Swift heredoc body with let", bash("feat", "cat <<'EOF' > /dev/null\nlet x = [1]\nEOF"), False),
             ("feature: Bash allowed: bash running a script file", bash("feat", "bash scripts/x.sh"), False),

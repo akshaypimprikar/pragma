@@ -518,3 +518,9 @@
 **Rule violated:** a fail-closed rule must fail closed on every shape it does not parse (an option it does not model counts as a script it cannot read); repeats the PR#140 timeout entries (no `\w*` prefix before a literal) and the 2026-11-18 "closed alias list" entry
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, COMMAND_TABLE, eval_form, diff_apply_runs)
 **Caught by:** this review (Round confirm on f69b07e)
+
+## 2026-11-19 — PR#196 — Regex quote stripping and exact option words reopened confirmed bypasses
+**What was wrong:** `defines_alias()` dropped "quoted strings holding a space" with regexes that did not track the open quote, so `echo "it's"; hash -p /usr/bin/git g; echo "it's"; g apply x.diff` paired the two apostrophes and hid the definition (regression from f69b07e); the stdin-shell rule matched only exact `-o`/`-O` words and literal `/dev/stdin`, so `bash -euo pipefail`, `/dev/./stdin` and `///dev/stdin` read a piped spelled `git apply` unseen (confirm8 HIGH 2 named `-euo pipefail`); removing glob characters from `SHELL_TEXT` let `ssh h '/usr/bin/gi?' apply x.diff` pass (regression)
+**Rule violated:** parse quotes with the one tokenizer the hook trusts, never a second regex; a fail-closed rule must cover the general form of a named repro (option clusters, path spellings), not the literal string; repeats the 2026-11-19 f69b07e entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, stdin_file, code_text, diff_apply_runs)
+**Caught by:** this review (Round confirm on c098069)

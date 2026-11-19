@@ -530,3 +530,9 @@
 **Rule violated:** the hook must read a command the way the shell reads it before applying any rule; every quote-pairing pass needs the shell's comment rule too
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines)
 **Caught by:** self-check while fixing the c098069 confirm (eighth session)
+
+## 2026-11-19 — PR#196 — The comment cut trusted the previous raw character
+**What was wrong:** `cut_comment()` (a55f7ae) cut at a `#` after an escaped space or `;`, after a continuation, after `$( )`/`<( )`, inside backticks and inside nested `"${x:+"..."}"` quotes, dropping commands bash runs (`echo a\ #x; git apply x.diff`, regression); a quoted or escaped `<<E` still dropped the next lines as a heredoc (pre-existing); quoted globs with no `/` after an ssh host, `gxargs`/`sem`, `for GIT_EDITOR in`, `${GIT_EDITOR:=}` and built `printf -v` names were not read
+**Rule violated:** a parse step that removes text must remove only what it is sure the shell ignores; when unsure, keep the text (over-reading can only block); repeats the 2026-11-19 comment-parsing entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines, code_text, sets_runs_name, defines_alias)
+**Caught by:** this review (Round confirm on a55f7ae)

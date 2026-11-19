@@ -61,6 +61,7 @@ Limits (deliberate):
 Usage: guard_protected_paths.py            (reads hook JSON on stdin)
        guard_protected_paths.py --self-test
 """
+import bisect
 import codecs
 import fnmatch
 import json
@@ -336,6 +337,9 @@ def strip_heredocs_and_newlines(command):
     continuations the way the shell does (`cp x \\\nCLAUDE.md` is one command),
     and turn the remaining newlines into `;`."""
     lines, out, i = command.split("\n"), [], 0
+    terminators = {}
+    for n, line in enumerate(lines):
+        terminators.setdefault(line.strip(), []).append(n)
     while i < len(lines):
         line = lines[i]
         i += 1
@@ -350,11 +354,12 @@ def strip_heredocs_and_newlines(command):
         if prefix.count("((") > prefix.count("))"):
             continue  # `$((1<<n))` is arithmetic, not a heredoc
         # Only treat it as a heredoc if its terminator exists; otherwise nothing
-        # is dropped, so a stray `<<word` can't hide the commands after it.
-        for j in range(i, len(lines)):
-            if lines[j].strip() == m.group(2):
-                i = j + 1
-                break
+        # is dropped, so a stray `<<word` can't hide the commands after it. Looked up by index, not by
+        # scanning ahead from every `<<` (quadratic on `<<E` x 8000; #196 confirm on f69b07e)
+        ends = terminators.get(m.group(2), [])
+        k = bisect.bisect_left(ends, i)
+        if k < len(ends):
+            i = ends[k] + 1
     return " ; ".join(out)
 
 
@@ -623,7 +628,7 @@ NO_EXEC_TOOLS = frozenset((
     "cd", "pushd", "popd", "echo", "printf", "grep", "egrep", "fgrep", "rg", "cat", "sed", "ls", "gh", "mkdir", "rmdir",
     "rm", "cp", "mv", "install", "touch", "wc", "head", "tail", "test", "[", "[[", "for", "case", "select", "in", "do",
     "done", "fi", "esac", "}", "du", "df", "diff", "cmp", "stat", "file", "readlink", "realpath", "basename", "dirname",
-    "mktemp", "chmod", "chown", "jq", "yq", "awk", "sort", "uniq", "cut", "tr", "tee", "date", "sleep", "kill", "open",
+    "mktemp", "chmod", "chown", "jq", "yq", "awk", "find", "sort", "uniq", "cut", "tr", "tee", "date", "sleep", "kill", "open",
     "curl", "wget", "strings", "shasum", "md5", "plutil", "defaults", "xcodebuild", "simctl", "swiftc", "swiftlint",
     "swiftformat", "python3", "python", "node", "perl", "ruby", "local", "export", "unset", "read", "return", "exit",
     "wait", "true", "false", ":", "zip", "unzip", "tar", "gzip", "gunzip", "ditto", "ln", "less", "more", "base64",
@@ -644,30 +649,75 @@ GIT_RUNNER_OPTION = re.compile(r"--(?:exec|upload-pack|receive-pack|extcmd|open-
                                r"|-O|-[A-Za-z]*[xu][A-Za-z]*$")  # rebase -x, clone -u, grep -O
 SED_EXEC = re.compile(r"(?<![A-Za-z])[gpIiMmw0-9]*e(?![A-Za-z])")  # GNU sed's `e` command or `s///e` flag, over-read
 ARITH_TEST = ("-eq", "-ne", "-lt", "-le", "-gt", "-ge")  # `[[ a -eq b ]]` evaluates both sides as arithmetic
-# text the shell evaluates as code at run time: arithmetic (`$(( ))`, `(( ))`, `$[ ]`, `let`, an integer variable),
-# an array subscript holding an expansion (`a[$x]`, `'a[$(cmd)]'` used later as a name), indirection (`${!x}`), bash
-# prompt expansion (`@P`) and zsh parameter flags (`${(e)x}`)
-EVAL_FORM = re.compile(r"\$\(\(|(?<![\w$])\(\(|\$\[|\$\{[!(]|@P\}|(?<![\w.-])let\s"
-                       r"|(?<![\w.-])(?:declare|typeset|local|export|readonly)\s+(?:-\w+\s+)*-\w*i"
-                       r"|[\w}]\[[^\[\]\n$`]*[$`]")  # stops at the next `[`: linear on `[a[a[a...`
+# text the shell evaluates as code at run time (eval_form()). Expansions, outside single quotes: arithmetic
+# (`$(( ))`, `$[ ]`), indirection (`${!x}`), zsh flags (`${(e)x}`), prompt expansion (`@P`), a subscript holding an
+# expansion (`${a[$x]}`). Words, unquoted only (`git commit -m "let users sign in"` is prose): `(( ))`, `let`, an
+# integer variable, `a[$x]=`. Anywhere, quotes included: a subscript holding `$( )` or a backtick (`'a[$(cmd)]'`,
+# stored and later used as a name by `read`, `printf -v` or arithmetic). Each `[^\[\]...]*` stops at the next
+# bracket, so the scans are linear on `[a[a[a...`.
+EVAL_EXPANSION_FORM = re.compile(r"\$\(\(|\$\[|\$\{[!(]|@P\}|\$\{\w+\[[^\[\]\n$`]*[$`]")
+EVAL_WORD_FORM = re.compile(r"(?<![\w$])\(\(|(?<![\w.-])let\s|(?<![\w.-])(?:declare|typeset|local|export|readonly)\s+"
+                            r"(?:-\w+\s+)*-\w*i|[\w}]\[[^\[\]\n$`]*[$`]")
+STORED_SUBSCRIPT = re.compile(r"\[[^\[\]\n]*(?:\$\(|`)")
+# a variable whose value git or the shell runs as a command (`GIT_EDITOR='...' git commit --amend`)
+RUNS_VALUE = re.compile(r"(?:GIT_(?:EDITOR|SEQUENCE_EDITOR|PAGER|SSH_COMMAND|SSH|EXTERNAL_DIFF|ASKPASS|PROXY_COMMAND)"
+                        r"|EDITOR|VISUAL|PAGER|MANPAGER|BASH_ENV|ENV|PROMPT_COMMAND|SHELLOPTS|BASHOPTS)\+?=")
+
+
+def quote_parts(command):
+    """(unquoted, double-quoted, single-quoted) text of a command, each joined with spaces, in one pass."""
+    parts, cur, quote, i = {None: [], '"': [], "'": []}, [], None, 0
+    while i < len(command):
+        c = command[i]
+        if quote is None and c == "\\":
+            cur.append(command[i : i + 2])
+            i += 2
+            continue
+        if c in "'\"" and quote in (None, c):
+            parts[quote].append("".join(cur) + " ")
+            cur, quote = [], (None if quote else c)
+        elif quote == '"' and c == "\\":
+            cur.append(command[i : i + 2])
+            i += 1
+        else:
+            cur.append(c)
+        i += 1
+    parts[quote].append("".join(cur))
+    return "".join(parts[None]), "".join(parts['"']), "".join(parts["'"])
+
+
+def eval_form(command):
+    """True if the command holds text the shell evaluates as code at run time (see EVAL_EXPANSION_FORM)."""
+    plain, double, single = quote_parts(strip_heredocs_and_newlines(command))
+    return bool(EVAL_WORD_FORM.search(plain) or EVAL_EXPANSION_FORM.search(plain + " " + double)
+                or STORED_SUBSCRIPT.search(command))
 # a command table entry anywhere, or an `alias`/`hash` definition (defines_alias()): each can make a plain word run
 # git or patch
-COMMAND_TABLE = re.compile(r"\w*aliases\[|BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:commands|functions)\[")
+COMMAND_TABLE = re.compile(r"aliases\[|BASH_ALIASES|BASH_CMDS|(?<![\w.-])(?:commands|functions)\[")  # galiases[ too
 ALIAS_OR_HASH = re.compile(r"(?i)(?<![\w.-])(alias|hash)\s")
 
 
-def defines_alias(text):
-    """True if `text` holds a command table entry, an `alias` with `=`, or a `hash` with `=` or `-p`, in the same
-    `;`/`&`/`|`/newline-separated part. Each part is read once (a regex scanning to the part's end from every
-    `alias` word was quadratic on `alias alias ...`)."""
+def defines_alias(command):
+    """True if the command holds a command table entry, or an `alias` with `=` or a `hash` with `=` or `-p` after it
+    in the same `;`/`&`/`|`/newline-separated part. A quoted string holding whitespace is prose or a value and is
+    dropped (`--body "alias a=git"`); other quotes and backslashes are removed (`a"lias" a=git`). Every `alias` and
+    `hash` word counts (#196 confirm on f69b07e: only the first one was read, so `FOO=alias hash -p ...` passed), and
+    each part is scanned a fixed number of times."""
+    text = re.sub(r"[\\'\"]", "", re.sub(r"'[^']*\s[^']*'|\"(?:[^\"\\]|\\.)*\s(?:[^\"\\]|\\.)*\"", " =",
+                                         command.replace("\\\n", "")))
     if COMMAND_TABLE.search(text):
         return True
     for part in re.split(r"[\n;&|]", text):
-        m = ALIAS_OR_HASH.search(part)
-        if m and ("=" in part[m.end():] or (m.group(1).lower() == "hash" and re.search(r"(?<!\S)-\w*p", part[m.end():]))):
+        first = ALIAS_OR_HASH.search(part)
+        if not first:
+            continue
+        if part.rfind("=") > first.start():
+            return True
+        hash_word = re.search(r"(?i)(?<![\w.-])hash\s", part)
+        if hash_word and re.compile(r"(?<!\S)-\w*p").search(part, hash_word.end()):
             return True
     return False
-SHELL_TEXT = re.compile(r"[\s;&|<>()$`'\"\\*?\[{]")  # a quoted or escaped argument holding one of these may be code
+SHELL_TEXT = re.compile(r"[\s;&|<>()$`'\"\\]")  # a quoted or escaped argument holding one of these may be code
 
 
 def literal_word(word):
@@ -789,6 +839,23 @@ def is_assignment_word(word):
     return tail is not None and tail.startswith("]") and "=" in tail
 
 
+def exec_commands(cmd, operands):
+    """The commands of a `find`'s `-exec`/`-execdir`/`-ok`/`-okdir` actions, each up to its `;` or `+`."""
+    if cmd != "find":
+        return []
+    subs, cur = [], None
+    for w in operands:
+        if cur is None:
+            if FIND_ACTIONS.fullmatch(w) and w.startswith(("-exec", "-ok")):
+                cur = []
+        elif w in (";", "+"):
+            subs.append(cur)
+            cur = None
+        else:
+            cur.append(w)
+    return subs + ([cur] if cur else [])
+
+
 def drop_braced(word):
     """`word` with every `${...}` removed, innermost first (`${a${b}}`); None past MAX_BRACE_PASSES levels."""
     for _ in range(MAX_BRACE_PASSES):
@@ -840,9 +907,22 @@ def diff_apply_dirs(words, config_env=False):
     return dirs if sub in ("apply", "am") or unknown else None
 
 
+SHELL_OPTION_ARGS = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+STDIN_FILES = re.compile(r"-|/dev/(?:stdin|fd/\d+)|/proc/self/fd/\d+")
+
+
 def reads_stdin_script(cmd, operands):
-    """True for a shell with no `-c` and no script operand: it runs commands from a heredoc, here-string or pipe."""
-    return cmd in SHELLS and not any(re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w) or not w.startswith("-") for w in operands)
+    """True for a shell that may run commands from a heredoc, here-string or pipe: no `-c` and no script operand,
+    `-s`, a `/dev/stdin`-style or `-` script, or an option that takes an argument (`-o pipefail`, `-O extglob`,
+    `--rcfile F`), which the hook does not tell apart from a script (fails closed; #196 confirm on f69b07e). Also
+    `.`/`source` of a `/dev/stdin`-style file or of nothing (`. <(...)`)."""
+    if cmd in (".", "source"):
+        return not operands or bool(STDIN_FILES.fullmatch(operands[0]))
+    if cmd not in SHELLS or any(re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w) for w in operands):
+        return False
+    script = next((w for w in operands if not w.startswith(("-", "+"))), None)
+    return (script is None or bool(STDIN_FILES.fullmatch(script)) or any(w in SHELL_OPTION_ARGS or w.startswith("--rcfile=")
+            or re.fullmatch(r"-[A-Za-z]*s[A-Za-z]*", w) for w in operands))
 
 
 def diff_apply_runs(command, _depth=0):
@@ -854,21 +934,22 @@ def diff_apply_runs(command, _depth=0):
     a program outside NO_EXEC_TOOLS (`bash -c`, `eval`, `trap`, `find -exec`, `fd -x`, `env -S`), to MAX_RUN_DEPTH
     levels. It does not match spelled names: a command name the shell builds, a built word given to a program that may
     run it, an alias or command table entry, a zsh alternation or extended glob, code evaluated at run time
-    (EVAL_FORM), a shell reading commands from stdin, or a parse it can't finish, is a possible run. The letter
+    (eval_form()), a shell reading commands from stdin, or a parse it can't finish, is a possible run. The letter
     matching this replaces leaked a new spelling every review round (#196 confirm rounds on 45e9a30 to c0fade2)."""
     check_deadline()
     tokens = tokenize(command)
     if tokens is None:
         return False, [], "it can't be parsed (a quote is left open)"
+    last_substitution = max(command.rfind("$("), command.rfind("`"), command.rfind("${!"), command.rfind("$(("))
     joined = command.replace("\\\n", "")
     possible = None
-    if defines_alias(re.sub(r"[\\'\"]", "", joined)):
+    if defines_alias(command):
         possible = "it defines an alias, a hashed command or a command table entry"
-    elif EVAL_FORM.search(joined):
+    elif eval_form(joined):
         possible = "it evaluates text as code at run time (arithmetic, an array subscript, `${!x}`, `@P`, `${(..)}`)"
     elif glued_paren(joined):
         possible = "a zsh alternation or extended glob (`(a|b)`, `@(..)`)"
-    elif any(not m.group(1) and re.search(r"\$\(|`", command[m.end():]) for m in HEREDOC.finditer(command)):
+    elif any(not m.group(1) and m.end() < last_substitution for m in HEREDOC.finditer(command)):
         possible = "an unquoted heredoc runs a `$( )` or backtick the hook does not read"
     runs, dirs = False, []
     config_env = bool(GIT_CONFIG_ENV.search(command))
@@ -896,6 +977,13 @@ def diff_apply_runs(command, _depth=0):
             runs = True
             dirs += found
         idx = real_command_index(words)
+        for w in words:  # `GIT_EDITOR='...' git commit`, `export PAGER=...`: the value runs as a command
+            if RUNS_VALUE.match(unquote(w)):
+                value = w.split("=", 1)[1]
+                if not literal_word(value):
+                    possible = possible or "a variable that runs its value (an editor, pager or ssh command) is built by the shell"
+                elif SHELL_TEXT.search(unquote(value)):
+                    visit(unquote(value))
         # wrapper options (`env -S 'g${E}it apply'`, `sudo -u "$U"`); assignments are data until something runs them
         for w in raw_operands(words if idx is None else words[:idx]):
             if is_assignment_word(w):
@@ -913,6 +1001,19 @@ def diff_apply_runs(command, _depth=0):
         operands = command_operands(words[idx + 1 :])
         if reads_stdin_script(cmd, operands):
             possible = possible or "a shell reads commands from stdin"
+        if cmd == "eval":  # eval joins its words: `eval '/usr/bin/gi?' apply x`
+            visit(" ".join(unquote(w) for w in raw_operands(words[idx + 1 :]) if literal_word(w)))
+        # xargs appends words read at run time, and `{}` in an xargs or find -exec command is replaced by them
+        # (`echo apply | xargs -I{} git {} x.diff`; #196 confirm on f69b07e)
+        under_xargs = any(os.path.basename(unquote(w)) == "xargs" for w in words[:idx])
+        if under_xargs and runs_arguments(cmd, operands):
+            possible = possible or f"`xargs` adds words read at run time to `{cmd}`"
+        for sub in exec_commands(cmd, operands):
+            sub_cmd = os.path.basename(sub[0]).lower() if sub else ""
+            if sub and (not literal_word(sub[0]) or sub[0] == "{}" or ("{}" in sub and runs_arguments(sub_cmd, sub[1:]))):
+                possible = possible or "a `find -exec` command takes a word found at run time"
+            elif sub and diff_apply_dirs(sub) is not None:
+                runs = True
         if not runs_arguments(cmd, operands):
             continue
         for w in raw_operands(words[idx + 1 :]):
@@ -1750,7 +1851,7 @@ def diff_header_names(text):
     return names
 
 
-def diff_header_dirs(command, bases, cache):
+def diff_header_dirs(command, bases, cache, best_effort=False):
     """(dirs, unread): folders a diff may write outside the checked directories (#196 N5): every name in a diff
     header, read from the command text (a heredoc or here-string) and from each existing file the command names
     (the first MAX_DIFF_BYTES of up to MAX_DIFF_FILES). Apple `patch -p0` writes both kinds of name, and git apply
@@ -1759,12 +1860,15 @@ def diff_header_dirs(command, bases, cache):
     is not read. `unread` is True when a file was cut at MAX_DIFF_BYTES, files past MAX_DIFF_FILES were skipped, or
     the diffs hold more than MAX_DIFF_NAMES names: the caller blocks then, as for MAX_CHECKED_DIRS,
     since a header past the cap could name a feature repo, and checking them all could time the hook out."""
-    if len(bases) > MAX_CHECKED_DIRS or has_unquoted_glob(command) or any(re.search(r"[$`]", t) and not re.fullmatch(r"'[^']*'", t)
-                                            for t in tokenize(command) or []):
-        return [], True  # any `$` or backtick outside single quotes, even in a word unrelated to the diff: a file named
-        # through a variable, `$( )` or `$'...'` can't be opened (#196 scan)
+    unreadable = len(bases) > MAX_CHECKED_DIRS or has_unquoted_glob(command) or any(re.search(r"[$`]", t) and not re.fullmatch(r"'[^']*'", t)
+                                            for t in tokenize(command) or [])
+    if unreadable and (not best_effort or len(bases) > MAX_CHECKED_DIRS):
+        # any `$` or backtick outside single quotes, even in a word unrelated to the diff: a file named through a
+        # variable, `$( )` or `$'...'` can't be opened (#196 scan). A possible run (best_effort) still reads the
+        # files it names literally (#196 confirm on f69b07e: `p$(echo at)ch -p0 -i cross.diff`)
+        return [], True
     texts = [command, command.replace("\\n", "\n")]
-    seen, unread = set(), False
+    seen, unread = set(), unreadable
     for w in command_words(command):
         for base in [None] if os.path.isabs(os.path.expanduser(w)) else bases:
             p = os.path.expanduser(w) if base is None else resolve(w, base)
@@ -1883,7 +1987,7 @@ def evaluate(payload):
                 )
             try:
                 dirs = dirs + [p for x in diff_dirs for d in dirs for p in resolve_both(x, d)] + named_dirs(command, dirs, cache)
-                header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache)
+                header_dirs, unread = diff_header_dirs(command, list(dict.fromkeys(dirs)), cache, best_effort=not strict)
             except CheckTimeout:
                 return timeout_message(tool_name)
             dirs += header_dirs
@@ -2812,6 +2916,33 @@ def self_test():
             ("feature: Bash allowed: $( ) path prefix", bash("feat", "ls $(pwd)/App"), False),
             ("feature: Bash allowed: function definition", bash("feat", "f() { echo hi; }; f"), False),
             ("feature: Bash allowed: xcrun simctl with a built device", bash("feat", "xcrun simctl boot \"$UDID\""), False),
+            # #196 confirm on f69b07e
+            ("feature: Bash second alias/hash word in a part", bash("feat", "FOO=alias hash -p /usr/bin/git g; g apply y.diff"), True),
+            ("feature: Bash alias with a spaced quoted value", bash("feat", "alias ll='ls -l'"), True),
+            ("feature: Bash stdin shell with -o", bash("feat", "printf 'g\\151t apply y.diff\\n' | bash -o pipefail"), True),
+            ("feature: Bash stdin shell with -O", bash("feat", "printf x | bash -O extglob"), True),
+            ("feature: Bash stdin shell with --rcfile", bash("feat", "printf x | bash --rcfile /dev/null"), True),
+            ("feature: Bash stdin shell with -s --", bash("feat", "printf x | bash -s -- a"), True),
+            ("feature: Bash shell reading /dev/stdin", bash("feat", "printf x | bash /dev/stdin"), True),
+            ("feature: Bash dot /dev/stdin", bash("feat", "printf x | . /dev/stdin"), True),
+            ("feature: Bash source /dev/stdin", bash("feat", "printf x | source /dev/stdin"), True),
+            ("feature: Bash xargs -I{} as the git subcommand", bash("feat", "echo apply | xargs -I{} git {} y.diff"), True),
+            ("feature: Bash xargs adds the git subcommand", bash("feat", "echo apply y.diff | xargs git"), True),
+            ("feature: Bash find -exec with {} as the git subcommand", bash("feat", "find . -name apply -exec git {} y.diff \;"), True),
+            ("feature: Bash GIT_EDITOR runs a built command", bash("feat", "GIT_EDITOR='$(echo git) apply y.diff; :' git commit --amend"), True),
+            ("feature: Bash GIT_SEQUENCE_EDITOR from a variable", bash("feat", "GIT_SEQUENCE_EDITOR=\"$X\" git rebase -i HEAD~2"), True),
+            ("chore cwd: Bash a possible run reads a named diff's headers", bash("chore", "p$(echo at)ch -p0 -i cross.diff"), True),
+            ("feature: Bash allowed: find with a quoted glob", bash("feat", "find . -name '*.swift'"), False),
+            ("feature: Bash allowed: find -exec rm {}", bash("feat", "find . -name '*.orig' -exec rm {} \;"), False),
+            ("feature: Bash allowed: npm run with a quoted glob", bash("feat", "npm run 'test:*'"), False),
+            ("feature: Bash allowed: commit message with let", bash("feat", "git commit -m \"let users sign in\""), False),
+            ("feature: Bash allowed: rg for let", bash("feat", "rg 'let x' src"), False),
+            ("feature: Bash allowed: awk field subscript", bash("feat", "awk '{print a[$1]}' f"), False),
+            ("feature: Bash allowed: jq variable subscript", bash("feat", "jq '.a[$i]' f"), False),
+            ("feature: Bash allowed: commit message with hash x=1", bash("feat", "git commit -m \"hash x=1\""), False),
+            ("feature: Bash allowed: PR body with alias prose", bash("feat", "gh pr create --body \"alias a=git\""), False),
+            ("feature: Bash allowed: Swift heredoc body with let", bash("feat", "cat <<'EOF' > /dev/null\nlet x = [1]\nEOF"), False),
+            ("feature: Bash allowed: bash running a script file", bash("feat", "bash scripts/x.sh"), False),
         ]
         for label, payload, expect_block in cases:
             proc = subprocess.run(

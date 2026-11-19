@@ -500,3 +500,9 @@
 **Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel", 2026-11-18 "closed launcher list" and PR#140 Round 6/7 timeout entries; reparse every word and keep every scan linear
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs, real_command_index)
 **Caught by:** this review (Round confirm on a882ff1)
+
+## 2026-11-18 — PR#196 — Stricter assignment regex, quadratic flag loops and a split alias definition
+**What was wrong:** the a882ff1 fix added three bypasses: a stricter assignment regex stopped at the first `]`, so `a[$(echo 1)]=1 rm CLAUDE.md` ran unseen (regression); the widened `DEFAULT_EXPANSION` had two adjacent flag loops, so a 9 KB nested `${!!!...` ran 64-75 s, past the hook timeout (fails open); and `alias \<NL>a=git` split the alias definition past the check. Glob words behind a launcher, zsh `aliases[...]` and `hash -p` were not seen either.
+**Rule violated:** repeats the PR#140 timeout entries (keep every regex linear, one loop per character class) and the "closed alias list" half of the previous entry; a stricter parser rule needs a regression row for each shape it stops matching
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, DEFAULT_EXPANSION, ALIAS_DEFINITION, diff_apply_runs)
+**Caught by:** this review (Round confirm on d5e89cd)

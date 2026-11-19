@@ -524,3 +524,9 @@
 **Rule violated:** parse quotes with the one tokenizer the hook trusts, never a second regex; a fail-closed rule must cover the general form of a named repro (option clusters, path spellings), not the literal string; repeats the 2026-11-19 f69b07e entry
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, stdin_file, code_text, diff_apply_runs)
 **Caught by:** this review (Round confirm on c098069)
+
+## 2026-11-19 — PR#196 — The parser read shell comments as code
+**What was wrong:** `strip_heredocs_and_newlines()` and `tokenize()` had no notion of `#` comments, so `true # it's` NL `g$(echo it) apply x.diff` NL `true # it's` paired the two commented apostrophes into one quoted word and ran `git apply` unseen; `true # <<'E'` dropped the next lines as a heredoc body; a commented trailing backslash joined the next line into the comment; `echo hi # don't` false-blocked (pre-existing since the parser was written)
+**Rule violated:** the hook must read a command the way the shell reads it before applying any rule; every quote-pairing pass needs the shell's comment rule too
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines)
+**Caught by:** self-check while fixing the c098069 confirm (eighth session)

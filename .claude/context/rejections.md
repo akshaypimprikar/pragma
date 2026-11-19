@@ -494,3 +494,9 @@
 **Rule violated:** repeats the 2026-11-18 "Letter matching for a spelled `git`" entry; a command name the hook cannot read must count as a run
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs)
 **Caught by:** this review (Round confirm on e6aa65d)
+
+## 2026-11-18 — PR#196 — Command-word-only spelled-git check, cubic letter regex, `${=A:-git}`, alias list and `${HOME}` false block
+**What was wrong:** `may_name_git()` read only the command word, so `eval`, `find -exec`, `trap`, `| sh` and `env -S` ran a spelled `g${E}it${IFS}apply` unseen (regression from e6aa65d); its `g.*i.*t` regex was cubic, so a 12 KB word ran past the 60 s timeout and failed open; zsh `${=A:-git}` was skipped as an assignment; the closed alias-value regex leaked (`alias a=g''it`, `al''ias`); and `${HOME}/go/bin/gitleaks`-style paths false-blocked on every branch.
+**Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel", 2026-11-18 "closed launcher list" and PR#140 Round 6/7 timeout entries; reparse every word and keep every scan linear
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs, real_command_index)
+**Caught by:** this review (Round confirm on a882ff1)

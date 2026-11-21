@@ -554,3 +554,9 @@
 **Rule violated:** a shell-structure rule (loop, assignment, command position) must read the tokenizer words, never the raw text; repeats the 2026-11-19 "parse quotes with the one tokenizer" entry
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, loops_runs_name)
 **Caught by:** this review (scoped Round confirm on 3e7b192)
+
+## 2026-11-21 — PR#196 — A per-word tail scan made the for-loop check quadratic
+**What was wrong:** `loops_runs_name()` (c0f464a) sliced and scanned the rest of the segment for every `for` word, so `for ENV in ` x 32 KB took 12-20 s on /usr/bin/python3 (deadline 20 s, hook limit 60 s)
+**Rule violated:** every per-word check in the hook must be linear in the segment (precompute suffix state); repeats the PR#140 timeout entries
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (loops_runs_name)
+**Caught by:** this review (scoped Round confirm on c0f464a)

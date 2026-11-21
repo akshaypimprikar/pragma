@@ -155,6 +155,22 @@ class Api:
                 return out
             page += 1
 
+    def pr_files(self, number, changed_files):
+        """(file names incl. rename sources, changed line count) for a PR. GitHub's PR files API lists at most 3,000
+        files, so a listing shorter than the PR's `changed_files` is an error: the missing files could hold
+        pipeline-lane paths or lines past the small-PR limit."""
+        files, listed, changed_lines = [], 0, 0
+        for f in self.paged(f"/pulls/{number}/files"):
+            listed += 1
+            changed_lines += f.get("additions", 0) + f.get("deletions", 0)
+            files.append(f["filename"])
+            if f.get("previous_filename"):
+                files.append(f["previous_filename"])
+        if listed < changed_files:
+            raise ValueError(f"the PR files API listed {listed} of {changed_files} changed files; "
+                             "split the PR so every file can be laned")
+        return files, changed_lines
+
     def compare_files(self, base, head, require_ancestor=True):
         """Files changed base...head, or None when base is not an ancestor of head.
 
@@ -190,12 +206,7 @@ def main(argv=None):
         api = Api(args.repo, token)
         pr = api.get(f"/pulls/{args.pr}")
         head_sha, head, base = pr["head"]["sha"], lane_head(pr, args.repo), pr["base"]["ref"]
-        files, changed_lines = [], 0
-        for f in api.paged(f"/pulls/{args.pr}/files"):
-            changed_lines += f.get("additions", 0) + f.get("deletions", 0)
-            files.append(f["filename"])
-            if f.get("previous_filename"):
-                files.append(f["previous_filename"])
+        files, changed_lines = api.pr_files(args.pr, pr["changed_files"])
         release_changed = []
         if head.startswith("release/") and base == "main":
             release_changed = api.compare_files("develop", head_sha, require_ancestor=False)

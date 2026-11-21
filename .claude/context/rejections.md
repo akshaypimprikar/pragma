@@ -542,3 +542,9 @@
 **Rule violated:** every fail-closed widening needs a false-block sweep over common developer commands before it ships, not only bypass repros
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, RUNS_NAME_SET, code_text call, GLOB_DATA_TOOLS, sets_runs_name)
 **Caught by:** this review (scoped final Round confirm on 440aa92)
+
+## 2026-11-21 — PR#196 — Narrowing a fail-closed rule by anchoring reopened bypasses
+**What was wrong:** the 8fcc0cf narrowing anchored `for NAME in` to a few command starts and skipped `read` operands after any flag word, so `{ for GIT_EDITOR in ...`, `! for`, zsh `for NAME (...)`, `read -d -p GIT_EDITOR` and zsh `read -t NAME` set an editor unseen (regressions); `builds_command_name` searched the command once per name (12 s at 32 KB)
+**Rule violated:** narrow a fail-closed rule by what the matched text holds, not by where it starts; run the bypass repros of the rule being narrowed before shipping the narrowing
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, sets_runs_name, builds_command_name)
+**Caught by:** this review (scoped Round confirm on 8fcc0cf)

@@ -536,3 +536,9 @@
 **Rule violated:** a parse step that removes text must remove only what it is sure the shell ignores; when unsure, keep the text (over-reading can only block); repeats the 2026-11-19 comment-parsing entry
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines, code_text, sets_runs_name, defines_alias)
 **Caught by:** this review (Round confirm on a55f7ae)
+
+## 2026-11-20 — PR#196 — Fail-closed fixes over-reached into common commands
+**What was wrong:** the a55f7ae confirm fixes blocked ordinary commands on feature/*: a comment with an apostrophe after any `$(`/`${`/backtick on the line (`VERSION=$(cat VERSION) # don't touch`), `for ENV in dev prod`, `${ENV:-dev}` and commit prose naming `for PAGER`, quoted globs to cargo/go/mvn/gradle/rsync, `read -r -p "$PROMPT" ans`
+**Rule violated:** every fail-closed widening needs a false-block sweep over common developer commands before it ships, not only bypass repros
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, RUNS_NAME_SET, code_text call, GLOB_DATA_TOOLS, sets_runs_name)
+**Caught by:** this review (scoped final Round confirm on 440aa92)

@@ -548,3 +548,9 @@
 **Rule violated:** narrow a fail-closed rule by what the matched text holds, not by where it starts; run the bypass repros of the rule being narrowed before shipping the narrowing
 **File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, sets_runs_name, builds_command_name)
 **Caught by:** this review (scoped Round confirm on 8fcc0cf)
+
+## 2026-11-21 — PR#196 — A text regex for `for NAME in` failed both ways three rounds running
+**What was wrong:** the 3e7b192 `for` pattern dropped `"` from its value class, so `for GIT_EDITOR in "gi? apply x.diff;:"` set an editor unseen (regression), and, unanchored, it matched prose (`--body "use for PAGER and for ENV in CI"`)
+**Rule violated:** a shell-structure rule (loop, assignment, command position) must read the tokenizer words, never the raw text; repeats the 2026-11-19 "parse quotes with the one tokenizer" entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, loops_runs_name)
+**Caught by:** this review (scoped Round confirm on 3e7b192)

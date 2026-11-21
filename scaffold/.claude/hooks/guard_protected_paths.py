@@ -334,15 +334,17 @@ HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z_0-9]*)\1")
 def cut_comment(line, state, at_start=True):
     """(text, state, cut, heredocs) for one line. `text` is `line` up to a `#` that surely starts a shell comment:
     outside quotes, not escaped, at the line start (`at_start`: the previous line did not end in a continuation
-    backslash) or after unescaped whitespace, `;`, `&` or `|`, and before any `$(`, `${`, `<(`, `>(` or backtick on
-    the line (inside those the shell's word and quote rules nest, so nothing after one is cut; #196 confirm on a55f7ae:
-    `a\\ #x`, `$(echo a)#x`, a backtick body, `"${x:+"a #b"}"` were cut). `state` is (quote, depth): the quote open
-    at the end (`'`, `"`, `$'`) and the `$(` depth inside a double quote, carried to the next line. `heredocs` are the
+    backslash) or after unescaped whitespace, `;`, `&` or `|`, and not inside an unquoted backtick body or `${ }`, nor
+    after a backtick inside double quotes on the line (`$( )` and `${ }` inside double quotes are tracked by depth, so a
+    nested `"` does not close the outer quote; #196 confirm on a55f7ae:
+    `a\\ #x`, `$(echo a)#x`, a backtick body, `"${x:+"a #b"}"` were cut). Inside `$( )` the shell reads comments too. `state` is (quote, depth): the quote open
+    at the end (`'`, `"`, `$'`) and the `$(`/`${` depth inside a double quote, carried to the next line. `heredocs` are the
     offsets of each `<<` outside quotes and escapes, or inside a double-quoted `$( )` (`"$(cat <<'EOF'`), the only
     places a heredoc starts (`echo '<<E'` and `echo \\<<E` start none). Not cutting is the safe side: a comment
     read as code can only block."""
     quote, depth = state
     i, n, nested, heredocs = 0, len(line), False, []
+    backtick, braces = False, 0  # inside an unquoted backtick body or `${ }`, a `#` is data
     prev_break = at_start  # the next character starts a word
     while i < n:
         c = line[i]
@@ -358,12 +360,10 @@ def cut_comment(line, state, at_start=True):
             if c == "\\":
                 i += 1
             elif c == "$" and line[i + 1 : i + 2] in ("(", "{"):
-                nested = True
-                depth += line[i + 1] == "("
-                i += 1
+                depth, i = depth + 1, i + 1  # a `"` inside `"$( )"` or `"${x:+"a"}"` nests; it does not close
             elif c == "`":
                 nested = True
-            elif c == ")" and depth:
+            elif c in ")}" and depth:
                 depth -= 1
             elif c == "<" and depth and line[i + 1 : i + 2] == "<":
                 heredocs.append(i)
@@ -375,11 +375,15 @@ def cut_comment(line, state, at_start=True):
             quote, i = "$'", i + 1
         elif c in "'\"":
             quote = c
-        elif c == "`" or (c in "$<>" and line[i + 1 : i + 2] in ("(", "{") and (c == "$" or line[i + 1] == "(")):
-            nested = True
+        elif c == "`":
+            backtick = not backtick
+        elif c == "$" and line[i + 1 : i + 2] == "{":
+            braces, i = braces + 1, i + 1
+        elif c == "}" and braces:
+            braces -= 1
         elif c == "<" and line[i + 1 : i + 2] == "<":
             heredocs.append(i)
-        elif c == "#" and prev_break and not nested:
+        elif c == "#" and prev_break and not (nested or backtick or braces):
             return line[:i], (None, 0), True, heredocs
         else:
             breaks = c in " \t;&|"
@@ -732,7 +736,8 @@ RUNS_VALUE = re.compile(RUNS_NAME.pattern + r"\+?=")
 # builtins that set a variable named by an operand at run time (`printf -v GIT_EDITOR ...`, `read PAGER`)
 SETS_NAMED_VARIABLE = ("printf", "read", "mapfile", "readarray")
 # `for GIT_EDITOR in ...`, `${GIT_EDITOR:=...}`: other ways to set one (#196 confirm on a55f7ae)
-RUNS_NAME_SET = re.compile(r"(?<![\w.-])for\s+" + RUNS_NAME.pattern + r"(?!\w)|\$\{" + RUNS_NAME.pattern + r":?[=?+-]")
+RUNS_NAME_SET = re.compile(r"(?:^|[;&|(\n]|\bdo|\bthen)\s*for\s+" + RUNS_NAME.pattern + r"\s+in\s[^;\n]*[$`'\"\\]"
+                           r"|\$\{" + RUNS_NAME.pattern + r":?=")  # loop values built or quoted; `${X:-d}` sets nothing
 # xargs-style programs that are not wrappers: GNU parallel and its tools, Homebrew's GNU xargs
 ARGUMENT_FEEDERS = ("parallel", "sem", "env_parallel", "parset", "gxargs")
 
@@ -747,8 +752,8 @@ def sets_runs_name(cmd, args):
                 names.append(args[k + 1])
             elif w.startswith("-v") and len(w) > 2:
                 names.append(w[2:])
-        elif not w.startswith("-"):
-            names.append(w)
+        elif not w.startswith("-") and not (k and re.fullmatch(r"-[A-Za-z]*[pdntuiNkC]", args[k - 1])):
+            names.append(w)  # not the value of `read -p PROMPT`, `-d DELIM`, `-n N`, `-t T`, `-u FD`, `-i TEXT`
     return any(not literal_word(w) or RUNS_NAME.fullmatch(unquote(w)) for w in names)
 
 
@@ -819,14 +824,15 @@ GLOB_TEXT = re.compile(r"[*?\[{]")
 
 # programs whose arguments are package, script or test names or find tests, never re-parsed by a shell: a quoted glob
 # given to one is data (`npm run 'test:*'`, `swift test --filter 'App/*'`, `find -name '*.orig' -exec rm`)
-GLOB_DATA_TOOLS = frozenset(("find", "npm", "pnpm", "yarn", "swift", "pytest", "jest", "vitest", "brew", "pip", "pip3", "pod",
+GLOB_DATA_TOOLS = frozenset(("find", "cargo", "go", "mvn", "gradle", "gradlew", "rsync", "npm", "pnpm", "yarn", "swift", "pytest", "jest", "vitest", "brew", "pip", "pip3", "pod",
                              "fastlane", "bundle", "rake"))
 
 
 def code_text(text, first=False):
     """True if a quoted argument may be a command for a program that re-parses it: it holds SHELL_TEXT, or a glob
-    with a `/` or, when `first`, any glob (`ssh -p 22 h 'gi?' apply x.diff` once a `git` file exists; #196 confirm on
-    a55f7ae). diff_apply_runs() passes `first` for every program outside GLOB_DATA_TOOLS and reads no glob for those."""
+    with a `/` (`ssh h '/usr/bin/gi?' apply x.diff`) or as the first non-option operand (`watch -n1 'gi?' apply`).
+    diff_apply_runs() reads no glob for GLOB_DATA_TOOLS. A glob with no `/` later in the line is not read
+    (`ssh -p 22 h '[g]it' apply`, once a file named `git` exists: a documented gap)."""
     return bool(SHELL_TEXT.search(text) or (GLOB_TEXT.search(text) and ("/" in text or first)))
 
 
@@ -1149,10 +1155,11 @@ def diff_apply_runs(command, _depth=0):
         if not runs_arguments(cmd, operands):
             continue
         args = raw_operands(words[idx + 1 :])
-        for w in args:
+        first = next((k for k, w in enumerate(args) if not unquote(w).startswith("-")), None)
+        for k, w in enumerate(args):
             if not literal_word(w):
                 possible = possible or f"a word built by the shell is given to `{cmd}`, which may run it"
-            elif unquote(w) != w and (SHELL_TEXT.search(unquote(w)) if cmd in GLOB_DATA_TOOLS else code_text(unquote(w), True)):
+            elif unquote(w) != w and (SHELL_TEXT.search(unquote(w)) if cmd in GLOB_DATA_TOOLS else code_text(unquote(w), k == first)):
                 visit(unquote(w))  # `bash -c '...'`, `eval '...'`, `trap '...' EXIT`: parsed as commands
     return runs, dirs, possible
 
@@ -3102,7 +3109,14 @@ def self_test():
             ("feature: Bash # in nested quotes of ${x:+}", bash("feat", "echo \"x\" \"${x:+\"a #b\"}\"; echo y > CLAUDE.md"), True),
             ("feature: Bash single-quoted <<E starts no heredoc", bash("feat", "echo '<<E'\necho y > CLAUDE.md\nE"), True),
             ("feature: Bash escaped <<E starts no heredoc", bash("feat", "echo \\<<E\necho y > CLAUDE.md\nE"), True),
-            ("feature: Bash ssh quoted glob without a slash", bash("feat", "touch git; ssh -p 22 localhost '[g]it' apply y.diff"), True),
+            ("feature: Bash allowed: comment after a substitution", bash("feat", "VERSION=$(cat VERSION) # don't touch"), False),
+            ("feature: Bash allowed: comment after a quoted substitution", bash("feat", "git commit -m \"x $(date) ${HOME}\" # it's"), False),
+            ("feature: Bash allowed: for over plain words", bash("feat", "for ENV in dev prod; do echo $ENV; done"), False),
+            ("feature: Bash allowed: ${ENV:-dev} default", bash("feat", "echo ${ENV:-dev}"), False),
+            ("feature: Bash allowed: commit message naming for PAGER", bash("feat", "git commit -m \"add fallback for PAGER\""), False),
+            ("feature: Bash allowed: cargo test glob", bash("feat", "cargo test 'foo*'"), False),
+            ("feature: Bash allowed: gradlew tests glob", bash("feat", "./gradlew test --tests 'x*'"), False),
+            ("feature: Bash allowed: read -p with a built prompt", bash("feat", "read -r -p \"$PROMPT\" ans"), False),
             ("feature: Bash gxargs placeholder", bash("feat", "echo apply | gxargs -I{} git {} y.diff"), True),
             ("feature: Bash for sets GIT_EDITOR", bash("feat", "for GIT_EDITOR in '$(echo git) apply y.diff; :'; do export GIT_EDITOR; git commit --amend; done"), True),
             ("feature: Bash printf -v with a built name", bash("feat", "v=GIT_EDITOR; printf -v $v '%s' '$(echo git) apply y.diff; :'; git commit --amend"), True),

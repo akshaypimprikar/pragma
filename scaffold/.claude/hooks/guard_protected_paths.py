@@ -736,8 +736,10 @@ RUNS_VALUE = re.compile(RUNS_NAME.pattern + r"\+?=")
 # builtins that set a variable named by an operand at run time (`printf -v GIT_EDITOR ...`, `read PAGER`)
 SETS_NAMED_VARIABLE = ("printf", "read", "mapfile", "readarray")
 # `for GIT_EDITOR in ...`, `${GIT_EDITOR:=...}`: other ways to set one (#196 confirm on a55f7ae)
-RUNS_NAME_SET = re.compile(r"(?:^|[;&|(\n]|\bdo|\bthen)\s*for\s+" + RUNS_NAME.pattern + r"\s+in\s[^;\n]*[$`'\"\\]"
-                           r"|\$\{" + RUNS_NAME.pattern + r":?=")  # loop values built or quoted; `${X:-d}` sets nothing
+# a `for` anywhere (`{ for`, `! for`, `time for`), with values holding code characters, or zsh's `for NAME (...)`; prose
+# such as `-m "use for ENV in CI"` has none of `$`, backtick, `'`, `\` or `(` after `in`. `${X:-d}` sets nothing.
+RUNS_NAME_SET = re.compile(r"(?<![\w.-])for\s+" + RUNS_NAME.pattern + r"(?:\s+in\s[^;\n]*[$`'\\(]|\s*\()"
+                           r"|\$\{" + RUNS_NAME.pattern + r":?=")
 # xargs-style programs that are not wrappers: GNU parallel and its tools, Homebrew's GNU xargs
 ARGUMENT_FEEDERS = ("parallel", "sem", "env_parallel", "parset", "gxargs")
 
@@ -745,16 +747,24 @@ ARGUMENT_FEEDERS = ("parallel", "sem", "env_parallel", "parset", "gxargs")
 def sets_runs_name(cmd, args):
     """True if `printf -v NAME` (or `-vNAME`), or a `read`/`mapfile`/`readarray` NAME operand, is a RUNS_NAME or a word
     built by the shell (`v=GIT_EDITOR; printf -v $v ...`). printf's other operands are data (`printf %s PAGER`)."""
-    names = []
-    for k, w in enumerate(args):
-        if cmd == "printf":
-            if w == "-v" and k + 1 < len(args):
-                names.append(args[k + 1])
-            elif w.startswith("-v") and len(w) > 2:
-                names.append(w[2:])
-        elif not w.startswith("-") and not (k and re.fullmatch(r"-[A-Za-z]*[pdntuiNkC]", args[k - 1])):
-            names.append(w)  # not the value of `read -p PROMPT`, `-d DELIM`, `-n N`, `-t T`, `-u FD`, `-i TEXT`
-    return any(not literal_word(w) or RUNS_NAME.fullmatch(unquote(w)) for w in names)
+    if cmd == "printf":
+        names = [args[k + 1] for k, w in enumerate(args[:-1]) if w == "-v"] + [w[2:] for w in args if w.startswith("-v") and len(w) > 2]
+        return any(not literal_word(w) or RUNS_NAME.fullmatch(unquote(w)) for w in names)
+    # read/mapfile: any operand naming a RUNS_NAME counts, option values included (`read -d -p GIT_EDITOR`; zsh's
+    # `-t`/`-n` take no value). Only the built-word test skips the values of bash's `-p`/`-d`/`-n`/`-t`/`-u`/`-i`
+    # (`read -r -p "$PROMPT" ans`), consumed in order so a flag-looking value does not hide the next name.
+    if any(RUNS_NAME.fullmatch(unquote(w)) for w in args):
+        return True
+    k = 0
+    while k < len(args):
+        w = args[k]
+        if re.fullmatch(r"-[A-Za-z]*[pdntuiNkC]", w):
+            k += 2
+            continue
+        if not w.startswith("-") and not literal_word(w):
+            return True
+        k += 1
+    return False
 
 
 def quote_parts(command):
@@ -1659,16 +1669,19 @@ def builds_command_name(command):
     `printf -v a ...; $a`, `read a; $a`), or positional parameters after a `set`: the name it runs is built
     in the command, so it can't be read. `$EDITOR f` or `"$HOME/bin/x"` (set elsewhere) stay readable."""
     tokens = tokenize(command)
+    # every bare name in the command, collected once (a search per `${x-` name was quadratic: 12 s at 32 KB;
+    # #196 confirm on 8fcc0cf)
+    bare = set(re.findall(r"(?<![$\w{!])[A-Za-z_]\w*", command))
+    sets_positional = re.search(r"(?:^|[\s;&|(])set\s", command) is not None
     for item in split_segments(tokens or []):
         if item[0] != "cmd":
             continue
         idx = real_command_index(item[1])
         word = item[1][idx] if idx is not None else ""
         for name in re.findall(r"\$\{?!?([A-Za-z_]\w*|[0-9@*])", word):
-            if not name[0].isalpha() and name[0] != "_":
-                if re.search(r"(?:^|[\s;&|(])set\s", command):
-                    return True
-            elif re.search(rf"(?<![$\w{{!]){name}\b", command):
+            if (not name[0].isalpha() and name[0] != "_") and sets_positional:
+                return True
+            if name in bare:
                 return True
     return False
 
@@ -3117,6 +3130,9 @@ def self_test():
             ("feature: Bash allowed: cargo test glob", bash("feat", "cargo test 'foo*'"), False),
             ("feature: Bash allowed: gradlew tests glob", bash("feat", "./gradlew test --tests 'x*'"), False),
             ("feature: Bash allowed: read -p with a built prompt", bash("feat", "read -r -p \"$PROMPT\" ans"), False),
+            ("feature: Bash for GIT_EDITOR inside braces", bash("feat", "{ for GIT_EDITOR in '$(echo git) apply y.diff;:'; do export GIT_EDITOR; git commit --amend; done; }"), True),
+            ("feature: Bash read -d -p NAME", bash("feat", "read -d -p GIT_EDITOR <<< '$(echo git) apply y.diff;:'; export GIT_EDITOR; git commit --amend"), True),
+            ("feature: Bash zsh for NAME (...)", bash("feat", "for GIT_EDITOR ('$(echo git) apply y.diff;:') { export GIT_EDITOR; git commit --amend }"), True),
             ("feature: Bash gxargs placeholder", bash("feat", "echo apply | gxargs -I{} git {} y.diff"), True),
             ("feature: Bash for sets GIT_EDITOR", bash("feat", "for GIT_EDITOR in '$(echo git) apply y.diff; :'; do export GIT_EDITOR; git commit --amend; done"), True),
             ("feature: Bash printf -v with a built name", bash("feat", "v=GIT_EDITOR; printf -v $v '%s' '$(echo git) apply y.diff; :'; git commit --amend"), True),

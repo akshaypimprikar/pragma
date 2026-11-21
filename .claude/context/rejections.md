@@ -350,3 +350,213 @@
 **Rule violated:** no formal rule, caught in review
 **File:** scripts/check_gates.sh:48
 **Caught by:** this review
+
+## 2026-11-16 — PR#196 — git apply/patch option parser missed short-option clusters and abbreviations (repeats PR#147)
+**What was wrong:** `diff_write_targets` read `w[:2]` as the option name, so `git apply -vp0`, `git apply --direc=.claude`, `patch --dir=.claude -p0` and `patch -sd .claude -p0` applied a diff to protected paths with exit 0 (verified against real git and Apple patch). Same miss as the 2026-11-05 PR#147 rg short-option-cluster entry. Resolved by not parsing diffs at all: any write-capable run is blocked on feature/* (Akshay, 2026-11-16).
+**Rule violated:** repeats the 2026-11-05 PR#147 entry; no formal rule beyond that entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:583
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — Diff reader failed open on /dev/stdin, expanded heredocs, Index: headers, a non-ASCII -p digit and long headers
+**What was wrong:** `read_diff` read `/dev/stdin` as an empty diff; `<<< "$(cat x.diff)"` and unquoted heredocs were read literally; `Index:`/`*** name` headers were not parsed; `-p²` raised `ValueError` and `main()` allowed the whole command; `diff_paths` with no `-p` was quadratic, so a 30 KB heredoc timed the hook out. Each exits 0 with a diff touching CLAUDE.md. Resolved by the same block-on-feature decision.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:545
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — Self-test f-string is a SyntaxError on Python 3.9, so the hook failed open on load
+**What was wrong:** `f'cd "{repos['space']}" ...'` reuses the quote inside an f-string, valid only from Python 3.12. `/usr/bin/python3` on macOS is 3.9.6; the hook exited 1 on load, which Claude Code treats as non-blocking, so every tool call was allowed.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:1670
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — cd_dirs missed real directory changes (HOME/CDPATH, bash -c, eval, env -C, reassigned variables)
+**What was wrong:** `HOME=<repo>; cd ~`, `CDPATH=<dir> cd x`, `bash -c 'cd <repo> && ...'`, `eval 'cd ...'`, `env -C <repo>`, and a variable assigned twice or set by `for`/`read` all moved a shell-run patch into a feature repo with exit 0; `cd $d && git apply` used the old cd handling. Fixed: those cases, and any variable in a cd target, are unresolved and block.
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py:1181
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — CHANGELOG/docstring overclaimed diff reading and cd $VAR coverage (repeats PR#140 R6, PR#148 R1)
+**What was wrong:** the CHANGELOG said the hook reads every diff and blocks one it can't read, and that `cd $VAR` is expanded or blocked; the bypasses above made both false. `gates/reference.md` had the matching wording.
+**Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
+**File:** CHANGELOG.md:8
+**Caught by:** this review
+
+## 2026-11-16 — PR#196 — git apply read-only check matched --check in a comment, after --, or as an option value
+**What was wrong:** `git apply x.diff # --check`, `git apply --exclude --check x.diff` and `git apply x.diff -- --check` counted as read-only because any `--check`/`--stat` word did, so each wrote CLAUDE.md on feature/* with exit 0. Fixed: #140's model; `git apply` is read-only only when every word is on a short allowlist (no `#`, `--`, or other option).
+**Rule violated:** no formal rule, caught in review (a "this flag makes it safe" check must also prove nothing else on the line undoes it)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (read_only_segment)
+**Caught by:** this review (Round 2, N1)
+
+## 2026-11-16 — PR#196 — git alias set in the same command ran git apply unseen
+**What was wrong:** `git config alias.p apply; git p x.diff` applied a diff on feature/* with exit 0, while the CHANGELOG listed only an alias set outside the command as unseen. Fixed: a command whose text has `git` then `apply`/`am` is a possible run, as are `--config-env`, unknown global options and `GIT_CONFIG_*`.
+**Rule violated:** repeats the PR#140 lesson: a denylist of ways to run a tool keeps leaking; name-in-text plus a read-only allowlist does not
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (DIFF_TOOL_NAME, diff_apply_dirs)
+**Caught by:** this review (Round 2, N2)
+
+## 2026-11-16 — PR#196 — reference.md said the hook allows every edit off feature/*, and the Not seen lists were incomplete (repeats PR#140 R6, PR#148 R1)
+**What was wrong:** an unresolved `cd` before a patch tool blocks on every branch, and wrappers, zsh `chdir`, `xargs -I`, `--config-env` and cross-repo diff paths were missing from the "Not seen" lists in the CHANGELOG and `gates/reference.md`.
+**Rule violated:** repeats the PR#140 Round 6 and PR#148 Round 1 CHANGELOG-overclaim entries
+**File:** .claude/skills/gates/reference.md:65
+**Caught by:** this review (Round 2, N3)
+
+## 2026-11-16 — PR#196 — Diff-header read skipped attached and quoted file names (confirm F1, F2)
+**What was wrong:** `diff_header_dirs` opened only whitespace-split words, so `patch -p0 -icross.diff`, `-i "cross".diff` and `patch -p0 < "space dir.diff"` applied a diff naming `../feat/CLAUDE.md` from a chore cwd with exit 0. Fixed in bdf79f1 (`command_words()`).
+**Rule violated:** no formal rule, caught in review
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs)
+**Caught by:** this review (Round confirm)
+
+## 2026-11-16 — PR#196 — Unbounded diff-header work let the hook time out and fail open (confirm F3)
+**What was wrong:** each absolute or `..` header name was resolved against every checked directory with an uncached parent walk; two sub-1 MB diffs with ~140k names ran 69 s. Fixed in bdf79f1 (512-name cap, cached `existing_dir()`).
+**Rule violated:** repeats this PR's N7 (one subprocess/walk per directory, no bound): every new loop over command input needs a work budget
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs)
+**Caught by:** this review (Round confirm)
+
+## 2026-11-17 — PR#196 — `git${IFS}apply` ran git apply on feature/* unseen
+**What was wrong:** `DIFF_TOOL_NAME` needed whitespace after `git`, and the tokenizer reads `git${IFS}apply` as one word (zsh `git${=IFS}apply` even as an assignment), so neither the text match nor `diff_apply_dirs` saw a run; the zsh form overwrote a feature repo's `CLAUDE.md` with exit 0.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Relative and symlinked diff-header names reached a feature repo
+**What was wrong:** `diff_header_dirs` read only absolute or `..` header names and `resolve()` is lexical, so `patch -p0`/`git apply` of a diff naming `feat/CLAUDE.md` from a non-repo parent folder, a diff naming `lnk2/CLAUDE.md` through a symlink in a chore repo, and `git -C lnk/.. apply` all wrote into a `feature/*` repo with exit 0.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_header_dirs, named_dirs)
+**Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Docs said only a variable-named diff file blocks on every branch (repeats PR#163, PR#214)
+**What was wrong:** CHANGELOG and `gates/reference.md` said "a file named through a variable or `$( )`" is blocked unread on every branch, but any `$` or backtick outside single quotes in a command naming a patch tool blocks there (`npm version patch -m "v$V"`); `reference.md` also said "one exception" and then listed several.
+**Rule violated:** repeats the 2026-10-07 PR#163 and 2026-11-11 PR#214 entries (CHANGELOG states a blocking rule without its exceptions)
+**File:** CHANGELOG.md:10, .claude/skills/gates/reference.md:65
+**Caught by:** financetracker-ios#234 round-1 review of the same hook
+
+## 2026-11-17 — PR#196 — Uncached realpath let a deep-tree patch-tool check outrun the hook timeout (repeats PR#140)
+**What was wrong:** bd0e046's `resolve_both()` called `os.path.realpath` per path inside loops capped only by item count (MAX_WORD_WORK, MAX_HEADER_WORK), not path depth; a ~290-deep cwd with 1,000 words ran 112 s and deep `a/a/.../../n` header names over 82 s, past the 60 s hook timeout, which fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (resolve_both, named_dirs, diff_header_dirs)
+**Caught by:** this review (Round confirm on acdbbd8) and financetracker-ios#234 round 2
+
+## 2026-11-17 — PR#196 — `git${IFS}apply` behind find -exec, watch or parallel still ran unseen
+**What was wrong:** bd0e046 checked for a `$`-built `git` word only up to the parsed command word, so `find . -exec git${IFS}apply x.diff ';'`, `watch`, `parallel` and `chronic` forms exited 0 on feature/* and wrote `CLAUDE.md`.
+**Rule violated:** no formal rule, caught in review (guard bypass)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** financetracker-ios#234 round 2 review of the same hook
+
+## 2026-11-17 — PR#196 — Repo walk after the 20 s deadline still let the hook run past its timeout (repeats PR#140)
+**What was wrong:** 8f9a901's deadline guarded only `resolve_both`/`existing_dir`; the later `for d in dirs` loop ran an uncached `repo_root` per (duplicated) directory, so `patch` + `-da ` x 8000 from a 430-deep cwd ran over 70 s and fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate repo walk)
+**Caught by:** this review (Round confirm on 2d71985)
+
+## 2026-11-18 — PR#196 — Write-target loop had no deadline, so the hook could still run past its timeout (repeats PR#140)
+**What was wrong:** the final `for abs_path, kind in candidates` loop ran a `git rev-parse` per write target with no dedupe and no deadline; `>CLAUDE.md;` x2800 plus a write to a feature repo's CLAUDE.md (30.9 KB) from a 430-deep chore cwd ran over 70 s, so the protected write fails open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate write-target loop)
+**Caught by:** this review (Round confirm on b337612)
+
+## 2026-11-18 — PR#196 — Narrowing the `git$` match to absolute paths let relative and `~` paths through
+**What was wrong:** ace1300's `(?:/[^$`]*/)?git[$`]` only matched a leading `/`, so `cd /usr/bin && ./git${IFS}apply x.diff` and `xargs ~/git${IFS}apply x` exited 0 on feature/*; the earlier basename check blocked them.
+**Rule violated:** a false-block fix must not reopen a bypass the previous form closed
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** this review (Round confirm on b337612)
+
+## 2026-11-18 — PR#196 — Shell apply_patch names x directories built before any deadline (repeats PR#140)
+**What was wrong:** `patch_targets` built every (name, directory) pair before `dirs` was deduped or any deadline applied; 3,000 `cd .;` plus an 800-name `apply_patch` heredoc from a 430-deep cwd took 99 s on `/usr/bin/python3`, so the hook timed out and failed open.
+**Rule violated:** repeats the 2026-11-03 PR#140 Round 6/7 entries and the 2026-11-17/18 timeout entries (super-linear work lets a hook timeout fail open)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (evaluate, patch_targets)
+**Caught by:** this review (Round confirm on c7c66c0)
+
+## 2026-11-18 — PR#196 — Documented a reopened bypass instead of closing it
+**What was wrong:** c7c66c0 listed `find . -exec bin/git${IFS}apply` as "not seen"; `eval`, `find -exec`, `watch` and `parallel` with a bare relative path to a `$`-built git ran unseen on feature/* and changed CLAUDE.md, though the hook before ace1300 blocked them.
+**Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel" entry and the 2026-11-18 "a false-block fix must not reopen a bypass the previous form closed" rule
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** this review (Round confirm on c7c66c0)
+
+## 2026-11-18 — PR#196 — A closed launcher list for the `git$` word check kept leaking
+**What was wrong:** f4791d5 checked `git$` words only after `eval`/`watch`/`parallel`/`find -exec`; `trap`, `fd -x`, `entr` and quotes inside an eval string (`bin/g''it\${IFS}apply`) still ran unseen on feature/*.
+**Rule violated:** pragma #140's lesson (a denylist of ways to run a tool keeps leaking; fail closed instead)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs)
+**Caught by:** background security scan on f4791d5
+
+## 2026-11-18 — PR#196 — `git$` word check missed decoded, expanded and slash-split spellings
+**What was wrong:** the `git$` word check matched the raw basename only, so `$'git'${IFS}apply`, `$"git"${IFS}apply`, `g${EMPTY}it${IFS}apply`, `gi{t,}${IFS}apply`, `g$(:)it${IFS}apply` and `git${IFS//x/}apply` (basename `}apply`) ran unseen on feature/*.
+**Rule violated:** pragma #140's lesson (normalize the way the shell does, or fail closed; names_tool() already did for apply_patch)
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (diff_apply_dirs, diff_apply_runs)
+**Caught by:** background security scans on ac8a069
+
+## 2026-11-18 — PR#196 — Letter matching for a spelled `git` missed default text and options
+**What was wrong:** the `gitapply`/`gitam` letter match dropped `${X:-text}` default text and needed `apply` right after `git`: `${E:-git}${IFS}apply`, `gi${E:-t}${IFS}apply` and `g${E}it${IFS}-C${IFS}<feature repo>${IFS}apply` ran unseen (cross-repo from a chore cwd too), and `$` words like `git-amend` false-blocked on every branch.
+**Rule violated:** repeats the 2026-11-18 "`git$` word check missed decoded, expanded and slash-split spellings" entry; normalize like the shell, then parse, instead of matching letters
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (shell_variants, diff_apply_runs)
+**Caught by:** this review (Round confirm on 45e9a30)
+
+## 2026-11-18 — PR#196 — Two fixed readings of a `$`-built command missed run-time git names, and the depth cap failed open
+**What was wrong:** the reparse of two fixed variants missed a `git` name built from mixed `:-`/`:+` defaults, `${1:-git}`/`${A[0]:-git}`/`${!A:-git}`/zsh flags, an escaped `}`, a line continuation, `${E:-git} "$@"`, an unquoted `$( )` (regression), and three `bash -c` levels (depth cap failed open, regression); an alias on its own line was not seen either.
+**Rule violated:** repeats the 2026-11-18 "Letter matching for a spelled `git`" entry; a command name the hook cannot read must count as a run
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs)
+**Caught by:** this review (Round confirm on e6aa65d)
+
+## 2026-11-18 — PR#196 — Command-word-only spelled-git check, cubic letter regex, `${=A:-git}`, alias list and `${HOME}` false block
+**What was wrong:** `may_name_git()` read only the command word, so `eval`, `find -exec`, `trap`, `| sh` and `env -S` ran a spelled `g${E}it${IFS}apply` unseen (regression from e6aa65d); its `g.*i.*t` regex was cubic, so a 12 KB word ran past the 60 s timeout and failed open; zsh `${=A:-git}` was skipped as an assignment; the closed alias-value regex leaked (`alias a=g''it`, `al''ias`); and `${HOME}/go/bin/gitleaks`-style paths false-blocked on every branch.
+**Rule violated:** repeats the 2026-11-17 "`git${IFS}apply` behind find -exec, watch or parallel", 2026-11-18 "closed launcher list" and PR#140 Round 6/7 timeout entries; reparse every word and keep every scan linear
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (may_name_git, diff_apply_runs, real_command_index)
+**Caught by:** this review (Round confirm on a882ff1)
+
+## 2026-11-18 — PR#196 — Stricter assignment regex, quadratic flag loops and a split alias definition
+**What was wrong:** the a882ff1 fix added three bypasses: a stricter assignment regex stopped at the first `]`, so `a[$(echo 1)]=1 rm CLAUDE.md` ran unseen (regression); the widened `DEFAULT_EXPANSION` had two adjacent flag loops, so a 9 KB nested `${!!!...` ran 64-75 s, past the hook timeout (fails open); and `alias \<NL>a=git` split the alias definition past the check. Glob words behind a launcher, zsh `aliases[...]` and `hash -p` were not seen either.
+**Rule violated:** repeats the PR#140 timeout entries (keep every regex linear, one loop per character class) and the "closed alias list" half of the previous entry; a stricter parser rule needs a regression row for each shape it stops matching
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, DEFAULT_EXPANSION, ALIAS_DEFINITION, diff_apply_runs)
+**Caught by:** this review (Round confirm on d5e89cd)
+
+## 2026-11-19 — PR#196 — Subscript tail after `${...}` hid the command, and the glob scan was quadratic
+**What was wrong:** the restored assignment skip did not skip `${x}]=1` (the tail of `a[$(echo 1)${x}]=1` after the tokenizer split at `(`), so `a[$(echo 1)${x}]=1 rm CLAUDE.md` ran unseen; `glob_names_tool()`'s fnmatch was quadratic on `[a` runs, so 3 `bash -c` levels of 32 KB took 59 s on Python 3.9 (the hook fails open at 60 s); zsh `=rm`, `/bin/r[m=]`, command tables (`BASH_CMDS`, zsh `commands[`/`functions[`/`galiases[`), `hash name=value` and a quoted `eval` glob string also ran unseen
+**Rule violated:** repeats the 2026-11-18 "Stricter assignment regex" entry and the PR#140 timeout entries; after ~10 confirm rounds of letter matching, Akshay chose a fail-closed redesign (a command the hook can't read in full is a possible run) instead of another targeted round
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (real_command_index, glob_names_tool, ALIAS_DEFINITION, diff_apply_runs)
+**Caught by:** this review (Round confirm on c0fade2) and background security scans on acd9427/c0fade2
+
+## 2026-11-19 — PR#196 — The fail-closed redesign read one alias word and missed stdin shells with options
+**What was wrong:** `defines_alias()` read only the first `alias`/`hash` word in a command part, so `FOO=alias hash -p /usr/bin/git g; g apply x.diff` ran unseen (regression from c0fade2); the stdin-shell rule treated an option argument (`bash -o pipefail`, `-O extglob`, `--rcfile F`), `-s --` or `/dev/stdin` as a script, so a piped spelled `git apply` ran unseen; `echo apply | xargs -I{} git {} x.diff` passed (regression); `COMMAND_TABLE` was quadratic (19.6 s on 3.9); `find` was missing from the no-exec list and `let`/`hash`/subscript forms in quoted prose blocked on feature/*
+**Rule violated:** a fail-closed rule must fail closed on every shape it does not parse (an option it does not model counts as a script it cannot read); repeats the PR#140 timeout entries (no `\w*` prefix before a literal) and the 2026-11-18 "closed alias list" entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, COMMAND_TABLE, eval_form, diff_apply_runs)
+**Caught by:** this review (Round confirm on f69b07e)
+
+## 2026-11-19 — PR#196 — Regex quote stripping and exact option words reopened confirmed bypasses
+**What was wrong:** `defines_alias()` dropped "quoted strings holding a space" with regexes that did not track the open quote, so `echo "it's"; hash -p /usr/bin/git g; echo "it's"; g apply x.diff` paired the two apostrophes and hid the definition (regression from f69b07e); the stdin-shell rule matched only exact `-o`/`-O` words and literal `/dev/stdin`, so `bash -euo pipefail`, `/dev/./stdin` and `///dev/stdin` read a piped spelled `git apply` unseen (confirm8 HIGH 2 named `-euo pipefail`); removing glob characters from `SHELL_TEXT` let `ssh h '/usr/bin/gi?' apply x.diff` pass (regression)
+**Rule violated:** parse quotes with the one tokenizer the hook trusts, never a second regex; a fail-closed rule must cover the general form of a named repro (option clusters, path spellings), not the literal string; repeats the 2026-11-19 f69b07e entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (defines_alias, reads_stdin_script, stdin_file, code_text, diff_apply_runs)
+**Caught by:** this review (Round confirm on c098069)
+
+## 2026-11-19 — PR#196 — The parser read shell comments as code
+**What was wrong:** `strip_heredocs_and_newlines()` and `tokenize()` had no notion of `#` comments, so `true # it's` NL `g$(echo it) apply x.diff` NL `true # it's` paired the two commented apostrophes into one quoted word and ran `git apply` unseen; `true # <<'E'` dropped the next lines as a heredoc body; a commented trailing backslash joined the next line into the comment; `echo hi # don't` false-blocked (pre-existing since the parser was written)
+**Rule violated:** the hook must read a command the way the shell reads it before applying any rule; every quote-pairing pass needs the shell's comment rule too
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines)
+**Caught by:** self-check while fixing the c098069 confirm (eighth session)
+
+## 2026-11-19 — PR#196 — The comment cut trusted the previous raw character
+**What was wrong:** `cut_comment()` (a55f7ae) cut at a `#` after an escaped space or `;`, after a continuation, after `$( )`/`<( )`, inside backticks and inside nested `"${x:+"..."}"` quotes, dropping commands bash runs (`echo a\ #x; git apply x.diff`, regression); a quoted or escaped `<<E` still dropped the next lines as a heredoc (pre-existing); quoted globs with no `/` after an ssh host, `gxargs`/`sem`, `for GIT_EDITOR in`, `${GIT_EDITOR:=}` and built `printf -v` names were not read
+**Rule violated:** a parse step that removes text must remove only what it is sure the shell ignores; when unsure, keep the text (over-reading can only block); repeats the 2026-11-19 comment-parsing entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, strip_heredocs_and_newlines, code_text, sets_runs_name, defines_alias)
+**Caught by:** this review (Round confirm on a55f7ae)
+
+## 2026-11-20 — PR#196 — Fail-closed fixes over-reached into common commands
+**What was wrong:** the a55f7ae confirm fixes blocked ordinary commands on feature/*: a comment with an apostrophe after any `$(`/`${`/backtick on the line (`VERSION=$(cat VERSION) # don't touch`), `for ENV in dev prod`, `${ENV:-dev}` and commit prose naming `for PAGER`, quoted globs to cargo/go/mvn/gradle/rsync, `read -r -p "$PROMPT" ans`
+**Rule violated:** every fail-closed widening needs a false-block sweep over common developer commands before it ships, not only bypass repros
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (cut_comment, RUNS_NAME_SET, code_text call, GLOB_DATA_TOOLS, sets_runs_name)
+**Caught by:** this review (scoped final Round confirm on 440aa92)
+
+## 2026-11-21 — PR#196 — Narrowing a fail-closed rule by anchoring reopened bypasses
+**What was wrong:** the 8fcc0cf narrowing anchored `for NAME in` to a few command starts and skipped `read` operands after any flag word, so `{ for GIT_EDITOR in ...`, `! for`, zsh `for NAME (...)`, `read -d -p GIT_EDITOR` and zsh `read -t NAME` set an editor unseen (regressions); `builds_command_name` searched the command once per name (12 s at 32 KB)
+**Rule violated:** narrow a fail-closed rule by what the matched text holds, not by where it starts; run the bypass repros of the rule being narrowed before shipping the narrowing
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, sets_runs_name, builds_command_name)
+**Caught by:** this review (scoped Round confirm on 8fcc0cf)
+
+## 2026-11-21 — PR#196 — A text regex for `for NAME in` failed both ways three rounds running
+**What was wrong:** the 3e7b192 `for` pattern dropped `"` from its value class, so `for GIT_EDITOR in "gi? apply x.diff;:"` set an editor unseen (regression), and, unanchored, it matched prose (`--body "use for PAGER and for ENV in CI"`)
+**Rule violated:** a shell-structure rule (loop, assignment, command position) must read the tokenizer words, never the raw text; repeats the 2026-11-19 "parse quotes with the one tokenizer" entry
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (RUNS_NAME_SET, loops_runs_name)
+**Caught by:** this review (scoped Round confirm on 3e7b192)
+
+## 2026-11-21 — PR#196 — A per-word tail scan made the for-loop check quadratic
+**What was wrong:** `loops_runs_name()` (c0f464a) sliced and scanned the rest of the segment for every `for` word, so `for ENV in ` x 32 KB took 12-20 s on /usr/bin/python3 (deadline 20 s, hook limit 60 s)
+**Rule violated:** every per-word check in the hook must be linear in the segment (precompute suffix state); repeats the PR#140 timeout entries
+**File:** scaffold/.claude/hooks/guard_protected_paths.py (loops_runs_name)
+**Caught by:** this review (scoped Round confirm on c0f464a)

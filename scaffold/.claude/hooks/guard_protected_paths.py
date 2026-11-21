@@ -745,10 +745,14 @@ def loops_runs_name(words):
     (zsh `for NAME (...)`, `for NAME; do` over "$@"). Read from tokenize() words, so prose in a quoted string is one
     word and never a `for` (#196 confirm on 3e7b192: text regexes either missed `{ for`, `"..."` values or matched
     `-m "use for ENV in CI"`). `for ENV in dev prod` loops over literal words and is fine."""
+    # coded[k]: some word at k or later is quoted or built; one backward pass keeps it linear (`for ENV in ` x 32 KB
+    # sliced the tail per `for` and took 20 s; #196 confirm on c0f464a)
+    coded = [False] * (len(words) + 1)
+    for k in range(len(words) - 1, -1, -1):
+        coded[k] = coded[k + 1] or not literal_word(words[k]) or unquote(words[k]) != words[k]
     for j, w in enumerate(words[:-1]):
         if w == "for" and RUNS_NAME.fullmatch(words[j + 1]):
-            rest = words[j + 2 :]
-            if not rest or rest[0] != "in" or any(not literal_word(v) or unquote(v) != v for v in rest[1:]):
+            if j + 2 >= len(words) or words[j + 2] != "in" or coded[j + 3]:
                 return True
     return False
 # xargs-style programs that are not wrappers: GNU parallel and its tools, Homebrew's GNU xargs

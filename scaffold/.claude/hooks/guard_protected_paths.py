@@ -736,10 +736,21 @@ RUNS_VALUE = re.compile(RUNS_NAME.pattern + r"\+?=")
 # builtins that set a variable named by an operand at run time (`printf -v GIT_EDITOR ...`, `read PAGER`)
 SETS_NAMED_VARIABLE = ("printf", "read", "mapfile", "readarray")
 # `for GIT_EDITOR in ...`, `${GIT_EDITOR:=...}`: other ways to set one (#196 confirm on a55f7ae)
-# a `for` anywhere (`{ for`, `! for`, `time for`), with values holding code characters, or zsh's `for NAME (...)`; prose
-# such as `-m "use for ENV in CI"` has none of `$`, backtick, `'`, `\` or `(` after `in`. `${X:-d}` sets nothing.
-RUNS_NAME_SET = re.compile(r"(?<![\w.-])for\s+" + RUNS_NAME.pattern + r"(?:\s+in\s[^;\n]*[$`'\\(]|\s*\()"
-                           r"|\$\{" + RUNS_NAME.pattern + r":?=")
+# `${GIT_EDITOR:=...}` sets one (`${X:-d}` sets nothing); a `for` loop over one is read from the words (loops_runs_name())
+RUNS_NAME_SET = re.compile(r"\$\{" + RUNS_NAME.pattern + r":?=")
+
+
+def loops_runs_name(words):
+    """True if an unquoted `for` word in one segment loops a RUNS_NAME over a quoted or built value, or has no `in`
+    (zsh `for NAME (...)`, `for NAME; do` over "$@"). Read from tokenize() words, so prose in a quoted string is one
+    word and never a `for` (#196 confirm on 3e7b192: text regexes either missed `{ for`, `"..."` values or matched
+    `-m "use for ENV in CI"`). `for ENV in dev prod` loops over literal words and is fine."""
+    for j, w in enumerate(words[:-1]):
+        if w == "for" and RUNS_NAME.fullmatch(words[j + 1]):
+            rest = words[j + 2 :]
+            if not rest or rest[0] != "in" or any(not literal_word(v) or unquote(v) != v for v in rest[1:]):
+                return True
+    return False
 # xargs-style programs that are not wrappers: GNU parallel and its tools, Homebrew's GNU xargs
 ARGUMENT_FEEDERS = ("parallel", "sem", "env_parallel", "parset", "gxargs")
 
@@ -1088,7 +1099,7 @@ def diff_apply_runs(command, _depth=0):
     if defines_alias(tokens):
         possible = "it defines an alias, a hashed command or a command table entry"
     elif RUNS_NAME_SET.search(joined):
-        possible = "a variable that runs its value (an editor, pager or ssh command) is set by `for` or `${NAME:=}`"
+        possible = "a variable that runs its value (an editor, pager or ssh command) is set by `${NAME:=}`"
     elif eval_form(joined):
         possible = "it evaluates text as code at run time (arithmetic, an array subscript, `${!x}`, `@P`, `${(..)}`)"
     elif glued_paren(joined):
@@ -1116,6 +1127,8 @@ def diff_apply_runs(command, _depth=0):
         for w in words:
             for body in command_substitutions(w):
                 visit(body)
+        if loops_runs_name(words):
+            possible = possible or "a `for` loop sets a variable that runs its value (an editor, pager or ssh command)"
         found = diff_apply_dirs(words, config_env)
         if found is not None:
             runs = True
@@ -3132,6 +3145,9 @@ def self_test():
             ("feature: Bash allowed: read -p with a built prompt", bash("feat", "read -r -p \"$PROMPT\" ans"), False),
             ("feature: Bash for GIT_EDITOR inside braces", bash("feat", "{ for GIT_EDITOR in '$(echo git) apply y.diff;:'; do export GIT_EDITOR; git commit --amend; done; }"), True),
             ("feature: Bash read -d -p NAME", bash("feat", "read -d -p GIT_EDITOR <<< '$(echo git) apply y.diff;:'; export GIT_EDITOR; git commit --amend"), True),
+            ("feature: Bash for GIT_EDITOR over a double-quoted value", bash("feat", "for GIT_EDITOR in \"gi? apply y.diff;:\"; do export GIT_EDITOR; git commit --amend; done"), True),
+            ("feature: Bash allowed: PR body prose naming for PAGER", bash("feat", "gh pr create --title t --body \"use for PAGER and for ENV in CI, and ${ENV:-dev}\""), False),
+            ("feature: Bash allowed: commit prose for EDITOR in CI", bash("feat", "git commit -m \"fix: for EDITOR in CI use vi (see #12)\""), False),
             ("feature: Bash zsh for NAME (...)", bash("feat", "for GIT_EDITOR ('$(echo git) apply y.diff;:') { export GIT_EDITOR; git commit --amend }"), True),
             ("feature: Bash gxargs placeholder", bash("feat", "echo apply | gxargs -I{} git {} y.diff"), True),
             ("feature: Bash for sets GIT_EDITOR", bash("feat", "for GIT_EDITOR in '$(echo git) apply y.diff; :'; do export GIT_EDITOR; git commit --amend; done"), True),

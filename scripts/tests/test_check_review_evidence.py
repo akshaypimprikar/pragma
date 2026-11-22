@@ -168,6 +168,26 @@ class CompareFilesTests(unittest.TestCase):
         self.assertIsNone(self.api(300, "diverged").compare_files("a", "b", require_ancestor=False))
 
 
+class PrFilesTests(unittest.TestCase):
+    def api(self, n_files, renamed=0):
+        api = ev.Api("o/r", "t")
+        rows = [{"filename": f"f{i}", "additions": 1, "deletions": 1} for i in range(n_files)]
+        for row in rows[:renamed]:
+            row["previous_filename"] = "old/" + row["filename"]
+        api.paged = lambda path: rows
+        return api
+
+    def test_lists_files_renames_and_lines(self):
+        files, lines = self.api(3, renamed=1).pr_files(7, 3)
+        self.assertEqual(files, ["f0", "old/f0", "f1", "f2"])
+        self.assertEqual(lines, 6)
+
+    def test_truncated_listing_fails(self):
+        # GitHub's PR files API lists at most 3,000 files; a shorter list than changed_files may hide lane paths
+        with self.assertRaises(ValueError):
+            self.api(3000).pr_files(7, 3001)
+
+
 class LaneHeadTests(unittest.TestCase):
     def pr(self, ref, repo):
         return {"head": {"ref": ref, "repo": {"full_name": repo} if repo else None}}
